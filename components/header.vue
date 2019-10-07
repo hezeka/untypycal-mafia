@@ -40,9 +40,10 @@ export default {
         
         span {
             display: block;
-            font-weight: 700;
-            font-size: 18px;
+            font-weight: 800;
+            font-size: 16px;
             opacity: .3;
+            text-transform: uppercase;
         }
     }
 }
@@ -55,7 +56,7 @@ export default {
     min-width: 40px;
     height: 40px;
     border-radius: 50px;
-    padding: 0 20px 0 45px;
+    padding: 0 25px 0 45px;
     background-image: url('/images/start.svg');
     background-size: 17px;
     background-repeat: no-repeat;

@@ -20,34 +20,38 @@
             <input placeholder="Ник игрока" class="wide-input" type="text" v-model="newPlayer">
           </form>
           <div class="users">
-            <div class="user-card"
-              v-for="(player, index) in players"
-              :key="index"
-              @click="deletePlayer(index)">
-              <div class="user-name">
-                {{player.name}}
+            <transition-group name="roles-list">
+              <div class="user-card"
+                v-for="(player, index) in players"
+                :key="player"
+                @click="deletePlayer(index)">
+                <div class="user-name">
+                  {{player.name}}
+                </div>
               </div>
-            </div>
+            </transition-group>
           </div>
         </section>
         <section>
-          <n-link to="{query: {modal: 'game'}}">
+          <a class="big-button" @click="startGame()">
             Начать игру
-          </n-link>
+          </a>
         </section>
       </div>
       <section id="roles">
         <div class="roles-caption">
-          Выбрано {{selectedRoles.length}} ролей из {{players.length}}
+          Выбрано {{selectedRoles.length}} ролей для {{players.length}} игроков
         </div>
         <div class="selected-roles">
-          <div class="role-item"
-            v-for="(role, id) in selectedRoles"
-            :key="id"
-            :class="[roles[role].color, roles[role].active ? 'active' : '']" >
-            {{roles[role].name}}
-            <button class="cross" title="Удалить роль" @click="removeRole(id)"></button>
-          </div>
+          <transition-group name="roles-list">
+            <div class="role-item"
+              v-for="(role, id) in selectedRoles"
+              :key="roles[role]"
+              :class="[roles[role].color, roles[role].active ? 'active' : '']" >
+              {{roles[role].name}}
+              <button class="cross" title="Удалить роль" @click="removeRole(id)"></button>
+            </div>
+          </transition-group>
         </div>
       </section>
     </div>
@@ -60,7 +64,10 @@ import RoleCard from '~/components/role-card.vue'
 export default {
   data() {
     return {
-      newPlayer: ''
+      newPlayer: '',
+      activeGame: {
+        
+      }
     }
   },
   components: {
@@ -87,6 +94,15 @@ export default {
     },
     deletePlayer(index) {
       this.$store.commit('deletePlayer', index)
+    },
+    startGame() {
+      if(this.players.length > this.selectedRoles.length) {
+        alert('Игроков больше, чем ролей')
+      } else if (this.players.length < this.selectedRoles.length) {
+        alert('Ролей больше, чем игроков')
+      } else {
+        this.$router.push({query: {modal: 'game'}})
+      }
     }
   },
   mounted() {
@@ -108,7 +124,10 @@ export default {
 .roles-section {
   font-size: 0;
   background-color: #000;
-  margin: 0 -10px;
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  grid-gap: 10px;
+  padding: 10px 0;
 }
 .role-item {
   display: inline-block;
@@ -188,6 +207,9 @@ export default {
   padding: 10px 0;
   display: grid;
   grid-template-rows: 1fr auto;
+  grid-row-start: 1;
+  grid-row-end: 3;
+  grid-column-start: 2;
   
   .user-card {
     padding: 10px 10px;
@@ -239,4 +261,31 @@ export default {
   }
 }
 
+.big-button {
+  display: block;
+  border-radius: 100px;
+  background-color: rgba(0, 174, 255, 0.048);
+  line-height: 48px;
+  text-align: center;
+  text-decoration: none;
+  color: rgb(0, 174, 255);
+  font-size: 12px;
+  cursor: pointer;
+  transition: .25s;
+  opacity: .5;
+
+  &:hover {
+    opacity: 1;
+  }
+}
+
+.roles-list-move {
+  transition: transform 1s;
+}
+.roles-list-enter-active, .roles-list-leave-active {
+  transition: opacity .5s;
+}
+.roles-list-enter, .roles-list-leave-to /* .fade-leave-active до версии 2.1.8 */ {
+  opacity: 0;
+}
 </style>

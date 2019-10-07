@@ -2,10 +2,10 @@
     <div
     class="role-card-item"
     :class="[role.color, role.active ? 'active' : '']">
-        <div class="role-card"
-            @click="selectRole(id)">
-            <div class="role-pic">
-                    <span class="active-icon" v-show="role.active"></span>
+        <div class="role-card">
+            <div class="role-pic"
+                @click="selectRole(id)">
+                <span class="active-icon" v-show="role.active"></span>
                 <!---<div class="active-role" v-show="role.active">
                     Активная роль
                 </div>--->
@@ -55,8 +55,8 @@ export default {
 
 .role-card-item {
     display: inline-block;
-    width: ~'calc(100% / 5)';
-    padding: 10px;
+    // width: ~'calc(100% / 5)';
+    // padding: 10px;
     font-size: 14px;
     box-sizing: border-box;
     text-align: center;
@@ -64,11 +64,10 @@ export default {
 
     .role-card {
         background-color: #000;
-        border-radius: 13px;
+        border-radius: 10px;
         box-shadow: 0 4px 30px rgba(255, 255, 255, 0.04), inset 0 0 0 4px black;
         position: relative;
         overflow: hidden;
-        cursor: pointer;
         transition: .4s;
 
         &:hover {
@@ -77,6 +76,9 @@ export default {
         }
         
         .role-pic {
+            width: 100%;
+            height: 100%;
+            cursor: pointer;
             .active-role {
                 position: absolute;
                 top: 10px;
@@ -122,6 +124,27 @@ export default {
                 border-top: 1px solid rgba(245, 245, 245, 0.041);
             }
         }
+
+        &::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 100%;
+            width: 300%;
+            height: 100%;
+            background-image: linear-gradient(85deg, transparent 10%, white, transparent 90%);
+            opacity: .5;
+            transition: 0s;
+            mix-blend-mode: soft-light;
+            transition: all 1.5s;
+        }
+
+        &:hover {
+            &::before {
+                left: -300%;
+                transition: all 1.5s;
+            }
+        }
     }
 
     &.blue {
@@ -146,10 +169,6 @@ export default {
         .role-name {
             color: rgb(196, 173, 160);
         }
-    }
-
-    &.active {
-        
     }
 }
 </style>
