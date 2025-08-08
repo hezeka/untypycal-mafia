@@ -44,13 +44,14 @@ export default {
     background-image: url('/images/claws.png');
     background-repeat: no-repeat;
     background-position: center;
-    opacity: .5;
+    opacity: 1;
     position: absolute;
-    top: 8px;
-    left: 8px;
+    top: 16px;
+    left: 16px;
     border-radius: 5px;
     border: 1px solid rgba(255, 255, 255, 0.178);
     background-color: rgba(34, 34, 34, 0.589);
+    backdrop-filter: blur(7px);
 }
 
 .role-card-item {
@@ -111,6 +112,7 @@ export default {
             padding: 10px 20px;
             box-sizing: border-box;
             text-align: left;
+            pointer-events: none;
 
             .role-name {
                 font-weight: 800;
@@ -137,6 +139,8 @@ export default {
             transition: 0s;
             mix-blend-mode: soft-light;
             transition: all 1.5s;
+            user-select: none;
+            pointer-events: none;
         }
 
         &:hover {

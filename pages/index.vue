@@ -23,7 +23,7 @@
             <transition-group name="roles-list">
               <div class="user-card"
                 v-for="(player, index) in players"
-                :key="player"
+                :key="player + index"
                 @click="deletePlayer(index)">
                 <div class="user-name">
                   {{player.name}}
@@ -116,7 +116,7 @@ export default {
 <style lang="less">
 .container {
   width: 100%;
-  max-width: 1100px;
+  // max-width: 1100px;
   margin: 0 auto;
   padding: 0 10px;
   box-sizing: border-box;

@@ -8,7 +8,7 @@ import {
 
 import NuxtLoading from './components/nuxt-loading.vue'
 
-import _6f6c098b from '../layouts/default.vue'
+import _6f6c098b from '..\\layouts\\default.vue'
 
 const layouts = { "_default": _6f6c098b }
 
