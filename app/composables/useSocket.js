@@ -7,7 +7,7 @@ const isConnected = ref(false)
 export const useSocket = () => {
   const initSocket = () => {
     if (process.client && !socketInstance) { // Только на клиенте
-      socketInstance = io(process.env.NODE_ENV === 'production' ? '' : 'http://localhost:3000')
+      socketInstance = io(process.env.NODE_ENV === 'production' ? 'http://localhost:3001' : 'http://localhost:3001')
       
       socketInstance.on('connect', () => {
         isConnected.value = true
