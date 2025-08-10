@@ -7,6 +7,17 @@
         <div v-if="timer" class="timer-display">
           Осталось времени: {{ timerDisplay }}
         </div>
+        
+        <!-- Информация о голосовании -->
+        <div v-if="gameState === 'voting'" class="voting-info">
+          <div class="voting-stats">
+            Проголосовало: {{ votingStats.submitted }} из {{ votingStats.total }}
+            <span v-if="votingStats.hasVoted" class="voted-indicator">✅ Вы проголосовали</span>
+          </div>
+          <div v-if="votingStats.votedFor" class="vote-choice">
+            Ваш выбор: {{ votingStats.votedFor === 'abstain' ? 'Воздержание' : getPlayerName(votingStats.votedFor) }}
+          </div>
+        </div>
       </div>
       
       <div class="game-controls" v-if="isHost">
@@ -62,7 +73,7 @@
               <div class="role-info">
                 <h3>{{ roles[playerRole].name }}</h3>
                 <p>{{ roles[playerRole].description }}</p>
-                <div class="role-goal">
+                <div class="role-goal" v-if="getTeamGoal(roles[playerRole].team) != 'Неизвестно'">
                   <strong>Цель команды "{{ getTeamName(roles[playerRole].team) }}":</strong>
                   {{ getTeamGoal(roles[playerRole].team) }}
                 </div>
@@ -83,6 +94,17 @@
             <span v-if="gameState === 'voting'">(Нажмите чтобы проголосовать)</span>
           </div>
           
+          <!-- Кнопка воздержания во время голосования -->
+          <div v-if="gameState === 'voting' && !isHost" class="abstain-section">
+            <button 
+              @click="votePlayer(null)"
+              class="btn abstain-btn"
+              :class="{ voted: votedPlayer === null }"
+            >
+              🚫 Воздержаться
+            </button>
+          </div>
+          
           <div class="players-grid">
             <div 
               v-for="player in playersToShow" 
@@ -93,8 +115,9 @@
                 dead: !player.alive,
                 protected: player.protected,
                 disconnected: !player.connected,
-                werewolf: player.showRole && (player.role && (player.role.includes('wolf') || player.role === 'werewolf')),
-                'is-self': player.isSelf
+                werewolf: player.showRole && isWerewolfRole(player.role),
+                'is-self': player.isSelf,
+                'can-vote': gameState === 'voting' && !isHost && player.alive
               }"
               @click="votePlayer(player.id)"
             >
@@ -109,9 +132,6 @@
               <div class="player-info">
                 <div class="player-name">{{ player.name }}</div>
                 <div v-if="player.showRole && player.role" class="revealed-role">
-                  {{ roles[player.role]?.name }}
-                </div>
-                <div v-else-if="gameState === 'ended' && player.role" class="revealed-role">
                   {{ roles[player.role]?.name }}
                 </div>
                 <div v-if="player.artifact" class="artifact-indicator">
@@ -197,6 +217,16 @@
             </div>
           </div>
 
+          <div v-if="gameState === 'voting'" class="control-section">
+            <h4>Статистика голосования</h4>
+            <div class="voting-summary">
+              <p>Проголосовало: {{ votingStats.submitted }} из {{ votingStats.total }} игроков</p>
+              <div v-if="votingStats.submitted < votingStats.total" class="missing-votes">
+                Ожидаем голосов от: {{ getMissingVoters() }}
+              </div>
+            </div>
+          </div>
+
           <div class="control-section">
             <h4>Действия</h4>
             <div class="action-buttons">
@@ -228,19 +258,24 @@ const {
 } = useGame()
 
 const votedPlayer = ref(null)
-const showAdminPanel = ref(null) // ID of player for whom admin panel is shown
+const showAdminPanel = ref(null)
 const newRole = ref('')
-const customTimer = ref(600) // 10 minutes default
 
 const gameState = computed(() => gameData.gameState)
 const currentPhase = computed(() => gameData.currentPhase)
+
+// Безопасное получение роли игрока
 const playerRole = computed(() => {
-  console.log('🎭 Current player role:', player.role)
-  console.log('🎮 Game state:', gameState.value)
-  console.log('👤 Player data:', player)
   return player.role
 })
+
 const timer = computed(() => gameData.timer)
+
+// Статистика голосования
+const votingStats = computed(() => {
+  if (!gameData.voting) return { total: 0, submitted: 0, hasVoted: false, votedFor: null }
+  return gameData.voting
+})
 
 // Timer display
 const timerDisplay = computed(() => {
@@ -250,26 +285,33 @@ const timerDisplay = computed(() => {
   return `${minutes}:${seconds.toString().padStart(2, '0')}`
 })
 
+// Helper function to check if role is werewolf-related
+const isWerewolfRole = (role) => {
+  return role && (
+    role.includes('wolf') || 
+    role === 'werewolf' || 
+    role === 'minion'
+  )
+}
+
 // Check if current player can see werewolf roles
 const canSeeWerewolfRoles = computed(() => {
   const role = player.role
-  return role === 'game_master' || 
-         (role && (role.includes('wolf') || role === 'werewolf' || role === 'minion'))
+  return role === 'game_master' || isWerewolfRole(role)
 })
 
 // Get players to display in grid (includes self for voting)
 const playersToShow = computed(() => {
-  return allPlayersForVoting.value.map(p => ({
-    ...p,
-    showRole: isHost.value || // Ведущий видит все роли
-             gameState.value === 'ended' || // В конце игры все видят все роли
-             (canSeeWerewolfRoles.value && 
-              p.role && (p.role.includes('wolf') || p.role === 'werewolf' || p.role === 'minion')), // Оборотни видят других оборотней
-    isSelf: p.id === player.id
-  }))
+  return allPlayersForVoting.value
+    .filter(p => p.role !== 'game_master') // Исключаем ведущего из отображения
+    .map(p => ({
+      ...p,
+      showRole: isHost.value || // Ведущий видит все роли
+               gameState.value === 'ended' || // В конце игры все видят все роли
+               (canSeeWerewolfRoles.value && isWerewolfRole(p.role)), // Оборотни видят других оборотней
+      isSelf: p.id === player.id
+    }))
 })
-
-const phaseClass = computed(() => '')
 
 const phaseTitle = computed(() => {
   const titles = {
@@ -285,7 +327,7 @@ const phaseDescription = computed(() => {
   const descriptions = {
     night: 'Игроки с ночными способностями выполняют свои действия',
     day: 'Обсуждение и поиск оборотней. У вас есть 10 минут.',
-    voting: 'Проголосуйте за игрока, которого подозреваете в том, что он оборотень',
+    voting: 'Проголосуйте за игрока, которого подозреваете, или воздержитесь',
     ended: 'Игра завершена. Результаты показаны ниже.'
   }
   return descriptions[gameState.value] || ''
@@ -311,7 +353,9 @@ const changePhase = (gameState, currentPhase) => {
 }
 
 const votePlayer = (playerId) => {
-  if (gameState.value !== 'voting') return
+  if (gameState.value !== 'voting' || isHost.value) return
+  
+  // playerId может быть null (воздержание) или ID игрока
   votedPlayer.value = playerId
   voteForPlayer(playerId)
 }
@@ -325,14 +369,20 @@ const getNextPhaseText = () => {
   switch (gameState.value) {
     case 'night': return 'Перейти к дню'
     case 'day': return 'Начать голосование'
-    case 'voting': return 'Завершить игру'
-    case 'ended': return 'Новый раунд'
+    case 'voting': return 'Завершить голосование'
+    case 'ended': return 'Новая игра'
     default: return 'Следующая фаза'
   }
 }
 
 const endVoting = () => {
   endGameVoting()
+}
+
+const restartGame = () => {
+  if (confirm('Начать новую игру? Все данные текущей игры будут потеряны.')) {
+    goToNextPhase() // This will cycle to setup if we're in ended state
+  }
 }
 
 const getTeamName = (team) => {
@@ -354,6 +404,18 @@ const getTeamGoal = (team) => {
   }
   return goals[team] || 'Неизвестно'
 }
+
+const getPlayerName = (playerId) => {
+  const player = allPlayersForVoting.value.find(p => p.id === playerId)
+  return player ? player.name : 'Неизвестный игрок'
+}
+
+const getMissingVoters = () => {
+  const allEligible = allPlayersForVoting.value.filter(p => p.role !== 'game_master' && p.alive && p.connected)
+  // Это приблизительная логика, так как точную информацию о том, кто не проголосовал, 
+  // сервер не отправляет из соображений безопасности
+  return `${votingStats.value.total - votingStats.value.submitted} игроков`
+}
 </script>
 
 <style lang="less" scoped>
@@ -367,6 +429,60 @@ const getTeamGoal = (team) => {
   font-weight: 600;
   color: #f39c12;
   margin-top: 8px;
+}
+
+.voting-info {
+  margin-top: 12px;
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 8px;
+  border-left: 4px solid #667eea;
+  
+  .voting-stats {
+    font-size: 14px;
+    margin-bottom: 8px;
+    
+    .voted-indicator {
+      color: #2ecc71;
+      margin-left: 12px;
+      font-weight: 600;
+    }
+  }
+  
+  .vote-choice {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.8);
+  }
+}
+
+.abstain-section {
+  padding: 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  text-align: center;
+  
+  .abstain-btn {
+    padding: 12px 24px;
+    border: 2px solid rgba(255, 255, 255, 0.3);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.05);
+    color: rgba(255, 255, 255, 0.8);
+    cursor: pointer;
+    transition: all 0.3s ease;
+    font-size: 14px;
+    font-weight: 500;
+    
+    &:hover {
+      background: rgba(255, 255, 255, 0.1);
+      border-color: rgba(255, 255, 255, 0.5);
+      color: white;
+    }
+    
+    &.voted {
+      background: rgba(255, 193, 7, 0.2);
+      border-color: #ffc107;
+      color: #ffc107;
+    }
+  }
 }
 
 .next-phase-btn {
@@ -419,8 +535,9 @@ const getTeamGoal = (team) => {
 .game-header {
   display: flex;
   justify-content: space-between;
-  align-items: center;
+  align-items: flex-start;
   margin-bottom: 30px;
+  gap: 20px;
   
   .phase-title {
     margin-bottom: 8px;
@@ -436,6 +553,7 @@ const getTeamGoal = (team) => {
     display: flex;
     gap: 16px;
     align-items: center;
+    flex-shrink: 0;
     
     .phase-controls {
       display: flex;
@@ -525,13 +643,16 @@ const getTeamGoal = (team) => {
       border-radius: 8px;
       padding: 16px;
       text-align: center;
-      cursor: pointer;
       transition: all 0.3s ease;
       position: relative;
       
-      &:hover {
-        border-color: rgba(255, 255, 255, 0.3);
-        transform: translateY(-2px);
+      &.can-vote {
+        cursor: pointer;
+        
+        &:hover {
+          border-color: rgba(255, 255, 255, 0.3);
+          transform: translateY(-2px);
+        }
       }
       
       &.voted {
@@ -542,6 +663,7 @@ const getTeamGoal = (team) => {
       &.dead {
         opacity: 0.5;
         filter: grayscale(100%);
+        pointer-events: none;
       }
       
       &.protected {
@@ -643,7 +765,7 @@ const getTeamGoal = (team) => {
         }
         
         .disconnected-marker {
-          right: 15px; // Смещаем влево если есть другие маркеры
+          right: 15px;
         }
       }
       
@@ -697,6 +819,16 @@ const getTeamGoal = (team) => {
     .btn-small {
       padding: 6px 12px;
       font-size: 11px;
+    }
+    
+    .voting-summary {
+      font-size: 13px;
+      
+      .missing-votes {
+        color: #f39c12;
+        font-size: 12px;
+        margin-top: 4px;
+      }
     }
   }
 }

@@ -3,19 +3,20 @@
     <header class="app-header">
       <div class="container">
         <div class="header-content">
-          <div class="logo">
-            <h1>Нетипичная Мафия</h1>
+          <div class="navigation">
+            <div class="logo">
+              <h1>Нетипичная Мафия</h1>
+            </div>
+            <div class="vr"></div>
+            <a @click="showRolesGuide = true" class="nav-link">
+              Роли
+            </a>
+            <a @click="showRules = true" class="nav-link">
+              Правила
+            </a>
           </div>
           
-          <div class="header-actions" v-if="isInRoom">
-            <button 
-              @click="showRolesGuide = true" 
-              class="btn btn-secondary btn-small"
-              style="margin-right: 12px;"
-            >
-              📖 Роли
-            </button>
-            
+          <div class="header-actions" v-if="isInRoom">            
             <div class="room-info">
               <span class="room-id">Комната: {{ roomId }}</span>
               <span class="connection-status" :class="{ connected: isConnected }">
@@ -72,6 +73,14 @@
         <span class="alert-text">Соединение потеряно. Попытка переподключения...</span>
       </div>
     </div>
+    
+    <!-- Rules Modal -->
+    <RulesModal 
+      v-if="showRules"
+      :is-host="isHost"
+      @close="showRules = false"
+    />
+    
     <!-- Roles Guide Modal -->
     <RolesGuide 
       v-if="showRolesGuide && isInRoom"
@@ -83,10 +92,12 @@
 </template>
 
 <script setup>
-const { isInRoom, room, gameData, player } = useGame()
+const { isInRoom, room, gameData, player, isHost } = useGame()
 const { isConnected } = useSocket()
 
+const showRules = ref(false)
 const showRolesGuide = ref(false)
+
 const roomId = computed(() => room.id)
 const gameRoles = computed(() => gameData.selectedRoles)
 const playerRole = computed(() => player.role)
@@ -94,12 +105,32 @@ const playerRole = computed(() => player.role)
 const leaveRoom = () => {
   if (confirm('Вы уверены, что хотите покинуть комнату?')) {
     showRolesGuide.value = false
+    showRules.value = false
     clearRoom()
     location.reload()
   }
 }
 
 const { clearRoom } = useGame()
+
+// Обработка клавиши Escape для закрытия модальных окон
+onMounted(() => {
+  const handleEscape = (event) => {
+    if (event.key === 'Escape') {
+      if (showRules.value) {
+        showRules.value = false
+      } else if (showRolesGuide.value) {
+        showRolesGuide.value = false
+      }
+    }
+  }
+  
+  window.addEventListener('keydown', handleEscape)
+  
+  onUnmounted(() => {
+    window.removeEventListener('keydown', handleEscape)
+  })
+})
 </script>
 
 <style lang="less" scoped>
@@ -131,18 +162,42 @@ const { clearRoom } = useGame()
       -webkit-background-clip: text;
       -webkit-text-fill-color: transparent;
       background-clip: text;
+      padding-bottom: 6px;
     }
+
+    .navigation {
+      display: flex;
+      align-items: center;
+      justify-content: start;
+      gap: 16px;
+    }
+
+    .nav-link {
+      cursor: pointer;
+
+      &:hover {
+        opacity: 1;
+        text-decoration: underline;
+      }
+    }
+
+
     
     .header-actions {
       display: flex;
       align-items: center;
-      gap: 16px;
+      gap: 12px;
+      
+      .header-btn {
+        white-space: nowrap;
+      }
       
       .room-info {
         display: flex;
         flex-direction: column;
         align-items: flex-end;
         font-size: 12px;
+        margin: 0 8px;
         
         .room-id {
           font-weight: 500;
@@ -257,6 +312,34 @@ const { clearRoom } = useGame()
   }
 }
 
+.btn {
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+}
+
+.btn-secondary {
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.8);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  
+  &:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.2);
+    color: white;
+    transform: translateY(-1px);
+  }
+}
+
 @keyframes slideIn {
   from {
     transform: translateX(100%);
@@ -276,12 +359,14 @@ const { clearRoom } = useGame()
   }
   
   .header-actions {
-    flex-direction: column;
+    flex-wrap: wrap;
+    justify-content: center;
     gap: 8px !important;
   }
   
   .room-info {
     align-items: center !important;
+    text-align: center;
   }
   
   .footer-content {
@@ -292,6 +377,11 @@ const { clearRoom } = useGame()
     right: 10px;
     left: 10px;
     top: 120px;
+  }
+  
+  .header-btn {
+    font-size: 11px !important;
+    padding: 6px 12px !important;
   }
 }
 </style>

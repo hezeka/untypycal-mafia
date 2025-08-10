@@ -10,20 +10,33 @@
         v-for="message in messages" 
         :key="message.id"
         class="message"
-        :class="message.type"
+        :class="[message.type, { 'is-whisper': message.type === 'whisper' }]"
       >
         <div class="message-header">
           <span class="message-author">
-            {{ message.playerName }}{{ getPlayerRoleDisplay(message.playerId) }}
+            <template v-if="message.type === 'whisper'">
+              {{ message.playerName }} → {{ message.targetPlayerName }}{{ getPlayerRoleDisplay(message.playerId) }}
+            </template>
+            <template v-else>
+              {{ message.playerName }}{{ getPlayerRoleDisplay(message.playerId) }}
+            </template>
           </span>
           <span class="message-time">{{ formatTime(message.timestamp) }}</span>
         </div>
-        <div class="message-content">{{ message.message }}</div>
+        <div class="message-content">
+          <span v-if="message.type === 'whisper'" class="whisper-indicator">💬 </span>{{ message.message }}
+        </div>
       </div>
       
       <div v-if="messages.length === 0" class="no-messages">
         Сообщений пока нет
       </div>
+    </div>
+    
+    <div class="chat-help" v-if="canSendMessage">
+      <small class="text-muted">
+        Для личного сообщения: <code>/шепот ИмяИгрока текст</code>
+      </small>
     </div>
     
     <form @submit.prevent="sendMessage" class="chat-input">
@@ -53,11 +66,19 @@ const messagesContainer = ref(null)
 
 const messages = computed(() => chatMessages.value)
 
+// Helper function to check if role is werewolf-related
+const isWerewolfRole = (role) => {
+  return role && (
+    role.includes('wolf') || 
+    role === 'werewolf' || 
+    role === 'minion'
+  )
+}
+
 // Check if current player can see werewolf roles
 const canSeeWerewolfRoles = computed(() => {
   const role = player.role
-  return role === 'game_master' || 
-         (role && (role.includes('wolf') || role === 'werewolf' || role === 'minion'))
+  return role === 'game_master' || isWerewolfRole(role)
 })
 
 const canSendMessage = computed(() => {
@@ -73,8 +94,7 @@ const canSendMessage = computed(() => {
   
   // During night phase, only werewolves can chat
   if (gameState === 'night') {
-    const role = player.role
-    return role && (role.includes('wolf') || role === 'werewolf' || role === 'minion')
+    return isWerewolfRole(player.role)
   }
   
   // During voting phase, no one can chat
@@ -83,16 +103,15 @@ const canSendMessage = computed(() => {
 
 const chatPlaceholder = computed(() => {
   if (!isInRoom.value) return 'Подключитесь к комнате...'
-  if (isHost.value) return 'Напишите сообщение...'
+  if (isHost.value) return 'Напишите сообщение или /шепот ИмяИгрока текст...'
   
   const gameState = gameData.gameState
   
-  if (gameState === 'setup') return 'Напишите сообщение...'
-  if (gameState === 'day') return 'Обсуждайте подозреваемых...'
+  if (gameState === 'setup') return 'Напишите сообщение или /шепот ИмяИгрока текст...'
+  if (gameState === 'day') return 'Обсуждайте подозреваемых или /шепот ИмяИгрока текст...'
   if (gameState === 'night') {
-    const role = player.role
-    if (role && (role.includes('wolf') || role === 'werewolf' || role === 'minion')) {
-      return 'Чат команды оборотней...'
+    if (isWerewolfRole(player.role)) {
+      return 'Чат команды оборотней или /шепот ИмяИгрока текст...'
     }
     return 'Ночью чат недоступен'
   }
@@ -101,22 +120,30 @@ const chatPlaceholder = computed(() => {
   return 'Чат недоступен'
 })
 
-// Helper function to get player role display
+// Helper function to get player role display (БЕЗОПАСНАЯ версия)
 const getPlayerRoleDisplay = (playerId) => {
   const gamePlayer = gameData.players.find(p => p.id === playerId)
   if (!gamePlayer || !gamePlayer.role) return ''
   
-  // Show role if admin or if can see werewolf roles and it's a werewolf or if game ended
+  // Показываем роль только в безопасных случаях:
+  // 1. Если это ведущий
+  // 2. Если игра закончена
+  // 3. Если это оборотень и текущий игрок может видеть роли оборотней
+  let shouldShowRole = false
+  
   if (isHost.value) {
     // Ведущий видит все роли
-    return ` (${roles[gamePlayer.role]?.name || gamePlayer.role})`
+    shouldShowRole = true
   } else if (gameData.gameState === 'ended') {
     // В конце игры все видят все роли
-    return ` (${roles[gamePlayer.role]?.name || gamePlayer.role})`
-  } else if (canSeeWerewolfRoles.value && 
-             (gamePlayer.role.includes('wolf') || gamePlayer.role === 'werewolf' || gamePlayer.role === 'minion')) {
+    shouldShowRole = true
+  } else if (canSeeWerewolfRoles.value && isWerewolfRole(gamePlayer.role)) {
     // Оборотни видят роли других оборотней
-    return ` (${roles[gamePlayer.role]?.name || gamePlayer.role})`
+    shouldShowRole = true
+  }
+  
+  if (shouldShowRole && roles[gamePlayer.role]) {
+    return ` (${roles[gamePlayer.role].name})`
   }
   
   return ''
@@ -158,7 +185,6 @@ onMounted(() => {
 .game-chat {
   display: flex;
   flex-direction: column;
-  // height: 300px;
   
   .card-header {
     display: flex;
@@ -176,6 +202,7 @@ onMounted(() => {
     overflow-y: auto;
     padding: 8px 0;
     margin: 8px 0;
+    max-height: 400px;
     
     &::-webkit-scrollbar {
       width: 4px;
@@ -208,6 +235,40 @@ onMounted(() => {
       
       &.player {
         background: rgba(255, 255, 255, 0.05);
+      }
+      
+      &.system {
+        background: rgba(46, 204, 113, 0.1);
+        border-left: 3px solid #2ecc71;
+        
+        .message-author {
+          color: #2ecc71;
+          font-weight: 600;
+        }
+        
+        .message-content {
+          font-weight: 500;
+          white-space: pre-line; // Поддерживает переносы строк
+        }
+      }
+      
+      &.whisper {
+        background: rgba(155, 89, 182, 0.1);
+        border-left: 3px solid #9b59b6;
+        border-radius: 8px 8px 8px 2px;
+        
+        .message-author {
+          color: #9b59b6;
+          font-style: italic;
+        }
+        
+        .message-content {
+          font-style: italic;
+          
+          .whisper-indicator {
+            opacity: 0.7;
+          }
+        }
       }
       
       .message-header {
@@ -244,7 +305,25 @@ onMounted(() => {
     }
   }
   
-      .chat-input {
+  .chat-help {
+    padding: 8px 0;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+    
+    small {
+      font-size: 10px;
+      color: rgba(255, 255, 255, 0.5);
+      
+      code {
+        background: rgba(255, 255, 255, 0.1);
+        padding: 2px 4px;
+        border-radius: 3px;
+        font-family: monospace;
+        font-size: 9px;
+      }
+    }
+  }
+  
+  .chat-input {
     display: flex;
     gap: 8px;
     margin-top: auto;

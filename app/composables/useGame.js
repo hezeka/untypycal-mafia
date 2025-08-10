@@ -19,7 +19,8 @@ const gameData = reactive({
   selectedRoles: [],
   gameState: 'setup',
   currentPhase: null,
-  chat: []
+  chat: [],
+  timer: null
 })
 
 const roles = {
@@ -192,19 +193,41 @@ export const useGame = () => {
   // Computed properties
   const isInRoom = computed(() => !!room.id)
   const isHost = computed(() => room.isHost)
+  
   const currentPlayer = computed(() => {
-    const current = gameData.players.find(p => p.id === player.id)
+    // Используем более надежный поиск игрока
+    const current = gameData.players.find(p => 
+      p.id === player.id || 
+      p.id === socket.id || 
+      p.name === player.name
+    )
+    
     if (current) {
-      console.log('🔍 Current player found in gameData:', current)
+      console.log('✅ Current player found:', { 
+        id: current.id, 
+        name: current.name, 
+        role: current.role,
+        searchedBy: current.id === player.id ? 'player.id' : 
+                   current.id === socket.id ? 'socket.id' : 'player.name'
+      })
     } else {
-      console.log('❌ Current player NOT found in gameData. Player ID:', player.id)
-      console.log('📊 Available players:', gameData.players.map(p => ({ id: p.id, name: p.name, role: p.role })))
+      console.log('❌ Current player NOT found. Search params:', {
+        'player.id': player.id,
+        'socket.id': socket.id,
+        'player.name': player.name,
+        'available_players': gameData.players.map(p => ({ 
+          id: p.id, 
+          name: p.name, 
+          role: p.role ? '[ROLE_HIDDEN]' : null // Скрываем роли в логах
+        }))
+      })
     }
     return current
   })
+  
   const otherPlayers = computed(() => gameData.players.filter(p => p.id !== player.id && p.role !== 'game_master'))
   const allPlayers = computed(() => gameData.players.filter(p => p.role !== 'game_master'))
-  const allPlayersForVoting = computed(() => gameData.players.filter(p => p.role !== 'game_master')) // Includes self for voting
+  const allPlayersForVoting = computed(() => gameData.players.filter(p => p.role !== 'game_master'))
   const selectedRoleObjects = computed(() => 
     gameData.selectedRoles.map(roleId => ({ id: roleId, ...roles[roleId] }))
   )
@@ -213,25 +236,45 @@ export const useGame = () => {
   // Socket event handlers
   const initSocketListeners = () => {
     socket.on('room-created', ({ roomId, gameData: newGameData }) => {
+      console.log('🏠 Room created:', roomId)
       room.id = roomId
       room.hostId = newGameData.hostId
-      room.isHost = newGameData.hostId === player.id
+      room.isHost = newGameData.hostId === socket.id
+      
+      // Обновляем player.id СРАЗУ
+      player.id = socket.id
+      
       updateGameData(newGameData)
     })
 
     socket.on('join-success', (newGameData) => {
-      console.log('📥 Join success event received:', newGameData)
+      console.log('📥 Join success event received for room:', newGameData.id)
+      
+      // КРИТИЧЕСКИ ВАЖНО: обновляем player.id до всех операций
+      player.id = socket.id
       
       // Successful join/rejoin
       room.id = newGameData.id
       room.hostId = newGameData.hostId
-      room.isHost = newGameData.hostId === player.id
-      updateGameData(newGameData)
+      room.isHost = newGameData.hostId === socket.id
       
-      // Restore player role from server data
-      const currentPlayerData = newGameData.players?.find(p => p.id === player.id)
+      // Restore player role from server data СРАЗУ, до updateGameData
+      const currentPlayerData = newGameData.players?.find(p => 
+        p.id === socket.id || 
+        p.name === player.name
+      )
+      
       if (currentPlayerData) {
-        console.log('👤 Current player data from server:', currentPlayerData)
+        console.log('👤 Current player data from server:', {
+          id: currentPlayerData.id,
+          name: currentPlayerData.name,
+          role: currentPlayerData.role || 'NO_ROLE'
+        })
+        
+        // Обновляем все данные игрока СРАЗУ
+        player.id = currentPlayerData.id
+        player.name = currentPlayerData.name
+        
         if (currentPlayerData.role) {
           player.role = currentPlayerData.role
           console.log(`✅ Restored role: ${currentPlayerData.role}`)
@@ -240,40 +283,68 @@ export const useGame = () => {
         }
       } else {
         console.log('❌ Player not found in server response')
+        console.log('Search attempted with:', {
+          'socket.id': socket.id,
+          'player.name': player.name
+        })
+        console.log('Available players:', newGameData.players?.map(p => ({
+          id: p.id,
+          name: p.name,
+          hasRole: !!p.role
+        })))
       }
       
-      console.log('🎮 Final player state:', { id: player.id, name: player.name, role: player.role })
+      // Теперь обновляем данные игры
+      updateGameData(newGameData)
+      
+      console.log('🎮 Final player state:', { 
+        id: player.id, 
+        name: player.name, 
+        role: player.role || 'NO_ROLE'
+      })
     })
 
     socket.on('game-updated', (newGameData) => {
       const oldRole = player.role
-      updateGameData(newGameData)
       
       // Update room info if not set
       if (!room.id && newGameData.id) {
         room.id = newGameData.id
         room.hostId = newGameData.hostId
-        room.isHost = newGameData.hostId === player.id
+        room.isHost = newGameData.hostId === socket.id
       }
       
-      // Check if current player's role changed
-      const currentPlayerData = newGameData.players?.find(p => p.id === player.id)
+      // Check if current player's role changed BEFORE updating game data
+      const currentPlayerData = newGameData.players?.find(p => 
+        p.id === player.id || 
+        p.id === socket.id ||
+        p.name === player.name
+      )
+      
       if (currentPlayerData && currentPlayerData.role && currentPlayerData.role !== oldRole) {
         player.role = currentPlayerData.role
-        console.log(`Your role changed to: ${currentPlayerData.role}`)
+        console.log(`Role updated to: ${currentPlayerData.role}`)
       }
+      
+      updateGameData(newGameData)
     })
 
     socket.on('game-started', (newGameData) => {
-      console.log('🚀 Game started event:', newGameData)
-      updateGameData(newGameData)
+      console.log('🚀 Game started event received')
       
-      // Force update player role when game starts
-      const currentPlayerData = newGameData.players?.find(p => p.id === player.id)
+      // Force update player role when game starts BEFORE updating game data
+      const currentPlayerData = newGameData.players?.find(p => 
+        p.id === player.id || 
+        p.id === socket.id ||
+        p.name === player.name
+      )
+      
       if (currentPlayerData && currentPlayerData.role) {
         player.role = currentPlayerData.role
         console.log(`🎭 Role assigned at game start: ${currentPlayerData.role}`)
       }
+      
+      updateGameData(newGameData)
     })
 
     socket.on('phase-changed', ({ gameState, currentPhase }) => {
@@ -289,6 +360,19 @@ export const useGame = () => {
       }
     })
 
+    socket.on('new-whisper', (whisperMessage) => {
+      // Добавляем шепот в чат
+      const existingWhisper = gameData.chat.find(m => m.id === whisperMessage.id)
+      if (!existingWhisper) {
+        gameData.chat.push(whisperMessage)
+      }
+    })
+
+    socket.on('whisper-error', ({ message }) => {
+      // Показываем ошибку шепота
+      alert(`Ошибка шепота: ${message}`)
+    })
+
     socket.on('vote-updated', ({ votes }) => {
       gameData.players = gameData.players.map(p => {
         const voteData = votes.find(v => v.id === p.id)
@@ -296,8 +380,26 @@ export const useGame = () => {
       })
     })
 
-    socket.on('game-ended', ({ eliminated, gameData: newGameData }) => {
-      updateGameData(newGameData)
+    socket.on('voting-ended', ({ eliminated, reason, winCondition, gameData: newGameData }) => {
+      // Показываем результаты голосования
+      if (eliminated.length > 0) {
+        console.log(`Результат голосования: ${reason}`)
+      } else {
+        console.log(`Результат голосования: ${reason}`)
+      }
+      
+      // Если есть условие победы, показываем его
+      if (winCondition) {
+        if (winCondition.gameEnded) {
+          console.log(`🎉 Игра завершена! ${winCondition.message}`)
+        } else {
+          console.log(`📅 ${winCondition.message}`)
+        }
+      }
+      
+      if (newGameData) {
+        updateGameData(newGameData)
+      }
     })
 
     socket.on('timer-updated', ({ timer }) => {
@@ -320,11 +422,29 @@ export const useGame = () => {
 
   // Helper functions
   const updateGameData = (newGameData) => {
+    // Безопасно обновляем данные, скрывая роли в логах
+    console.log('📊 Updating game data:', {
+      id: newGameData.id,
+      gameState: newGameData.gameState,
+      playersCount: newGameData.players?.length || 0,
+      selectedRolesCount: newGameData.selectedRoles?.length || 0
+      // НЕ логируем массив players с ролями
+    })
+    
     Object.assign(gameData, newGameData)
     
-    const currentPlayerData = newGameData.players?.find(p => p.id === player.id)
-    if (currentPlayerData && currentPlayerData.role) {
-      player.role = currentPlayerData.role
+    // Обновляем роль текущего игрока только если она ещё не установлена
+    if (!player.role) {
+      const currentPlayerData = newGameData.players?.find(p => 
+        p.id === player.id || 
+        p.id === socket.id ||
+        p.name === player.name
+      )
+      
+      if (currentPlayerData && currentPlayerData.role) {
+        player.role = currentPlayerData.role
+        console.log(`🔄 Role updated in updateGameData: ${currentPlayerData.role}`)
+      }
     }
   }
 
@@ -337,7 +457,9 @@ export const useGame = () => {
     gameData.gameState = 'setup'
     gameData.currentPhase = null
     gameData.chat = []
+    gameData.timer = null
     player.role = null
+    player.id = null
   }
 
   // Actions

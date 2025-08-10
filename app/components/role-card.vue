@@ -5,7 +5,7 @@
     @click="$emit('toggle', roleId)"
   >
     <div class="role-image">
-      <img :src="`/roles/${roleId}.png`" :alt="role.name" />
+      <img :src="`/roles/compressed/${roleId}.webp`" :alt="role.name" />
       <div v-if="selected" class="selected-overlay">
         <div class="check-icon">✓</div>
       </div>
@@ -135,6 +135,7 @@ const getTeamName = (team) => {
     transform: translateY(10%);
     user-select: none;
     pointer-events: none;
+    box-shadow: inset 0 1px 0 #ffffff2e;
     
     .role-name {
       font-size: 16px;
@@ -157,10 +158,11 @@ const getTeamName = (team) => {
       gap: 8px;
       
       .role-team {
-        font-size: 11px;
-        padding: 2px 6px;
-        border-radius: 4px;
+        font-size: 13px;
+        padding: 3px 9px;
+        border-radius: 6px;
         background: rgba(255, 255, 255, 0.1);
+        box-shadow: inset 0 0 0 1px #ffffff0f;
         
         &.blue { background: rgba(52, 152, 219, 0.2); color: #3498db; }
         &.red { background: rgba(231, 76, 60, 0.2); color: #e74c3c; }
@@ -169,11 +171,12 @@ const getTeamName = (team) => {
       }
       
       .night-badge {
-        font-size: 10px;
         color: #f39c12;
         background: rgba(243, 156, 18, 0.2);
-        padding: 2px 6px;
-        border-radius: 4px;
+        font-size: 13px;
+        padding: 3px 9px;
+        border-radius: 6px;
+        box-shadow: inset 0 0 0 1px #ffffff0f;
       }
     }
   }
