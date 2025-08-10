@@ -27,13 +27,12 @@ export default defineNuxtConfig({
 
   // Настройки dev сервера
   devServer: {
-    port: 3001, // Отличается от серверного порта 3000
+    port: 3001,
     host: 'localhost'
   },
 
   // Настройки сборки
   nitro: {
-    // Отключаем встроенный сервер, так как используем кастомный
     experimental: {
       wasm: true
     }
@@ -42,14 +41,35 @@ export default defineNuxtConfig({
   // Настройки совместимости
   compatibilityDate: '2024-01-01',
 
-  // Vite конфигурация
+  // Vite конфигурация с исправлениями для сервера
   vite: {
+    define: {
+      global: 'globalThis'
+    },
+    optimizeDeps: {
+      include: ['socket.io-client']
+    },
     css: {
       preprocessorOptions: {
         less: {
           // Настройки LESS если нужны
         }
       }
-    }
-  }
+    },
+    server: {
+      hmr: {
+        port: 24678
+      }
+    },
+    // Отключаем проблемные плагины на продакшене
+    plugins: process.env.NODE_ENV === 'production' ? [] : undefined
+  },
+
+  // Добавляем настройки для продакшена
+  build: {
+    transpile: ['socket.io-client']
+  },
+
+  // Отключаем dev tools на продакшене
+  devtools: { enabled: process.env.NODE_ENV !== 'production' }
 })

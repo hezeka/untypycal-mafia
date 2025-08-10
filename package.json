@@ -7,7 +7,9 @@
     "socket": "node server/socket-server.js",
     "nuxt": "nuxt dev",
     "build": "nuxt build",
-    "start": "nuxt start"
+    "start": "nuxt start",
+    "clean": "rm -rf .nuxt .output node_modules/.cache",
+    "postinstall": "nuxt prepare"
   },
   "dependencies": {
     "@nuxtjs/google-fonts": "^3.2.0",
@@ -15,7 +17,6 @@
     "cross-env": "^10.0.0",
     "express": "^5.1.0",
     "less": "^4.4.0",
-    "less-loader": "^10.2.0",
     "nuxt": "^4.0.1",
     "socket.io": "^4.8.1",
     "socket.io-client": "^4.8.1",
@@ -26,5 +27,9 @@
   "devDependencies": {
     "concurrently": "^9.2.0",
     "nodemon": "^3.1.10"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=8.0.0"
   }
 }
