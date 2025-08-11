@@ -189,6 +189,7 @@ const roles = {
 
 export const useGame = () => {
   const { socket } = useSocket()
+  const { playSound } = useSounds()
 
   // Computed properties
   const isInRoom = computed(() => !!room.id)
@@ -235,6 +236,22 @@ export const useGame = () => {
 
   // Socket event handlers
   const initSocketListeners = () => {
+    socket.on('new-message', (message) => {
+      // Существующий код
+      const existingMessage = gameData.chat.find(m => m.id === message.id)
+      if (!existingMessage) {
+        gameData.chat.push(message)
+        
+        // ДОБАВЛЯЕМ ЗВУК - только если сообщение не от текущего игрока
+        if (message.playerId !== player.id) {
+          if (message.type === 'system') {
+            playSound('notification', 0.7)
+          } else {
+            playSound('message', 0.4)
+          }
+        }
+      }
+    })
     socket.on('room-created', ({ roomId, gameData: newGameData }) => {
       console.log('🏠 Room created:', roomId)
       room.id = roomId
@@ -245,6 +262,19 @@ export const useGame = () => {
       player.id = socket.id
       
       updateGameData(newGameData)
+    })
+    
+    socket.on('new-whisper', (whisperMessage) => {
+      // Существующий код
+      const existingWhisper = gameData.chat.find(m => m.id === whisperMessage.id)
+      if (!existingWhisper) {
+        gameData.chat.push(whisperMessage)
+        
+        // ДОБАВЛЯЕМ ЗВУК - только если шепот не от текущего игрока
+        if (whisperMessage.playerId !== player.id) {
+          playSound('whisper', 0.6)
+        }
+      }
     })
 
     socket.on('join-success', (newGameData) => {
@@ -332,6 +362,9 @@ export const useGame = () => {
     socket.on('game-started', (newGameData) => {
       console.log('🚀 Game started event received')
       
+      // Звук начала игры
+      playSound('gameStart', 0.8)
+      
       // Force update player role when game starts BEFORE updating game data
       const currentPlayerData = newGameData.players?.find(p => 
         p.id === player.id || 
@@ -350,6 +383,13 @@ export const useGame = () => {
     socket.on('phase-changed', ({ gameState, currentPhase }) => {
       gameData.gameState = gameState
       gameData.currentPhase = currentPhase
+      
+      // Звук смены фазы
+      if (gameState === 'voting') {
+        playSound('voting', 0.7)
+      } else {
+        playSound('phaseChange', 0.6)
+      }
     })
 
     socket.on('new-message', (message) => {
@@ -381,6 +421,9 @@ export const useGame = () => {
     })
 
     socket.on('voting-ended', ({ eliminated, reason, winCondition, gameData: newGameData }) => {
+      // Звук окончания голосования
+      playSound('notification', 0.7)
+      
       // Показываем результаты голосования
       if (eliminated.length > 0) {
         console.log(`Результат голосования: ${reason}`)

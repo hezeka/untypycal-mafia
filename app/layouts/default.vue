@@ -23,6 +23,15 @@
                 {{ isConnected ? 'Подключено' : 'Отключено' }}
               </span>
             </div>
+    
+            <!-- Кнопка звука -->
+            <button 
+              @click="toggleSounds" 
+              class="btn btn-secondary btn-small sound-toggle"
+              :title="soundsEnabled ? 'Выключить звуки' : 'Включить звуки'"
+            >
+              {{ soundsEnabled ? '🔊' : '🔇' }}
+            </button>
             
             <button @click="leaveRoom" class="btn btn-secondary btn-small">
               Покинуть комнату
