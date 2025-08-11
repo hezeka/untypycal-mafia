@@ -60,6 +60,11 @@
             <code>/шепот &lt;группа&gt; &lt;текст&gt;</code>
             <span>Сообщение группе игроков</span>
           </div>
+          <!-- ДОБАВЛЯЕМ: Шепот ведущему (только для не-ведущих) -->
+          <div v-if="!isHost" class="help-item">
+            <code>/шепот ведущий &lt;текст&gt;</code>
+            <span>Сообщение ведущему</span>
+          </div>
           <div class="help-item">
             <code>/помощь</code>
             <span>Показать все команды</span>
@@ -67,6 +72,8 @@
           <div class="help-groups" v-if="availableGroups.length > 0">
             <strong>Доступные группы:</strong>
             <span v-for="group in availableGroups" :key="group" class="group-tag">{{ group }}</span>
+            <!-- ДОБАВЛЯЕМ: Ведущий в список целей -->
+            <span v-if="!isHost" class="group-tag host-tag">ведущий</span>
           </div>
         </div>
       </details>
@@ -570,6 +577,11 @@ onMounted(() => {
             border-radius: 3px;
             margin-right: 4px;
             font-size: 9px;
+          }
+          .host-tag {
+            background: rgba(102, 126, 234, 0.3);
+            color: #667eea;
+            border: 1px solid rgba(102, 126, 234, 0.5);
           }
         }
       }
