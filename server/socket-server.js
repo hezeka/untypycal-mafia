@@ -3,12 +3,36 @@ import http from 'http'
 import { v4 as uuidv4 } from 'uuid'
 
 const server = http.createServer()
+
+// Настройки CORS для работы через nginx
+const corsOrigins = process.env.NODE_ENV === 'production' 
+  ? [
+      "https://mafia.waifucards.app",
+      "http://mafia.waifucards.app"
+    ]
+  : [
+      "http://localhost:3000",
+      "http://127.0.0.1:3000"
+    ]
+
 const io = new Server(server, {
   cors: {
-    origin: "*",
-    methods: ["GET", "POST"]
-  }
+    origin: corsOrigins,
+    methods: ["GET", "POST"],
+    credentials: true
+  },
+  // Дополнительные настройки для продакшена
+  transports: ['websocket', 'polling'],
+  allowUpgrades: true,
+  pingTimeout: 60000,
+  pingInterval: 25000,
+  // Путь должен совпадать с nginx
+  path: '/socket.io/'
 })
+
+console.log('🚀 Socket.IO server starting...')
+console.log('📍 Environment:', process.env.NODE_ENV || 'development')
+console.log('🌐 CORS origins:', corsOrigins)
 
 // Define roles for validation
 const roles = {
@@ -411,7 +435,7 @@ class GameRoom {
 }
 
 io.on('connection', (socket) => {
-  console.log('User connected:', socket.id)
+  console.log('✅ User connected:', socket.id, 'from', socket.handshake.headers.origin)
 
   socket.on('create-room', (data) => {
     const roomId = Math.random().toString(36).substring(2, 8).toUpperCase()
@@ -428,8 +452,12 @@ io.on('connection', (socket) => {
     
     socket.join(roomId)
     socket.emit('room-created', { roomId, gameData: room.getGameData(socket.id) })
-    console.log(`Room ${roomId} created by ${data.playerName}`)
+    console.log(`🏠 Room ${roomId} created by ${data.playerName}`)
   })
+
+  // ... остальной код остается тем же самым ...
+  // Здесь нужно скопировать весь остальной код обработчиков событий из оригинального файла
+  // Я привожу только начало для демонстрации структуры
 
   socket.on('join-room', (data) => {
     const room = gameRooms.get(data.roomId)
@@ -582,7 +610,7 @@ io.on('connection', (socket) => {
       }
     })
     
-    console.log(`Game started in room ${data.roomId}`)
+    console.log(`🎮 Game started in room ${data.roomId}`)
   })
 
   socket.on('change-phase', (data) => {
@@ -824,7 +852,7 @@ io.on('connection', (socket) => {
     // Сохраняем голос
     room.votes.set(socket.id, data.targetId)
 
-    console.log(`Vote from ${voter.name}: ${data.targetId ? room.players.get(data.targetId)?.name : 'ABSTAIN'}`)
+    console.log(`🗳️ Vote from ${voter.name}: ${data.targetId ? room.players.get(data.targetId)?.name : 'ABSTAIN'}`)
 
     // Отправляем обновленную информацию о голосовании всем игрокам
     room.players.forEach((player, playerId) => {
@@ -879,11 +907,11 @@ io.on('connection', (socket) => {
       }
     })
 
-    console.log(`Voting ended in room ${data.roomId}: ${votingResult.reason}`)
+    console.log(`🎯 Voting ended in room ${data.roomId}: ${votingResult.reason}`)
     if (winCondition.gameEnded) {
-      console.log(`Game ended: ${winCondition.winner} wins`)
+      console.log(`🏆 Game ended: ${winCondition.winner} wins`)
     } else {
-      console.log(`Game continues: new day started`)
+      console.log(`🌅 Game continues: new day started`)
     }
   })
 
@@ -990,7 +1018,7 @@ io.on('connection', (socket) => {
             })
           }
         })
-        console.log(`Auto-voting ended: ${votingResult.reason}`)
+        console.log(`🎯 Auto-voting ended: ${votingResult.reason}`)
         break
       case 'ended':
         nextState = 'setup'
@@ -1028,8 +1056,8 @@ io.on('connection', (socket) => {
     })
   })
 
-  socket.on('disconnect', () => {
-    console.log('User disconnected:', socket.id)
+  socket.on('disconnect', (reason) => {
+    console.log('❌ User disconnected:', socket.id, 'Reason:', reason)
     
     // Find player in rooms and mark as disconnected instead of removing
     for (const [roomId, room] of gameRooms) {
@@ -1066,5 +1094,7 @@ io.on('connection', (socket) => {
 const PORT = process.env.SOCKET_PORT || 3001
 
 server.listen(PORT, () => {
-  console.log(`Socket.IO server running on port ${PORT}`)
+  console.log(`🚀 Socket.IO server running on port ${PORT}`)
+  console.log(`🌐 Environment: ${process.env.NODE_ENV || 'development'}`)
+  console.log(`🔗 CORS allowed origins:`, corsOrigins)
 })
