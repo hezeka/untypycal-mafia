@@ -443,15 +443,19 @@ io.on('connection', (socket) => {
     // Проверяем, является ли сообщение командой
     if (commandProcessor.isCommand(sanitizedMessage)) {
       try {
+        console.log(`🔍 Processing command: ${sanitizedMessage} from ${player.name}`) // ОТЛАДКА
+        
         const result = await commandProcessor.processCommand(socket.id, sanitizedMessage)
+        
+        console.log(`📊 Command result:`, { // ОТЛАДКА
+          hasError: !!result.error,
+          hasWhisper: !!result.whisperMessage,
+          hasHelp: !!result.helpMessage
+        })
         
         if (result.error) {
           socket.emit('command-error', { message: result.error })
-          logGameAction(data.roomId, 'command_error', { 
-            player: player.name,
-            error: result.error,
-            command: sanitizedMessage.split(' ')[0]
-          })
+          console.log(`❌ Command error for ${player.name}: ${result.error}`) // ОТЛАДКА
           return
         }
 
@@ -487,11 +491,11 @@ io.on('connection', (socket) => {
           return
         }
       } catch (error) {
-        console.error('Command processing error:', error)
-        socket.emit('command-error', { message: 'Ошибка обработки команды' })
+        console.error('💥 Command processing exception:', error) // УЛУЧШЕННАЯ ОТЛАДКА
+        console.error('Stack:', error.stack) // СТЕК ОШИБКИ
+        socket.emit('command-error', { message: 'Ошибка обработки команды: ' + error.message })
       }
 
-      // Команды не отправляются в обычный чат
       return
     }
 

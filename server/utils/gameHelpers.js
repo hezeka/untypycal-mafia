@@ -73,7 +73,7 @@ const FORBIDDEN_NAMES = [
   'бот', 'bot', 'модератор', 'moderator', 'game_master', 'gamemaster',
   
   // Команды чата
-  'шепот', 'whisper', 'помощь', 'help', 'кто', 'who', 'время', 'time',
+  'ш', 'whisper', 'помощь', 'help', 'кто', 'who', 'время', 'time',
   'список', 'list', 'все', 'all', 'everyone',
   
   // Группы

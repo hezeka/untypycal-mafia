@@ -395,6 +395,7 @@ export class GameRoom {
     
     const aliveWerewolves = alivePlayers.filter(p => this.isWerewolfRole(p.role))
     const aliveVillagers = alivePlayers.filter(p => !this.isWerewolfRole(p.role) && p.role !== 'tanner')
+    const aliveTanner = alivePlayers.find(p => p.role === 'tanner')
     
     // Проверяем, был ли убит неудачник
     const deadPlayers = Array.from(this.players.values()).filter(p => 
@@ -403,32 +404,61 @@ export class GameRoom {
     const killedTanner = deadPlayers.find(p => p.role === 'tanner')
     
     console.log(`Win check: ${aliveWerewolves.length} werewolves, ${aliveVillagers.length} villagers alive`)
-    console.log(`Killed tanner: ${!!killedTanner}`)
+    console.log(`Killed tanner: ${!!killedTanner}, Alive tanner: ${!!aliveTanner}`)
+    console.log(`Alive werewolves:`, aliveWerewolves.map(p => `${p.name} (${p.role})`))
+    console.log(`Alive villagers:`, aliveVillagers.map(p => `${p.name} (${p.role})`))
 
+    // 1. НЕУДАЧНИК ПОБЕЖДАЕТ - если его убили голосованием
     if (killedTanner) {
       return {
         winner: 'tanner',
         message: `🎯 Неудачник (${killedTanner.name}) победил! Он был убит и достиг своей цели.`,
         gameEnded: true
       }
-    } else if (aliveWerewolves.length === 0) {
-      return {
-        winner: 'village',
-        message: `🏘️ Деревня победила! Все оборотни были убиты.`,
-        gameEnded: true
-      }
-    } else if (aliveWerewolves.length >= aliveVillagers.length) {
+    }
+    
+    // 2. ОБОРОТНИ ПОБЕЖДАЮТ - если все жители мертвы (кроме неудачника)
+    if (aliveVillagers.length === 0 && aliveWerewolves.length > 0) {
       return {
         winner: 'werewolves',
-        message: `🐺 Оборотни победили! Они захватили деревню.`,
+        message: `🐺 Оборотни победили! Все жители убиты.`,
         gameEnded: true
       }
-    } else {
+    }
+    
+    // 3. ДЕРЕВНЯ ПОБЕЖДАЕТ - если убит хотя бы один оборотень
+    const deadWerewolves = deadPlayers.filter(p => this.isWerewolfRole(p.role))
+    if (deadWerewolves.length > 0) {
       return {
-        winner: null,
-        message: `Игра продолжается. Живы: ${aliveWerewolves.length} оборотней, ${aliveVillagers.length} жителей.`,
-        gameEnded: false
+        winner: 'village',
+        message: `🏘️ Деревня победила! Убит оборотень: ${deadWerewolves.map(p => p.name).join(', ')}.`,
+        gameEnded: true
       }
+    }
+    
+    // 4. ОБОРОТНИ ПОБЕЖДАЮТ - если ни одного оборотня не убили
+    if (deadWerewolves.length === 0 && aliveWerewolves.length > 0) {
+      return {
+        winner: 'werewolves',
+        message: `🐺 Оборотни победили! Ни один оборотень не был убит.`,
+        gameEnded: true
+      }
+    }
+    
+    // 5. ДЕРЕВНЯ ПОБЕЖДАЕТ - если нет живых оборотней вообще
+    if (aliveWerewolves.length === 0) {
+      return {
+        winner: 'village',
+        message: `🏘️ Деревня победила! Все оборотни мертвы.`,
+        gameEnded: true
+      }
+    }
+
+    // Игра продолжается (редкий случай)
+    return {
+      winner: null,
+      message: `Игра продолжается. Живы: ${aliveWerewolves.length} оборотней, ${aliveVillagers.length} жителей.`,
+      gameEnded: false
     }
   }
 

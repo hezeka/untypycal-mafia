@@ -53,16 +53,16 @@
         <summary class="help-summary">💡 Команды чата</summary>
         <div class="help-content">
           <div class="help-item">
-            <code>/шепот &lt;игрок&gt; &lt;текст&gt;</code>
+            <code>/ш &lt;игрок&gt; &lt;текст&gt;</code>
             <span>Личное сообщение игроку</span>
           </div>
           <div class="help-item">
-            <code>/шепот &lt;группа&gt; &lt;текст&gt;</code>
+            <code>/ш &lt;группа&gt; &lt;текст&gt;</code>
             <span>Сообщение группе игроков</span>
           </div>
           <!-- ДОБАВЛЯЕМ: Шепот ведущему (только для не-ведущих) -->
           <div v-if="!isHost" class="help-item">
-            <code>/шепот ведущий &lt;текст&gt;</code>
+            <code>/ш ведущий &lt;текст&gt;</code>
             <span>Сообщение ведущему</span>
           </div>
           <div class="help-item">
@@ -164,10 +164,10 @@ const chatPlaceholder = computed(() => {
   const gameState = gameData.gameState
   
   if (gameState === 'setup') return 'Сообщение или команда (/помощь для справки)...'
-  if (gameState === 'day') return 'Обсуждение или команда (/шепот игрок текст)...'
+  if (gameState === 'day') return 'Обсуждение или команда (/ш игрок текст)...'
   if (gameState === 'night') {
     if (isWerewolfRole(player.role)) {
-      return 'Чат команды оборотней или /шепот...'
+      return 'Чат команды оборотней или /ш...'
     }
     return 'Ночью чат недоступен'
   }
@@ -250,7 +250,7 @@ const autoCompleteCommand = () => {
   const input = newMessage.value.toLowerCase()
   
   const commands = [
-    '/шепот ',
+    '/ш ',
     '/помощь',
     '/whisper ',
     '/help'
@@ -258,14 +258,14 @@ const autoCompleteCommand = () => {
   
   // Добавляем команды с группами
   availableGroups.value.forEach(group => {
-    commands.push(`/шепот ${group} `)
+    commands.push(`/ш ${group} `)
   })
   
   // Добавляем команды с именами игроков
   gameData.players
     .filter(p => p.role !== 'game_master' && p.id !== player.id)
     .forEach(p => {
-      commands.push(`/шепот ${p.name} `)
+      commands.push(`/ш ${p.name} `)
     })
   
   const matches = commands.filter(cmd => cmd.startsWith(input))

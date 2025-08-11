@@ -27,7 +27,7 @@ export class ChatCommandProcessor {
   // Находит команду по имени или алиасу
   findCommand(commandName) {
     const commands = {
-      'шепот': ['whisper', 'w'],
+      'ш': ['whisper', 'w'],
       'помощь': ['help', 'h', '?'],
       'кто': ['who', 'список', 'list'],
       'время': ['time', 'timer']
@@ -61,7 +61,7 @@ export class ChatCommandProcessor {
     }
 
     switch (command) {
-      case 'шепот':
+      case 'ш':
         return this.processWhisperCommand(sender, parsed.args)
       case 'помощь':
         return this.processHelpCommand(sender)
@@ -78,7 +78,7 @@ export class ChatCommandProcessor {
   processWhisperCommand(sender, args) {
     if (args.length < 2) {
       return {
-        error: 'Недостаточно аргументов. Используйте: /шепот <игрок/группа> <сообщение>'
+        error: 'Недостаточно аргументов. Используйте: /ш <игрок/группа> <сообщение>'
       }
     }
 
@@ -108,11 +108,6 @@ export class ChatCommandProcessor {
     // Сначала проверяем группы
     if (this.isGroupName(target)) {
       return this.processGroupWhisper(sender, target, message, messageType)
-    }
-
-    // ДОБАВЛЯЕМ: Проверяем шепот ведущему
-    if (target === 'ведущий' || target === 'host' || target === 'гм' || target === 'gm') {
-      return this.processHostWhisper(sender, message, messageType)
     }
 
     // Затем ищем конкретного игрока
@@ -146,38 +141,49 @@ export class ChatCommandProcessor {
     )
   }
 
-  processHostWhisper(sender, message, messageType) {
-    // Нельзя шептать самому себе
-    if (messageType === 'host') {
+  // Обрабатывает групповой шепот
+  processGroupWhisper(sender, groupName, message, messageType) {
+    // Проверяем права отправки в группу
+    if (!this.room.canPlayerMessageGroup(sender, groupName)) {
+      const groupDisplayName = this.room.getGroupDisplayName(groupName)
       return {
-        error: 'Вы и есть ведущий'
+        error: `У вас нет прав для отправки сообщений группе "${groupDisplayName}"`
       }
     }
 
-    // Находим ведущего
-    const hostPlayer = this.room.players.get(this.room.hostId)
-    if (!hostPlayer || !hostPlayer.connected) {
+    // Находим получателей
+    const groupMembers = this.room.getGroupMembers(groupName)
+    if (groupMembers.length === 0) {
+      const groupDisplayName = this.room.getGroupDisplayName(groupName)
       return {
-        error: 'Ведущий не подключен'
+        error: `В группе "${groupDisplayName}" нет подходящих получателей`
       }
     }
 
-    // Создаем сообщение шепота ведущему
+    const recipients = groupMembers.map(p => p.id)
+    
+    // Добавляем ведущего, если он не отправитель и не в списке получателей
+    if (!this.room.isHost(sender.id) && !recipients.includes(this.room.hostId)) {
+      recipients.push(this.room.hostId)
+    }
+
+    // Создаем сообщение группового шепота
     const whisperMessage = {
       id: uuidv4(),
       playerId: sender.id,
       playerName: sender.name,
-      targetPlayerId: hostPlayer.id,
-      targetPlayerName: 'Ведущий',
+      targetGroup: groupName,
+      targetGroupName: this.room.getGroupDisplayName(groupName),
+      targetMembers: groupMembers.map(p => p.name),
       message: message,
-      type: 'whisper',
+      type: 'group_whisper',
       timestamp: Date.now()
     }
 
     return {
       success: true,
       whisperMessage,
-      recipients: [sender.id, hostPlayer.id]
+      recipients: [...new Set(recipients)] // Убираем дубликаты
     }
   }
 
@@ -208,22 +214,15 @@ export class ChatCommandProcessor {
     }
   }
 
+  // Обрабатывает команду помощи
   processHelpCommand(sender) {
     let helpText = '📋 **Доступные команды чата:**\n\n'
 
     helpText += '**Основные команды:**\n'
-    helpText += '• `/шепот <игрок> <текст>` - личное сообщение игроку\n'
-    helpText += '• `/шепот <группа> <текст>` - сообщение группе игроков\n'
+    helpText += '• `/ш <игрок> <текст>` - личное сообщение игроку\n'
+    helpText += '• `/ш <группа> <текст>` - сообщение группе игроков\n'
     helpText += '• `/помощь` - показать эту справку\n'
     helpText += '• `/кто` - список всех игроков\n'
-    
-    // ДОБАВЛЯЕМ: Информацию о шепоте ведущему
-    const messageType = this.room.isHost(sender.id) ? 'host' : 'player'
-    if (messageType !== 'host') {
-      helpText += '• `/шепот ведущий <текст>` - сообщение ведущему\n'
-    }
-    
-    helpText += '• `/помощь` - показать эту справку\n'
     
     if (this.room.timer) {
       helpText += '• `/время` - показать оставшееся время\n'
@@ -379,11 +378,7 @@ export class ChatCommandProcessor {
       }
     })
 
-    // ДОБАВЛЯЕМ: Ведущий (если отправитель не ведущий)
-    const messageType = this.room.isHost(sender.id) ? 'host' : 'player'
-    if (messageType !== 'host') {
-      targets.push('ведущий')
-    }
+    // Добавляем доступные группы
     if (this.room.canPlayerMessageGroup(sender, 'оборотни')) {
       targets.push('оборотни')
     }
