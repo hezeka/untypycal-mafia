@@ -414,6 +414,19 @@ export const useGame = () => {
       }
     })
 
+    socket.on('new-whisper', (whisperMessage) => {
+      // Добавляем шепот в чат
+      const existingWhisper = gameData.chat.find(m => m.id === whisperMessage.id)
+      if (!existingWhisper) {
+        gameData.chat.push(whisperMessage)
+      }
+    })
+
+    socket.on('command-error', ({ message }) => {
+      // Показываем ошибку команды - будет обработана в компоненте GameChat
+      console.log('Command error:', message)
+    })
+
     socket.on('error', ({ message }) => {
       console.error('Game error:', message)
       alert(message)

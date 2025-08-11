@@ -1,16 +1,21 @@
 {
-  "name": "nuxt-app",
+  "name": "mafia-werewolf-game",
+  "version": "1.0.0",
   "type": "module",
   "private": true,
+  "description": "Online Werewolf (Mafia) game platform with advanced chat commands",
   "scripts": {
     "dev": "concurrently \"node server/socket-server.js\" \"nuxt dev\"",
-    "socket": "node server/socket-server.js",
-    "nuxt": "nuxt dev",
+    "dev:socket": "node server/socket-server.js",
+    "dev:nuxt": "nuxt dev",
     "build": "nuxt build",
     "start": "concurrently \"NODE_ENV=production node server/socket-server.js\" \"nuxt start\"",
     "start:socket": "NODE_ENV=production node server/socket-server.js",
     "start:nuxt": "nuxt start",
+    "preview": "nuxt preview",
     "clean": "rm -rf .nuxt .output node_modules/.cache",
+    "lint": "echo 'No linting configured'",
+    "test": "echo 'No tests configured'",
     "postinstall": "nuxt prepare"
   },
   "dependencies": {
@@ -33,5 +38,17 @@
   "engines": {
     "node": ">=18.0.0",
     "npm": ">=8.0.0"
-  }
+  },
+  "keywords": [
+    "werewolf",
+    "mafia", 
+    "game",
+    "online",
+    "multiplayer",
+    "vue",
+    "nuxt",
+    "socket.io"
+  ],
+  "author": "Your Name",
+  "license": "MIT"
 }

@@ -10,12 +10,18 @@
         v-for="message in messages" 
         :key="message.id"
         class="message"
-        :class="[message.type, { 'is-whisper': message.type === 'whisper' }]"
+        :class="[message.type, { 
+          'is-whisper': message.type === 'whisper',
+          'is-group-whisper': message.type === 'group_whisper'
+        }]"
       >
         <div class="message-header">
           <span class="message-author">
             <template v-if="message.type === 'whisper'">
               {{ message.playerName }} → {{ message.targetPlayerName }}{{ getPlayerRoleDisplay(message.playerId) }}
+            </template>
+            <template v-else-if="message.type === 'group_whisper'">
+              {{ message.playerName }} → {{ message.targetGroupName }}{{ getPlayerRoleDisplay(message.playerId) }}
             </template>
             <template v-else>
               {{ message.playerName }}{{ getPlayerRoleDisplay(message.playerId) }}
@@ -24,7 +30,16 @@
           <span class="message-time">{{ formatTime(message.timestamp) }}</span>
         </div>
         <div class="message-content">
-          <span v-if="message.type === 'whisper'" class="whisper-indicator">💬 </span>{{ message.message }}
+          <span v-if="message.type === 'whisper'" class="whisper-indicator">💬 </span>
+          <span v-else-if="message.type === 'group_whisper'" class="group-whisper-indicator">👥 </span>
+          <span v-html="formatMessageContent(message.message)"></span>
+        </div>
+        
+        <!-- Показываем участников группового шепота -->
+        <div v-if="message.type === 'group_whisper' && message.targetMembers" class="group-members">
+          <small class="text-muted">
+            Участники: {{ message.targetMembers.join(', ') }}
+          </small>
         </div>
       </div>
       
@@ -34,9 +49,34 @@
     </div>
     
     <div class="chat-help" v-if="canSendMessage">
-      <small class="text-muted">
-        Для личного сообщения: <code>/шепот ИмяИгрока текст</code>
-      </small>
+      <details class="help-details">
+        <summary class="help-summary">💡 Команды чата</summary>
+        <div class="help-content">
+          <div class="help-item">
+            <code>/шепот &lt;игрок&gt; &lt;текст&gt;</code>
+            <span>Личное сообщение игроку</span>
+          </div>
+          <div class="help-item">
+            <code>/шепот &lt;группа&gt; &lt;текст&gt;</code>
+            <span>Сообщение группе игроков</span>
+          </div>
+          <div class="help-item">
+            <code>/помощь</code>
+            <span>Показать все команды</span>
+          </div>
+          <div class="help-groups" v-if="availableGroups.length > 0">
+            <strong>Доступные группы:</strong>
+            <span v-for="group in availableGroups" :key="group" class="group-tag">{{ group }}</span>
+          </div>
+        </div>
+      </details>
+    </div>
+    
+    <!-- Показываем ошибку команды -->
+    <div v-if="commandError" class="command-error">
+      <span class="error-icon">⚠️</span>
+      <span class="error-text">{{ commandError }}</span>
+      <button @click="commandError = null" class="error-close">✕</button>
     </div>
     
     <form @submit.prevent="sendMessage" class="chat-input">
@@ -44,8 +84,10 @@
         v-model="newMessage" 
         class="input"
         :placeholder="chatPlaceholder"
-        maxlength="200"
+        maxlength="300"
         :disabled="!canSendMessage"
+        @keydown="handleKeyDown"
+        ref="messageInput"
       >
       <button 
         type="submit" 
@@ -60,9 +102,16 @@
 
 <script setup>
 const { chatMessages, isInRoom, sendMessage: sendGameMessage, gameData, isHost, player, roles } = useGame()
+const { socket } = useSocket()
 
 const newMessage = ref('')
 const messagesContainer = ref(null)
+const messageInput = ref(null)
+const commandError = ref(null)
+
+// Автодополнение команд
+const commandSuggestions = ref([])
+const showSuggestions = ref(false)
 
 const messages = computed(() => chatMessages.value)
 
@@ -103,21 +152,36 @@ const canSendMessage = computed(() => {
 
 const chatPlaceholder = computed(() => {
   if (!isInRoom.value) return 'Подключитесь к комнате...'
-  if (isHost.value) return 'Напишите сообщение или /шепот ИмяИгрока текст...'
+  if (isHost.value) return 'Сообщение или команда (/помощь для справки)...'
   
   const gameState = gameData.gameState
   
-  if (gameState === 'setup') return 'Напишите сообщение или /шепот ИмяИгрока текст...'
-  if (gameState === 'day') return 'Обсуждайте подозреваемых или /шепот ИмяИгрока текст...'
+  if (gameState === 'setup') return 'Сообщение или команда (/помощь для справки)...'
+  if (gameState === 'day') return 'Обсуждение или команда (/шепот игрок текст)...'
   if (gameState === 'night') {
     if (isWerewolfRole(player.role)) {
-      return 'Чат команды оборотней или /шепот ИмяИгрока текст...'
+      return 'Чат команды оборотней или /шепот...'
     }
     return 'Ночью чат недоступен'
   }
   if (gameState === 'voting') return 'Во время голосования чат отключен'
   
   return 'Чат недоступен'
+})
+
+// Доступные группы для текущего игрока
+const availableGroups = computed(() => {
+  const groups = []
+  
+  if (isHost.value) {
+    groups.push('оборотни', 'деревня', 'все')
+  } else if (isWerewolfRole(player.role)) {
+    groups.push('оборотни')
+  } else if (player.role && player.role !== 'tanner') {
+    groups.push('деревня')
+  }
+  
+  return groups
 })
 
 // Helper function to get player role display (БЕЗОПАСНАЯ версия)
@@ -149,8 +213,74 @@ const getPlayerRoleDisplay = (playerId) => {
   return ''
 }
 
+// Форматирование содержимого сообщения (поддержка markdown)
+const formatMessageContent = (content) => {
+  return content
+    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*(.*?)\*/g, '<em>$1</em>')
+    .replace(/`(.*?)`/g, '<code>$1</code>')
+    .replace(/\n/g, '<br>')
+}
+
+// Обработка автодополнения команд
+const handleKeyDown = (event) => {
+  const input = event.target.value
+  
+  // Tab для автодополнения
+  if (event.key === 'Tab' && input.startsWith('/')) {
+    event.preventDefault()
+    autoCompleteCommand()
+    return
+  }
+  
+  // Escape для скрытия ошибки
+  if (event.key === 'Escape') {
+    commandError.value = null
+  }
+}
+
+const autoCompleteCommand = () => {
+  const input = newMessage.value.toLowerCase()
+  
+  const commands = [
+    '/шепот ',
+    '/помощь',
+    '/whisper ',
+    '/help'
+  ]
+  
+  // Добавляем команды с группами
+  availableGroups.value.forEach(group => {
+    commands.push(`/шепот ${group} `)
+  })
+  
+  // Добавляем команды с именами игроков
+  gameData.players
+    .filter(p => p.role !== 'game_master' && p.id !== player.id)
+    .forEach(p => {
+      commands.push(`/шепот ${p.name} `)
+    })
+  
+  const matches = commands.filter(cmd => cmd.startsWith(input))
+  
+  if (matches.length === 1) {
+    newMessage.value = matches[0]
+    // Устанавливаем курсор в конец
+    nextTick(() => {
+      const inputEl = messageInput.value
+      if (inputEl) {
+        inputEl.focus()
+        inputEl.setSelectionRange(newMessage.value.length, newMessage.value.length)
+      }
+    })
+  }
+}
+
 const sendMessage = () => {
   if (!newMessage.value.trim()) return
+  
+  // Очищаем предыдущую ошибку
+  commandError.value = null
   
   sendGameMessage(newMessage.value.trim())
   newMessage.value = ''
@@ -171,6 +301,24 @@ const scrollToBottom = () => {
     }
   })
 }
+
+// Слушаем ошибки команд
+onMounted(() => {
+  if (socket) {
+    socket.on('command-error', (data) => {
+      commandError.value = data.message
+      // Автоматически скрываем ошибку через 5 секунд
+      setTimeout(() => {
+        commandError.value = null
+      }, 5000)
+    })
+    
+    socket.on('new-whisper', (whisperMessage) => {
+      // Добавляем шепот в чат (уже обработано в useGame)
+      scrollToBottom()
+    })
+  }
+})
 
 watch(messages, () => {
   scrollToBottom()
@@ -248,7 +396,7 @@ onMounted(() => {
         
         .message-content {
           font-weight: 500;
-          white-space: pre-line; // Поддерживает переносы строк
+          white-space: pre-line;
         }
       }
       
@@ -267,6 +415,38 @@ onMounted(() => {
           
           .whisper-indicator {
             opacity: 0.7;
+          }
+        }
+      }
+      
+      &.group_whisper {
+        background: rgba(243, 156, 18, 0.1);
+        border-left: 3px solid #f39c12;
+        border-radius: 8px 8px 8px 2px;
+        
+        .message-author {
+          color: #f39c12;
+          font-style: italic;
+          font-weight: 600;
+        }
+        
+        .message-content {
+          font-style: italic;
+          
+          .group-whisper-indicator {
+            opacity: 0.8;
+            font-size: 14px;
+          }
+        }
+        
+        .group-members {
+          margin-top: 6px;
+          padding-top: 6px;
+          border-top: 1px solid rgba(243, 156, 18, 0.2);
+          
+          .text-muted {
+            color: rgba(243, 156, 18, 0.7);
+            font-size: 10px;
           }
         }
       }
@@ -294,6 +474,26 @@ onMounted(() => {
         line-height: 1.4;
         color: rgba(255, 255, 255, 0.9);
         word-wrap: break-word;
+        
+        // Стили для markdown
+        :deep(strong) {
+          font-weight: 600;
+          color: white;
+        }
+        
+        :deep(em) {
+          font-style: italic;
+          color: rgba(255, 255, 255, 0.8);
+        }
+        
+        :deep(code) {
+          background: rgba(255, 255, 255, 0.1);
+          padding: 2px 4px;
+          border-radius: 3px;
+          font-family: monospace;
+          font-size: 11px;
+          color: #f39c12;
+        }
       }
     }
     
@@ -309,16 +509,108 @@ onMounted(() => {
     padding: 8px 0;
     border-top: 1px solid rgba(255, 255, 255, 0.1);
     
-    small {
-      font-size: 10px;
-      color: rgba(255, 255, 255, 0.5);
+    .help-details {
+      .help-summary {
+        cursor: pointer;
+        font-size: 11px;
+        color: rgba(255, 255, 255, 0.6);
+        padding: 4px 0;
+        user-select: none;
+        
+        &:hover {
+          color: rgba(255, 255, 255, 0.8);
+        }
+      }
       
-      code {
-        background: rgba(255, 255, 255, 0.1);
-        padding: 2px 4px;
-        border-radius: 3px;
-        font-family: monospace;
-        font-size: 9px;
+      .help-content {
+        margin-top: 8px;
+        padding: 8px;
+        background: rgba(255, 255, 255, 0.03);
+        border-radius: 4px;
+        border-left: 2px solid #667eea;
+        
+        .help-item {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          margin-bottom: 4px;
+          font-size: 10px;
+          
+          code {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 2px 4px;
+            border-radius: 3px;
+            font-family: monospace;
+            color: #667eea;
+            font-size: 9px;
+          }
+          
+          span {
+            color: rgba(255, 255, 255, 0.6);
+            margin-left: 8px;
+          }
+        }
+        
+        .help-groups {
+          margin-top: 8px;
+          padding-top: 8px;
+          border-top: 1px solid rgba(255, 255, 255, 0.1);
+          font-size: 10px;
+          
+          strong {
+            color: rgba(255, 255, 255, 0.8);
+            margin-right: 6px;
+          }
+          
+          .group-tag {
+            display: inline-block;
+            background: rgba(102, 126, 234, 0.2);
+            color: #667eea;
+            padding: 2px 6px;
+            border-radius: 3px;
+            margin-right: 4px;
+            font-size: 9px;
+          }
+        }
+      }
+    }
+  }
+  
+  .command-error {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    margin: 8px 0;
+    background: rgba(231, 76, 60, 0.1);
+    border: 1px solid rgba(231, 76, 60, 0.3);
+    border-radius: 6px;
+    animation: slideIn 0.3s ease;
+    
+    .error-icon {
+      color: #e74c3c;
+      font-size: 14px;
+    }
+    
+    .error-text {
+      flex: 1;
+      font-size: 12px;
+      color: #e74c3c;
+      line-height: 1.3;
+    }
+    
+    .error-close {
+      background: none;
+      border: none;
+      color: rgba(231, 76, 60, 0.7);
+      cursor: pointer;
+      padding: 2px;
+      border-radius: 3px;
+      font-size: 12px;
+      
+      &:hover {
+        background: rgba(231, 76, 60, 0.2);
+        color: #e74c3c;
       }
     }
   }
@@ -332,6 +624,11 @@ onMounted(() => {
       flex: 1;
       font-size: 13px;
       padding: 8px 12px;
+      
+      &:focus {
+        border-color: #667eea;
+        box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.2);
+      }
     }
     
     .btn-small {
@@ -341,4 +638,31 @@ onMounted(() => {
     }
   }
 }
+
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+// Адаптивность
+@media (max-width: 768px) {
+  .help-item {
+    flex-direction: column;
+    align-items: flex-start !important;
+    gap: 2px;
+  }
+  
+  .command-error {
+    .error-text {
+      font-size: 11px !important;
+    }
+  }
+}
+
 </style>
