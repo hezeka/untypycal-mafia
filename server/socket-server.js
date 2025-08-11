@@ -1,3 +1,4 @@
+
 import { Server } from 'socket.io'
 import http from 'http'
 import { GameRoom } from './models/GameRoom.js'
@@ -8,6 +9,10 @@ import {
   getMessageRecipients, 
   generateRoomId,
   validatePlayerName,
+  validatePlayerNameForReconnection,
+  getExistingPlayerNames,
+  suggestAlternativeNames,
+  generateRandomName,
   validateRoomId,
   cleanupDisconnectedPlayers,
   logGameAction,
@@ -66,7 +71,7 @@ io.on('connection', (socket) => {
 
   socket.on('create-room', (data) => {
     // Валидация данных
-    const nameValidation = validatePlayerName(data.playerName)
+    const nameValidation = validatePlayerName(data.playerName, [])
     if (!nameValidation.valid) {
       socket.emit('error', { message: nameValidation.error })
       return
@@ -89,38 +94,57 @@ io.on('connection', (socket) => {
     
     logGameAction(roomId, 'room_created', { 
       hostName: nameValidation.name,
-      hostId: socket.id 
+      hostId: socket.id,
+      formattedName: nameValidation.name !== data.playerName ? `"${data.playerName}" -> "${nameValidation.name}"` : 'no formatting'
     })
   })
 
   socket.on('join-room', (data) => {
-    // Валидация данных
-    const nameValidation = validatePlayerName(data.playerName)
-    if (!nameValidation.valid) {
-      socket.emit('error', { message: nameValidation.error })
-      return
-    }
-
+    // Валидация формата комнаты
     if (!validateRoomId(data.roomId)) {
-      socket.emit('error', { message: 'Неверный формат кода комнаты' })
+      socket.emit('error', { message: 'Неверный формат кода комнаты (должен быть 6 символов: буквы и цифры)' })
       return
     }
 
     const room = gameRooms.get(data.roomId.toUpperCase())
     if (!room) {
-      socket.emit('error', { message: 'Комната не найдена' })
+      socket.emit('error', { message: 'Комната не найдена. Проверьте код комнаты.' })
+      return
+    }
+
+    // Получаем список существующих имен в комнате
+    const existingNames = getExistingPlayerNames(room)
+    
+    // Валидация имени с учетом существующих игроков
+    const nameValidation = validatePlayerName(data.playerName, existingNames)
+    if (!nameValidation.valid) {
+      // Предлагаем альтернативы если имя занято
+      if (nameValidation.error.includes('уже в комнате')) {
+        const suggestions = suggestAlternativeNames(data.playerName, existingNames)
+        const suggestionText = suggestions.length > 0 
+          ? ` Попробуйте: ${suggestions.join(', ')}`
+          : ''
+        socket.emit('error', { 
+          message: nameValidation.error + suggestionText,
+          suggestions: suggestions
+        })
+      } else {
+        socket.emit('error', { message: nameValidation.error })
+      }
       return
     }
 
     logGameAction(data.roomId, 'join_request', { 
-      playerName: nameValidation.name,
-      gameState: room.gameState
+      originalName: data.playerName,
+      formattedName: nameValidation.name,
+      gameState: room.gameState,
+      existingPlayersCount: room.players.size
     })
 
     // Check if player already exists by name (reconnection)
     let existingPlayer = null
     for (const [socketId, player] of room.players.entries()) {
-      if (player.name === nameValidation.name) {
+      if (player.name.toLowerCase() === nameValidation.name.toLowerCase()) {
         existingPlayer = { socketId, player }
         break
       }
@@ -129,6 +153,13 @@ io.on('connection', (socket) => {
     if (existingPlayer) {
       // RECONNECTION - always allow regardless of game state
       const { socketId: oldSocketId, player: playerData } = existingPlayer
+      
+      logGameAction(data.roomId, 'reconnection_detected', {
+        playerName: nameValidation.name,
+        oldSocketId,
+        newSocketId: socket.id,
+        gameState: room.gameState
+      })
       
       // Обновляем голос если был
       if (room.votes.has(oldSocketId)) {
@@ -146,6 +177,7 @@ io.on('connection', (socket) => {
         if (playerData.role !== 'game_master') {
           playerData.role = 'game_master'
         }
+        logGameAction(data.roomId, 'host_reconnected', { playerName: nameValidation.name })
       }
       
       // Update player's socket ID and mark as connected
@@ -156,30 +188,30 @@ io.on('connection', (socket) => {
       
       logGameAction(data.roomId, 'player_reconnected', { 
         playerName: nameValidation.name,
-        oldSocketId,
-        newSocketId: socket.id
+        role: playerData.role || 'no_role'
       })
     } else {
       // NEW PLAYER - only allow during setup
       if (room.gameState !== 'setup') {
-        socket.emit('error', { message: 'Игра уже началась, новые игроки не могут присоединиться' })
+        socket.emit('error', { 
+          message: 'Игра уже началась, новые игроки не могут присоединиться. Дождитесь окончания текущей игры.' 
+        })
         return
       }
 
-      // Проверяем, нет ли уже игрока с таким именем
-      const nameExists = Array.from(room.players.values())
-        .some(p => p.name.toLowerCase() === nameValidation.name.toLowerCase())
-      
-      if (nameExists) {
-        socket.emit('error', { message: 'Игрок с таким именем уже в комнате' })
+      // Проверяем лимит игроков (опционально)
+      const maxPlayers = 20 // Максимум игроков в комнате
+      if (room.players.size >= maxPlayers) {
+        socket.emit('error', { message: `Комната переполнена (максимум ${maxPlayers} игроков)` })
         return
       }
 
       room.addPlayer(socket.id, nameValidation.name)
       
-      logGameAction(data.roomId, 'player_joined', { 
+      logGameAction(data.roomId, 'new_player_joined', { 
         playerName: nameValidation.name,
-        playersCount: room.players.size
+        totalPlayers: room.players.size,
+        formatted: nameValidation.name !== data.playerName
       })
     }
 
@@ -193,8 +225,77 @@ io.on('connection', (socket) => {
       }
     })
     
-    // Also send a specific confirmation to the joining player
+    // Send a specific confirmation to the joining player
     socket.emit('join-success', room.getGameData(socket.id))
+    
+    // Уведомляем других игроков о присоединении (если это новый игрок)
+    if (!existingPlayer) {
+      room.addChatMessage(null, `🎭 ${nameValidation.name} присоединился к игре`, 'system')
+      
+      // Отправляем системное сообщение всем
+      room.players.forEach((player, playerId) => {
+        if (player.connected && playerId !== socket.id) {
+          io.to(playerId).emit('new-message', room.chat[room.chat.length - 1])
+        }
+      })
+    }
+  })
+
+  // Добавляем новый обработчик для проверки доступности имени
+  socket.on('check-name-availability', (data) => {
+    if (!data.roomId || !data.playerName) {
+      socket.emit('name-check-result', { available: false, error: 'Неверные данные' })
+      return
+    }
+
+    const room = gameRooms.get(data.roomId.toUpperCase())
+    if (!room) {
+      socket.emit('name-check-result', { available: false, error: 'Комната не найдена' })
+      return
+    }
+
+    const existingNames = getExistingPlayerNames(room)
+    const validation = validatePlayerName(data.playerName, existingNames)
+    
+    if (validation.valid) {
+      socket.emit('name-check-result', { 
+        available: true, 
+        formattedName: validation.name,
+        changed: validation.name !== data.playerName
+      })
+    } else {
+      const suggestions = suggestAlternativeNames(data.playerName, existingNames)
+      socket.emit('name-check-result', { 
+        available: false, 
+        error: validation.error,
+        suggestions: suggestions
+      })
+    }
+  })
+
+  // Добавляем обработчик для получения предложений имен
+  socket.on('get-name-suggestions', (data) => {
+    if (!data.roomId || !data.baseName) {
+      socket.emit('name-suggestions', { suggestions: [] })
+      return
+    }
+
+    const room = gameRooms.get(data.roomId.toUpperCase())
+    if (!room) {
+      socket.emit('name-suggestions', { suggestions: [] })
+      return
+    }
+
+    const existingNames = getExistingPlayerNames(room)
+    const suggestions = suggestAlternativeNames(data.baseName, existingNames)
+    
+    // Добавляем случайное имя если мало предложений
+    if (suggestions.length < 3) {
+      const randomName = generateRandomName(existingNames)
+      suggestions.push(randomName)
+    }
+    
+    socket.emit('name-suggestions', { suggestions: suggestions.slice(0, 5) })
   })
 
   socket.on('select-role', (data) => {

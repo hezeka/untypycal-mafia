@@ -4,20 +4,81 @@
       <!-- Room not found or loading - показываем ПЕРВЫМ -->
       <div v-if="!isInRoom" class="loading-section">
         <div class="card text-center">
-          <div class="card-header">Подключение к комнате {{ route.params.id }}</div>
-          <p>Введите свое имя для присоединения к игре:</p>
+          <div class="card-header">Присоединение к комнате {{ route.params.id }}</div>
           
           <form @submit.prevent="joinRoom" class="join-form">
-            <input 
-              v-model="playerName" 
-              class="input mb-2" 
-              placeholder="Ваше имя" 
-              required
-              maxlength="20"
-              autofocus
+            <div class="input-group">
+              <label for="playerName" class="input-label">Ваше имя:</label>
+              <input 
+                id="playerName"
+                v-model="playerName" 
+                class="input" 
+                :class="{
+                  'input-error': nameValidation.error,
+                  'input-success': nameValidation.valid && playerName.length > 0,
+                  'input-warning': nameValidation.changed
+                }"
+                placeholder="Введите ваше имя" 
+                required
+                maxlength="15"
+                autofocus
+                @input="validateNameInput"
+                @blur="checkNameAvailability"
+              >
+              
+              <!-- Индикатор валидации -->
+              <div class="validation-feedback">
+                <div v-if="nameValidation.checking" class="validation-checking">
+                  <span class="spinner">⏳</span> Проверка доступности...
+                </div>
+                <div v-else-if="nameValidation.error" class="validation-error">
+                  ❌ {{ nameValidation.error }}
+                </div>
+                <div v-else-if="nameValidation.valid && playerName.length > 0" class="validation-success">
+                  ✅ {{ nameValidation.changed ? `Будет использовано: "${nameValidation.formattedName}"` : 'Имя доступно' }}
+                </div>
+                <div v-else-if="playerName.length > 0" class="validation-info">
+                  💡 Имя может содержать только буквы, цифры, дефис и подчеркивание
+                </div>
+              </div>
+            </div>
+
+            <!-- Предложения альтернативных имен -->
+            <div v-if="nameSuggestions.length > 0" class="name-suggestions">
+              <p class="suggestions-title">💡 Попробуйте эти варианты:</p>
+              <div class="suggestions-list">
+                <button 
+                  v-for="suggestion in nameSuggestions" 
+                  :key="suggestion"
+                  type="button"
+                  class="suggestion-btn"
+                  @click="selectSuggestion(suggestion)"
+                >
+                  {{ suggestion }}
+                </button>
+              </div>
+            </div>
+
+            <!-- Правила для имен -->
+            <div class="name-rules">
+              <details>
+                <summary>📋 Правила для имен</summary>
+                <ul class="rules-list">
+                  <li>От 1 до 15 символов</li>
+                  <li>Только буквы, цифры, дефис (-) и подчеркивание (_)</li>
+                  <li>Должно начинаться с буквы</li>
+                  <li>Пробелы и слеши (/) запрещены</li>
+                  <li>Имя должно быть уникальным в комнате</li>
+                </ul>
+              </details>
+            </div>
+            
+            <button 
+              type="submit" 
+              class="btn btn-primary"
+              :disabled="!canJoin"
             >
-            <button type="submit" class="btn btn-primary" :disabled="!playerName.trim()">
-              Присоединиться к игре
+              {{ nameValidation.checking ? 'Проверка...' : 'Присоединиться к игре' }}
             </button>
           </form>
 
@@ -149,18 +210,27 @@ const {
   startGame: startNewGame
 } = useGame()
 
+const { socket } = useSocket()
+
 // Local reactive data
 const playerName = ref('')
+const nameSuggestions = ref([])
+const nameValidation = reactive({
+  valid: false,
+  error: null,
+  checking: false,
+  changed: false,
+  formattedName: null
+})
 
 // Computed properties
 const roomId = computed(() => route.params.id)
 const hostId = computed(() => room.hostId)
 const gameState = computed(() => gameData.gameState)
-const players = computed(() => allPlayers.value) // Only non-host players
+const players = computed(() => allPlayers.value)
 const selectedRoles = computed(() => gameData.selectedRoles)
 
 const currentPlayerId = computed(() => {
-  const { socket } = useSocket()
   return socket?.id
 })
 
@@ -169,11 +239,137 @@ const hostName = computed(() => {
   return hostPlayer ? hostPlayer.name : 'Неизвестно'
 })
 
+const canJoin = computed(() => {
+  return playerName.value.trim().length > 0 && 
+         nameValidation.valid && 
+         !nameValidation.checking
+})
+
+// Валидация имени в реальном времени
+const validateNameInput = debounce(() => {
+  const name = playerName.value.trim()
+  
+  if (!name) {
+    resetValidation()
+    return
+  }
+
+  // Базовая клиентская валидация
+  if (name.length > 15) {
+    setValidationError('Имя слишком длинное (максимум 15 символов)')
+    return
+  }
+
+  if (!/^[a-zA-Zа-яА-Я0-9_-]*$/.test(name)) {
+    setValidationError('Недопустимые символы. Используйте только буквы, цифры, дефис и подчеркивание')
+    return
+  }
+
+  if (name.length > 0 && !/^[a-zA-Zа-яА-Я]/.test(name)) {
+    setValidationError('Имя должно начинаться с буквы')
+    return
+  }
+
+  if (name.includes('/')) {
+    setValidationError('Символ "/" запрещен в именах')
+    return
+  }
+
+  if (name.includes(' ')) {
+    setValidationError('Пробелы запрещены в именах')
+    return
+  }
+
+  // Если базовая валидация прошла, сбрасываем ошибки
+  nameValidation.error = null
+  nameValidation.valid = true
+}, 300)
+
+// Проверка доступности имени на сервере
+const checkNameAvailability = debounce(() => {
+  const name = playerName.value.trim()
+  
+  if (!name || nameValidation.error) return
+  
+  nameValidation.checking = true
+  
+  socket.emit('check-name-availability', {
+    roomId: roomId.value,
+    playerName: name
+  })
+}, 500)
+
+// Обработчики событий сокета
+const setupSocketListeners = () => {
+  socket.on('name-check-result', (result) => {
+    nameValidation.checking = false
+    
+    if (result.available) {
+      nameValidation.valid = true
+      nameValidation.error = null
+      nameValidation.changed = result.changed
+      nameValidation.formattedName = result.formattedName
+      nameSuggestions.value = []
+    } else {
+      nameValidation.valid = false
+      nameValidation.error = result.error
+      nameSuggestions.value = result.suggestions || []
+    }
+  })
+
+  socket.on('name-suggestions', (result) => {
+    nameSuggestions.value = result.suggestions || []
+  })
+}
+
+// Вспомогательные функции
+const setValidationError = (error) => {
+  nameValidation.error = error
+  nameValidation.valid = false
+  nameValidation.checking = false
+  nameValidation.changed = false
+  nameSuggestions.value = []
+}
+
+const resetValidation = () => {
+  nameValidation.error = null
+  nameValidation.valid = false
+  nameValidation.checking = false
+  nameValidation.changed = false
+  nameValidation.formattedName = null
+  nameSuggestions.value = []
+}
+
+const selectSuggestion = (suggestion) => {
+  playerName.value = suggestion
+  nameSuggestions.value = []
+  nameValidation.valid = true
+  nameValidation.error = null
+  nameValidation.changed = false
+  nameValidation.formattedName = suggestion
+}
+
+// Debounce utility
+function debounce(func, wait) {
+  let timeout
+  return function executedFunction(...args) {
+    const later = () => {
+      clearTimeout(timeout)
+      func(...args)
+    }
+    clearTimeout(timeout)
+    timeout = setTimeout(later, wait)
+  }
+}
+
 // Methods
 const joinRoom = async () => {
+  if (!canJoin.value) return
+  
+  const finalName = nameValidation.formattedName || playerName.value.trim()
   await joinGameRoom({ 
     roomId: roomId.value, 
-    playerName: playerName.value.trim() 
+    playerName: finalName
   })
 }
 
@@ -192,6 +388,7 @@ const startGame = () => {
 // Initialize socket listeners and try to reconnect to room if possible
 onMounted(() => {
   initSocketListeners()
+  setupSocketListeners()
   
   // Try to reconnect to the room from URL
   const urlRoomId = roomId.value
@@ -268,6 +465,160 @@ definePageMeta({
 </script>
 
 <style lang="less" scoped>
+.game-page {
+  min-height: 100vh;
+  padding: 20px 0;
+}
+
+.loading-section {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 50vh;
+  
+  .card {
+    max-width: 500px;
+    width: 100%;
+  }
+  
+  .join-form {
+    margin: 20px 0;
+  }
+}
+
+.input-group {
+  margin-bottom: 16px;
+  
+  .input-label {
+    display: block;
+    margin-bottom: 8px;
+    font-weight: 500;
+    color: rgba(255, 255, 255, 0.9);
+  }
+  
+  .input {
+    transition: all 0.3s ease;
+    
+    &.input-error {
+      border-color: #e74c3c;
+      box-shadow: 0 0 0 2px rgba(231, 76, 60, 0.3);
+    }
+    
+    &.input-success {
+      border-color: #2ecc71;
+      box-shadow: 0 0 0 2px rgba(46, 204, 113, 0.3);
+    }
+    
+    &.input-warning {
+      border-color: #f39c12;
+      box-shadow: 0 0 0 2px rgba(243, 156, 18, 0.3);
+    }
+  }
+}
+
+.validation-feedback {
+  margin-top: 8px;
+  min-height: 20px;
+  font-size: 13px;
+  
+  .validation-checking {
+    color: #3498db;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    
+    .spinner {
+      animation: spin 1s linear infinite;
+    }
+  }
+  
+  .validation-error {
+    color: #e74c3c;
+    line-height: 1.4;
+  }
+  
+  .validation-success {
+    color: #2ecc71;
+  }
+  
+  .validation-info {
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 12px;
+  }
+}
+
+.name-suggestions {
+  margin: 16px 0;
+  padding: 16px;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 8px;
+  border-left: 3px solid #f39c12;
+  
+  .suggestions-title {
+    margin: 0 0 12px 0;
+    font-size: 14px;
+    color: #f39c12;
+    font-weight: 500;
+  }
+  
+  .suggestions-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  
+  .suggestion-btn {
+    padding: 6px 12px;
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 16px;
+    color: white;
+    cursor: pointer;
+    font-size: 12px;
+    transition: all 0.3s ease;
+    
+    &:hover {
+      background: rgba(255, 255, 255, 0.2);
+      border-color: #f39c12;
+      transform: translateY(-1px);
+    }
+  }
+}
+
+.name-rules {
+  margin: 16px 0;
+  
+  details {
+    summary {
+      cursor: pointer;
+      color: rgba(255, 255, 255, 0.7);
+      font-size: 13px;
+      padding: 8px 0;
+      
+      &:hover {
+        color: rgba(255, 255, 255, 0.9);
+      }
+    }
+    
+    .rules-list {
+      margin: 8px 0 0 20px;
+      padding: 0;
+      
+      li {
+        color: rgba(255, 255, 255, 0.6);
+        font-size: 12px;
+        margin-bottom: 4px;
+        line-height: 1.4;
+      }
+    }
+  }
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
 .game-page {
   min-height: 100vh;
   padding: 20px 0;

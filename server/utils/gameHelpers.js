@@ -66,27 +66,146 @@ export function generateRoomId() {
   return Math.random().toString(36).substring(2, 8).toUpperCase()
 }
 
-// Validate player name
-export function validatePlayerName(name) {
+// Список запрещенных имен (системные, команды, группы)
+const FORBIDDEN_NAMES = [
+  // Системные
+  'система', 'system', 'админ', 'admin', 'ведущий', 'host', 'сервер', 'server',
+  'бот', 'bot', 'модератор', 'moderator', 'game_master', 'gamemaster',
+  
+  // Команды чата
+  'шепот', 'whisper', 'помощь', 'help', 'кто', 'who', 'время', 'time',
+  'список', 'list', 'все', 'all', 'everyone',
+  
+  // Группы
+  'оборотни', 'волки', 'wolves', 'werewolves', 'деревня', 'жители', 
+  'village', 'villagers', 'мафия', 'mafia',
+  
+  // Роли (основные)
+  'провидец', 'seer', 'грабитель', 'robber', 'смутьян', 'troublemaker',
+  'пьяница', 'drunk', 'неудачник', 'tanner', 'охотник', 'hunter',
+  'оборотень', 'werewolf', 'миньон', 'minion',
+  
+  // Общие
+  'игрок', 'player', 'гость', 'guest', 'аноним', 'anonymous', 'null', 'undefined'
+]
+
+// Форматирование и валидация имени игрока
+export function validatePlayerName(name, existingPlayers = []) {
   if (!name || typeof name !== 'string') {
     return { valid: false, error: 'Имя не может быть пустым' }
   }
   
-  const trimmed = name.trim()
-  if (trimmed.length < 1) {
+  // Убираем лишние пробелы и форматируем
+  let formattedName = name.trim()
+  
+  if (formattedName.length < 1) {
     return { valid: false, error: 'Имя не может быть пустым' }
   }
   
-  if (trimmed.length > 20) {
-    return { valid: false, error: 'Имя слишком длинное (максимум 20 символов)' }
+  if (formattedName.length > 15) {
+    return { valid: false, error: 'Имя слишком длинное (максимум 15 символов)' }
   }
   
-  // Проверяем на недопустимые символы
-  if (!/^[a-zA-Zа-яА-Я0-9\s_-]+$/.test(trimmed)) {
-    return { valid: false, error: 'Имя содержит недопустимые символы' }
+  // Проверяем на запрещенные символы
+  if (!/^[a-zA-Zа-яА-Я0-9_-]+$/.test(formattedName)) {
+    return { 
+      valid: false, 
+      error: 'Имя может содержать только буквы, цифры, дефис и подчеркивание. Пробелы и слеши запрещены!' 
+    }
   }
   
-  return { valid: true, name: trimmed }
+  // Проверяем, что имя не начинается с цифры или спецсимвола
+  if (!/^[a-zA-Zа-яА-Я]/.test(formattedName)) {
+    return { 
+      valid: false, 
+      error: 'Имя должно начинаться с буквы' 
+    }
+  }
+  
+  // Проверяем на запрещенные имена
+  const lowercaseName = formattedName.toLowerCase()
+  if (FORBIDDEN_NAMES.includes(lowercaseName)) {
+    return { 
+      valid: false, 
+      error: 'Это имя зарезервировано системой. Выберите другое.' 
+    }
+  }
+  
+  // Проверяем, что имя не похоже на команду
+  if (lowercaseName.startsWith('/') || lowercaseName.includes('/')) {
+    return { 
+      valid: false, 
+      error: 'Имя не может содержать слеши (символ /)' 
+    }
+  }
+  
+  // Проверяем на существующих игроков (регистронезависимо)
+  const nameExists = existingPlayers.some(playerName => 
+    playerName.toLowerCase() === lowercaseName
+  )
+  
+  if (nameExists) {
+    return { 
+      valid: false, 
+      error: 'Игрок с таким именем уже в комнате. Выберите другое имя.' 
+    }
+  }
+  
+  // Применяем форматирование
+  formattedName = formatPlayerName(formattedName)
+  
+  return { valid: true, name: formattedName }
+}
+
+// Форматирование имени игрока для красивого отображения
+function formatPlayerName(name) {
+  // Делаем первую букву заглавной, остальные строчными
+  return name.charAt(0).toUpperCase() + name.slice(1).toLowerCase()
+}
+
+// Проверка имени при переподключении
+export function validatePlayerNameForReconnection(name, room, excludeSocketId = null) {
+  const existingPlayerNames = Array.from(room.players.values())
+    .filter(p => p.id !== excludeSocketId) // Исключаем текущего игрока при переподключении
+    .map(p => p.name)
+  
+  return validatePlayerName(name, existingPlayerNames)
+}
+
+// Получить список занятых имен в комнате
+export function getExistingPlayerNames(room, excludeSocketId = null) {
+  return Array.from(room.players.values())
+    .filter(p => p.id !== excludeSocketId)
+    .map(p => p.name)
+}
+
+// Предложить альтернативные имена
+export function suggestAlternativeNames(originalName, existingNames) {
+  const baseName = originalName.replace(/[^a-zA-Zа-яА-Я0-9]/g, '').substring(0, 10)
+  const suggestions = []
+  
+  // Пробуем добавить цифры
+  for (let i = 1; i <= 9; i++) {
+    const suggestion = `${baseName}${i}`
+    if (!existingNames.includes(suggestion.toLowerCase()) && 
+        !FORBIDDEN_NAMES.includes(suggestion.toLowerCase())) {
+      suggestions.push(formatPlayerName(suggestion))
+      if (suggestions.length >= 3) break
+    }
+  }
+  
+  // Пробуем добавить символы
+  const suffixes = ['_new', '_player', '_user']
+  for (const suffix of suffixes) {
+    const suggestion = `${baseName}${suffix}`
+    if (!existingNames.includes(suggestion.toLowerCase()) && 
+        !FORBIDDEN_NAMES.includes(suggestion.toLowerCase())) {
+      suggestions.push(formatPlayerName(suggestion))
+      if (suggestions.length >= 5) break
+    }
+  }
+  
+  return suggestions
 }
 
 // Validate room ID format
@@ -186,4 +305,44 @@ export function getPhaseDisplayName(gameState, currentPhase) {
   }
   
   return phases[gameState] || 'Неизвестная фаза'
+}
+
+// Проверка имени на соответствие шаблонам ботов
+export function looksLikeBot(name) {
+  const botPatterns = [
+    /bot/i,
+    /бот/i,
+    /test/i,
+    /тест/i,
+    /admin/i,
+    /mod/i,
+    /^user\d+$/i,
+    /^guest\d+$/i,
+    /^анон\d+$/i
+  ]
+  
+  return botPatterns.some(pattern => pattern.test(name))
+}
+
+// Генерация случайного имени если нужно
+export function generateRandomName(existingNames = []) {
+  const adjectives = ['Хитрый', 'Мудрый', 'Быстрый', 'Смелый', 'Тихий', 'Ловкий']
+  const animals = ['Волк', 'Лис', 'Кот', 'Сова', 'Еж', 'Заяц']
+  
+  let attempts = 0
+  while (attempts < 20) {
+    const adj = adjectives[Math.floor(Math.random() * adjectives.length)]
+    const animal = animals[Math.floor(Math.random() * animals.length)]
+    const number = Math.floor(Math.random() * 99) + 1
+    
+    const name = `${adj}${animal}${number}`
+    
+    if (!existingNames.includes(name.toLowerCase())) {
+      return name
+    }
+    attempts++
+  }
+  
+  // Fallback
+  return `Игрок${Date.now().toString().slice(-4)}`
 }

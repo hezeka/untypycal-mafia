@@ -429,7 +429,28 @@ export const useGame = () => {
 
     socket.on('error', ({ message }) => {
       console.error('Game error:', message)
+      
+      // Проверяем, является ли это ошибкой валидации имени
+      if (message.includes('имя') || message.includes('Имя') || 
+          message.includes('name') || message.includes('Name') ||
+          message.includes('уже в комнате') || message.includes('зарезервировано')) {
+        
+        // Эта ошибка должна обрабатываться в компоненте формы
+        // Не показываем alert для ошибок валидации имен
+        return
+      }
+      
+      // Для всех остальных ошибок показываем alert
       alert(message)
+    })
+
+    // Новые обработчики для валидации имен
+    socket.on('name-check-result', (result) => {
+      // Этот обработчик будет добавлен в компонентах форм
+    })
+
+    socket.on('name-suggestions', (result) => {
+      // Этот обработчик будет добавлен в компонентах форм
     })
   }
 
