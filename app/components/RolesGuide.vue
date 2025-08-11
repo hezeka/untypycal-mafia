@@ -87,6 +87,7 @@ const getTeamName = (team) => {
   overflow: hidden;
   display: flex;
   flex-direction: column;
+  width: 100%;
 }
 
 .modal-header {
