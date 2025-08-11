@@ -470,16 +470,24 @@ export const useGame = () => {
       console.log('Command error:', message)
     })
 
-    socket.on('error', ({ message }) => {
+    socket.on('error', ({ message, suggestions }) => {
       console.error('Game error:', message)
       
-      // Проверяем, является ли это ошибкой валидации имени
-      if (message.includes('имя') || message.includes('Имя') || 
-          message.includes('name') || message.includes('Name') ||
-          message.includes('уже в комнате') || message.includes('зарезервировано')) {
-        
-        // Эта ошибка должна обрабатываться в компоненте формы
-        // Не показываем alert для ошибок валидации имен
+      // Проверяем, является ли это ошибкой валидации имени при ручном вводе
+      // (НЕ при переподключении)
+      const isNameValidationError = (
+        message.includes('имя') || 
+        message.includes('Имя') || 
+        message.includes('уже в комнате') || 
+        message.includes('зарезервировано') ||
+        message.includes('слишком длинное') ||
+        message.includes('недопустимые символы')
+      )
+      
+      if (isNameValidationError) {
+        // Эти ошибки обрабатываются в компонентах форм
+        // НЕ показываем alert для ошибок валидации имен
+        console.log('Name validation error - handled by form component')
         return
       }
       

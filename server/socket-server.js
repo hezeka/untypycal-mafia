@@ -112,50 +112,22 @@ io.on('connection', (socket) => {
       return
     }
 
-    // Получаем список существующих имен в комнате
-    const existingNames = getExistingPlayerNames(room)
-    
-    // Валидация имени с учетом существующих игроков
-    const nameValidation = validatePlayerName(data.playerName, existingNames)
-    if (!nameValidation.valid) {
-      // Предлагаем альтернативы если имя занято
-      if (nameValidation.error.includes('уже в комнате')) {
-        const suggestions = suggestAlternativeNames(data.playerName, existingNames)
-        const suggestionText = suggestions.length > 0 
-          ? ` Попробуйте: ${suggestions.join(', ')}`
-          : ''
-        socket.emit('error', { 
-          message: nameValidation.error + suggestionText,
-          suggestions: suggestions
-        })
-      } else {
-        socket.emit('error', { message: nameValidation.error })
-      }
-      return
-    }
-
-    logGameAction(data.roomId, 'join_request', { 
-      originalName: data.playerName,
-      formattedName: nameValidation.name,
-      gameState: room.gameState,
-      existingPlayersCount: room.players.size
-    })
-
-    // Check if player already exists by name (reconnection)
+    // СНАЧАЛА проверяем переподключение по имени
     let existingPlayer = null
     for (const [socketId, player] of room.players.entries()) {
-      if (player.name.toLowerCase() === nameValidation.name.toLowerCase()) {
+      if (player.name.toLowerCase() === data.playerName.toLowerCase().trim()) {
         existingPlayer = { socketId, player }
         break
       }
     }
-    
+
+    // Если это переподключение - НЕ валидируем имя заново
     if (existingPlayer) {
-      // RECONNECTION - always allow regardless of game state
+      // RECONNECTION - просто переподключаем без валидации
       const { socketId: oldSocketId, player: playerData } = existingPlayer
       
       logGameAction(data.roomId, 'reconnection_detected', {
-        playerName: nameValidation.name,
+        playerName: data.playerName,
         oldSocketId,
         newSocketId: socket.id,
         gameState: room.gameState
@@ -177,7 +149,7 @@ io.on('connection', (socket) => {
         if (playerData.role !== 'game_master') {
           playerData.role = 'game_master'
         }
-        logGameAction(data.roomId, 'host_reconnected', { playerName: nameValidation.name })
+        logGameAction(data.roomId, 'host_reconnected', { playerName: data.playerName })
       }
       
       // Update player's socket ID and mark as connected
@@ -186,35 +158,65 @@ io.on('connection', (socket) => {
       playerData.disconnectedAt = null
       room.players.set(socket.id, playerData)
       
+      socket.join(data.roomId.toUpperCase())
+      
+      // Send personalized data to each player
+      room.players.forEach((player, playerId) => {
+        if (player.connected) {
+          const personalizedGameData = room.getGameData(playerId)
+          io.to(playerId).emit('game-updated', personalizedGameData)
+        }
+      })
+      
+      // Send confirmation to reconnecting player
+      socket.emit('join-success', room.getGameData(socket.id))
+      
       logGameAction(data.roomId, 'player_reconnected', { 
-        playerName: nameValidation.name,
+        playerName: data.playerName,
         role: playerData.role || 'no_role'
       })
-    } else {
-      // NEW PLAYER - only allow during setup
-      if (room.gameState !== 'setup') {
-        socket.emit('error', { 
-          message: 'Игра уже началась, новые игроки не могут присоединиться. Дождитесь окончания текущей игры.' 
-        })
-        return
-      }
-
-      // Проверяем лимит игроков (опционально)
-      const maxPlayers = 20 // Максимум игроков в комнате
-      if (room.players.size >= maxPlayers) {
-        socket.emit('error', { message: `Комната переполнена (максимум ${maxPlayers} игроков)` })
-        return
-      }
-
-      room.addPlayer(socket.id, nameValidation.name)
       
-      logGameAction(data.roomId, 'new_player_joined', { 
-        playerName: nameValidation.name,
-        totalPlayers: room.players.size,
-        formatted: nameValidation.name !== data.playerName
-      })
+      return // ВАЖНО: выходим здесь, не выполняем валидацию ниже
     }
 
+    // Если НЕ переподключение - ТОГДА валидируем имя для нового игрока
+    const existingNames = getExistingPlayerNames(room)
+    const nameValidation = validatePlayerName(data.playerName, existingNames)
+    
+    if (!nameValidation.valid) {
+      // Предлагаем альтернативы если имя занято
+      if (nameValidation.error.includes('уже в комнате')) {
+        const suggestions = suggestAlternativeNames(data.playerName, existingNames)
+        const suggestionText = suggestions.length > 0 
+          ? ` Попробуйте: ${suggestions.join(', ')}`
+          : ''
+        socket.emit('error', { 
+          message: nameValidation.error + suggestionText,
+          suggestions: suggestions
+        })
+      } else {
+        socket.emit('error', { message: nameValidation.error })
+      }
+      return
+    }
+
+    // NEW PLAYER - only allow during setup
+    if (room.gameState !== 'setup') {
+      socket.emit('error', { 
+        message: 'Игра уже началась, новые игроки не могут присоединиться. Дождитесь окончания текущей игры.' 
+      })
+      return
+    }
+
+    // Проверяем лимит игроков
+    const maxPlayers = 20
+    if (room.players.size >= maxPlayers) {
+      socket.emit('error', { message: `Комната переполнена (максимум ${maxPlayers} игроков)` })
+      return
+    }
+
+    room.addPlayer(socket.id, nameValidation.name)
+    
     socket.join(data.roomId.toUpperCase())
     
     // Send personalized data to each player
@@ -225,20 +227,24 @@ io.on('connection', (socket) => {
       }
     })
     
-    // Send a specific confirmation to the joining player
+    // Send confirmation to new player
     socket.emit('join-success', room.getGameData(socket.id))
     
-    // Уведомляем других игроков о присоединении (если это новый игрок)
-    if (!existingPlayer) {
-      room.addChatMessage(null, `🎭 ${nameValidation.name} присоединился к игре`, 'system')
-      
-      // Отправляем системное сообщение всем
-      room.players.forEach((player, playerId) => {
-        if (player.connected && playerId !== socket.id) {
-          io.to(playerId).emit('new-message', room.chat[room.chat.length - 1])
-        }
-      })
-    }
+    // Уведомляем других игроков о присоединении
+    room.addChatMessage(null, `🎭 ${nameValidation.name} присоединился к игре`, 'system')
+    
+    // Отправляем системное сообщение всем кроме нового игрока
+    room.players.forEach((player, playerId) => {
+      if (player.connected && playerId !== socket.id) {
+        io.to(playerId).emit('new-message', room.chat[room.chat.length - 1])
+      }
+    })
+    
+    logGameAction(data.roomId, 'new_player_joined', { 
+      playerName: nameValidation.name,
+      totalPlayers: room.players.size,
+      formatted: nameValidation.name !== data.playerName
+    })
   })
 
   // Добавляем новый обработчик для проверки доступности имени
