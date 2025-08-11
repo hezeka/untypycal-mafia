@@ -440,22 +440,35 @@ io.on('connection', (socket) => {
     const messageType = room.isHost(socket.id) ? 'host' : 'player'
     const commandProcessor = new ChatCommandProcessor(room)
 
+    // ОТЛАДКА: логируем каждое сообщение
+    console.log(`📨 Message from ${player.name}: "${sanitizedMessage}"`)
+    console.log(`🔍 Is command: ${commandProcessor.isCommand(sanitizedMessage)}`)
+
     // Проверяем, является ли сообщение командой
     if (commandProcessor.isCommand(sanitizedMessage)) {
       try {
-        console.log(`🔍 Processing command: ${sanitizedMessage} from ${player.name}`) // ОТЛАДКА
+        console.log(`🔍 Processing command: ${sanitizedMessage} from ${player.name}`)
+        
+        // ОТЛАДКА: парсим команду для логирования
+        const parsed = commandProcessor.parseCommand(sanitizedMessage)
+        console.log(`📊 Parsed command:`, {
+          command: parsed?.command,
+          args: parsed?.args,
+          argsLength: parsed?.args?.length
+        })
         
         const result = await commandProcessor.processCommand(socket.id, sanitizedMessage)
         
-        console.log(`📊 Command result:`, { // ОТЛАДКА
+        console.log(`📊 Command result:`, {
           hasError: !!result.error,
           hasWhisper: !!result.whisperMessage,
-          hasHelp: !!result.helpMessage
+          hasHelp: !!result.helpMessage,
+          error: result.error
         })
         
         if (result.error) {
           socket.emit('command-error', { message: result.error })
-          console.log(`❌ Command error for ${player.name}: ${result.error}`) // ОТЛАДКА
+          console.log(`❌ Command error for ${player.name}: ${result.error}`)
           return
         }
 
@@ -491,8 +504,8 @@ io.on('connection', (socket) => {
           return
         }
       } catch (error) {
-        console.error('💥 Command processing exception:', error) // УЛУЧШЕННАЯ ОТЛАДКА
-        console.error('Stack:', error.stack) // СТЕК ОШИБКИ
+        console.error('💥 Command processing exception:', error)
+        console.error('Stack:', error.stack)
         socket.emit('command-error', { message: 'Ошибка обработки команды: ' + error.message })
       }
 

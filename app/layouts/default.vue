@@ -4,9 +4,9 @@
       <div class="container">
         <div class="header-content">
           <div class="navigation">
-            <div class="logo">
-              <h1>Нетипичная Мафия</h1>
-            </div>
+            <a href="/" class="logo">
+              Нетипичка
+            </a>
             <div class="vr"></div>
             <a @click="showRolesGuide = true" class="nav-link">
               Роли
@@ -163,7 +163,7 @@ onMounted(() => {
     align-items: center;
     padding: 16px 0;
     
-    .logo h1 {
+    .logo {
       margin: 0;
       font-size: 1.5rem;
       font-weight: 700;

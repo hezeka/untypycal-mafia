@@ -847,6 +847,11 @@ const getMissingVoters = () => {
     flex-direction: column;
     gap: 16px;
     text-align: center;
+    align-items: center;
+
+    .game-controls {
+      // width: 100%;
+    }
   }
 }
 
@@ -857,6 +862,13 @@ const getMissingVoters = () => {
   
   .phase-title {
     font-size: 1.5rem !important;
+  }
+  
+  .game-header {
+
+    .game-controls {
+      flex-direction: column;
+    }
   }
 }
 </style>

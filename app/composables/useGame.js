@@ -252,6 +252,24 @@ export const useGame = () => {
         }
       }
     })
+    
+    // ИСПРАВЛЕНИЕ: Обрабатываем шепоты как обычные сообщения чата
+    socket.on('new-whisper', (whisperMessage) => {
+      console.log('📨 Received whisper:', whisperMessage)
+      
+      // Проверяем, нет ли уже такого сообщения
+      const existingWhisper = gameData.chat.find(m => m.id === whisperMessage.id)
+      if (!existingWhisper) {
+        // ДОБАВЛЯЕМ шепот в общий чат как обычное сообщение
+        gameData.chat.push(whisperMessage)
+        
+        // ДОБАВЛЯЕМ ЗВУК - только если шепот не от текущего игрока
+        if (whisperMessage.playerId !== player.id) {
+          playSound('whisper', 0.6)
+        }
+      }
+    })
+    
     socket.on('room-created', ({ roomId, gameData: newGameData }) => {
       console.log('🏠 Room created:', roomId)
       room.id = roomId
@@ -262,19 +280,6 @@ export const useGame = () => {
       player.id = socket.id
       
       updateGameData(newGameData)
-    })
-    
-    socket.on('new-whisper', (whisperMessage) => {
-      // Существующий код
-      const existingWhisper = gameData.chat.find(m => m.id === whisperMessage.id)
-      if (!existingWhisper) {
-        gameData.chat.push(whisperMessage)
-        
-        // ДОБАВЛЯЕМ ЗВУК - только если шепот не от текущего игрока
-        if (whisperMessage.playerId !== player.id) {
-          playSound('whisper', 0.6)
-        }
-      }
     })
 
     socket.on('join-success', (newGameData) => {
@@ -392,22 +397,6 @@ export const useGame = () => {
       }
     })
 
-    socket.on('new-message', (message) => {
-      // Avoid duplicating messages - check if message already exists
-      const existingMessage = gameData.chat.find(m => m.id === message.id)
-      if (!existingMessage) {
-        gameData.chat.push(message)
-      }
-    })
-
-    socket.on('new-whisper', (whisperMessage) => {
-      // Добавляем шепот в чат
-      const existingWhisper = gameData.chat.find(m => m.id === whisperMessage.id)
-      if (!existingWhisper) {
-        gameData.chat.push(whisperMessage)
-      }
-    })
-
     socket.on('whisper-error', ({ message }) => {
       // Показываем ошибку шепота
       alert(`Ошибка шепота: ${message}`)
@@ -454,14 +443,6 @@ export const useGame = () => {
       // Redirect to home page
       if (typeof window !== 'undefined') {
         window.location.href = '/'
-      }
-    })
-
-    socket.on('new-whisper', (whisperMessage) => {
-      // Добавляем шепот в чат
-      const existingWhisper = gameData.chat.find(m => m.id === whisperMessage.id)
-      if (!existingWhisper) {
-        gameData.chat.push(whisperMessage)
       }
     })
 
@@ -512,7 +493,8 @@ export const useGame = () => {
       id: newGameData.id,
       gameState: newGameData.gameState,
       playersCount: newGameData.players?.length || 0,
-      selectedRolesCount: newGameData.selectedRoles?.length || 0
+      selectedRolesCount: newGameData.selectedRoles?.length || 0,
+      chatLength: newGameData.chat?.length || 0
       // НЕ логируем массив players с ролями
     })
     

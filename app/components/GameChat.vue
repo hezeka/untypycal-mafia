@@ -283,13 +283,21 @@ const autoCompleteCommand = () => {
   }
 }
 
+// ИЗМЕНЕНИЕ: упрощенная логика - очищаем поле сразу, восстанавливаем только при ошибке
 const sendMessage = () => {
   if (!newMessage.value.trim()) return
   
   // Очищаем предыдущую ошибку
   commandError.value = null
   
-  sendGameMessage(newMessage.value.trim())
+  // Сохраняем сообщение для возможного восстановления при ошибке
+  lastSentMessage.value = newMessage.value.trim()
+  
+  // Отправляем сообщение
+  sendGameMessage(lastSentMessage.value)
+  
+  // ИЗМЕНЕНИЕ: Очищаем поле сразу после отправки
+  // Если будет ошибка команды - восстановим сообщение в обработчике ошибки
   newMessage.value = ''
 }
 
@@ -309,23 +317,37 @@ const scrollToBottom = () => {
   })
 }
 
+// Флаг и переменная для восстановления сообщения при ошибке
+const lastSentMessage = ref('')
+
 // Слушаем ошибки команд
 onMounted(() => {
   if (socket) {
     socket.on('command-error', (data) => {
       commandError.value = data.message
-      // Автоматически скрываем ошибку через 5 секунд
+      // ИЗМЕНЕНИЕ: При ошибке команды восстанавливаем последнее отправленное сообщение
+      newMessage.value = lastSentMessage.value
+      lastSentMessage.value = '' // Очищаем сохраненное сообщение
+      
+      // Автоматически скрываем ошибку через 10 секунд
       setTimeout(() => {
         commandError.value = null
-      }, 5000)
+      }, 10000)
     })
     
     socket.on('new-whisper', (whisperMessage) => {
       // Добавляем шепот в чат (уже обработано в useGame)
       scrollToBottom()
     })
+    
+    socket.on('new-message', (message) => {
+      // Просто прокручиваем чат при новых сообщениях
+      scrollToBottom()
+    })
   }
 })
+
+
 
 watch(messages, () => {
   scrollToBottom()
