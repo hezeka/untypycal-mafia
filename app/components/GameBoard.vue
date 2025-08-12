@@ -663,7 +663,7 @@ const getMissingVoters = () => {
       &.dead {
         opacity: 0.5;
         filter: grayscale(100%);
-        pointer-events: none;
+        // pointer-events: none;
       }
       
       &.protected {
