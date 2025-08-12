@@ -122,6 +122,22 @@ const showSuggestions = ref(false)
 
 const messages = computed(() => chatMessages.value)
 
+const getMessageText = () => {
+  return newMessage.value
+}
+
+const setMessageText = (text) => {
+  newMessage.value = text
+  nextTick(() => {
+    messageInput.value?.focus()
+  })
+}
+
+// Экспортируем функции наружу
+defineExpose({
+  getMessageText,
+  setMessageText
+})
 // Helper function to check if role is werewolf-related
 const isWerewolfRole = (role) => {
   return role && (
@@ -379,7 +395,7 @@ onMounted(() => {
     overflow-y: auto;
     padding: 8px 0;
     margin: 8px 0;
-    max-height: 400px;
+    max-height: 600px;
     
     &::-webkit-scrollbar {
       width: 4px;

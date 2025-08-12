@@ -137,15 +137,24 @@
                 <div v-if="player.artifact" class="artifact-indicator">
                   Артефакт
                 </div>
-                
-                <!-- Admin Controls -->
-                <div v-if="isHost" class="admin-controls">
-                  <button 
+                <div class="admin-controls">
+                  <button
+                    @click="whisperToPlayer(player.name)"
+                    class="btn btn-secondary btn-tiny"
+                  >
+                    📩
+                  </button>
+                  <button
+                    v-if="isHost"
                     @click="showAdminPanel = showAdminPanel === player.id ? null : player.id"
                     class="btn btn-secondary btn-tiny"
                   >
                     ⚙️
                   </button>
+                </div>
+                
+                <!-- Admin Controls -->
+                <div v-if="isHost" class="admin-controls">
                   
                   <div v-if="showAdminPanel === player.id" class="admin-panel">
                     <button @click="adminAction(player.alive ? 'kill' : 'revive', player.id)" class="btn btn-danger btn-tiny">
@@ -180,7 +189,7 @@
 
       <!-- Game Chat -->
       <div class="chat-section">
-        <GameChat />
+        <GameChat ref="chatRef" />
       </div>
 
       <!-- Host Controls -->
@@ -415,6 +424,15 @@ const getMissingVoters = () => {
   // Это приблизительная логика, так как точную информацию о том, кто не проголосовал, 
   // сервер не отправляет из соображений безопасности
   return `${votingStats.value.total - votingStats.value.submitted} игроков`
+}
+
+// Ссылка на компонент чата
+const chatRef = ref(null)
+
+// Функция для быстрого шепота игроку
+const whisperToPlayer = (playerName) => {
+  const currentText = chatRef.value?.getMessageText() || ''
+  chatRef.value?.setMessageText(`/ш ${playerName} ${currentText}`)
 }
 </script>
 
@@ -715,7 +733,7 @@ const getMissingVoters = () => {
           content: '(Вы)';
           position: absolute;
           top: 8px;
-          right: 8px;
+          left: 8px;
           font-size: 10px;
           color: #667eea;
           background: rgba(102, 126, 234, 0.2);
