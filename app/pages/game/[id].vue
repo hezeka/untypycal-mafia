@@ -134,12 +134,14 @@
                   :class="{ 
                     'is-host': player.id === hostId,
                     'is-disconnected': !player.connected,
-                    'is-self': player.id === currentPlayerId
+                    'is-self': player.id === currentPlayerId,
+                    'is-speaking': isSpeaking(player.id)
                   }"
                 >
                   <div class="player-main-info">
                     <span class="player-name">
                       {{ player.name }}
+                      <span v-if="!player.connected" class="disconnected-badge">😴</span>
                       <span v-if="!player.connected" class="disconnected-badge">😴</span>
                     </span>
                     <span v-if="player.id === hostId" class="host-badge">Ведущий</span>
@@ -207,8 +209,12 @@ const {
   joinRoom: joinGameRoom,
   selectRole,
   removeRole,
-  startGame: startNewGame
+  startGame: startNewGame,
+  voiceActivity,
+  sendVoiceActivity
 } = useGame()
+
+const { initVoiceDetection, stopVoiceDetection, isSupported } = useVoiceActivity()
 
 const { socket } = useSocket()
 
@@ -244,6 +250,10 @@ const canJoin = computed(() => {
          nameValidation.valid && 
          !nameValidation.checking
 })
+
+const isSpeaking = (playerId) => {
+  return voiceActivity.speakingPlayers.has(playerId)
+}
 
 // Валидация имени в реальном времени
 const validateNameInput = debounce(() => {
@@ -386,9 +396,26 @@ const startGame = () => {
 }
 
 // Initialize socket listeners and try to reconnect to room if possible
-onMounted(() => {
+onMounted(async () => {
   initSocketListeners()
   setupSocketListeners()
+  
+  // Инициализируем голосовую активность
+  if (process.client) {
+    try {
+      const success = await initVoiceDetection((isActive) => {
+        sendVoiceActivity(isActive)
+      })
+      
+      if (success) {
+        console.log('🎤 Voice activity detection initialized')
+      } else {
+        console.log('🔇 Voice activity not available')
+      }
+    } catch (error) {
+      console.warn('Voice detection initialization failed:', error)
+    }
+  }
   
   // Try to reconnect to the room from URL
   const urlRoomId = roomId.value
@@ -456,6 +483,7 @@ onUnmounted(() => {
   if (redirectTimeout) {
     clearTimeout(redirectTimeout)
   }
+  stopVoiceDetection()
 })
 
 // Meta
@@ -693,6 +721,7 @@ definePageMeta({
       gap: 4px;
       padding: 8px 0;
       border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+      transition: 0.2s;
       
       &:last-child {
         border-bottom: none;
@@ -721,6 +750,16 @@ definePageMeta({
         
         .player-name {
           color: rgba(255, 255, 255, 0.5);
+        }
+      }
+  
+      &.is-speaking {
+        background: rgba(0, 255, 136, 0.03);
+        border-left: 3px solid #2bb173;
+        padding-left: 12px;
+
+        .player-name {
+          color: #1ecd7b !important;
         }
       }
       
@@ -770,6 +809,24 @@ definePageMeta({
       &.brown { border-left: 3px solid #8b4513; }
       &.purple { border-left: 3px solid #9b59b6; }
     }
+  }
+}
+
+@keyframes voiceGlow {
+  0%, 100% {
+    text-shadow: 0 0 5px rgba(0, 255, 136, 0.5);
+  }
+  50% {
+    text-shadow: 0 0 10px rgba(0, 255, 136, 0.8);
+  }
+}
+
+@keyframes voiceBounce {
+  0% {
+    transform: scale(1);
+  }
+  100% {
+    transform: scale(1.1);
   }
 }
 

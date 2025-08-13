@@ -110,6 +110,30 @@ export class ChatCommandProcessor {
       return this.processHostWhisper(sender, message, messageType)
     }
 
+    // НОВОЕ: Ночные ограничения для всех игроков
+    if (this.room.gameState === 'night' && messageType === 'player') {
+      // Если игрок не оборотень, он может писать только ведущему
+      if (!this.room.canSeeWerewolfRoles(sender.role)) {
+        // Проверяем, что цель - действительно ведущий
+        if (target !== 'ведущий' && target !== 'host') {
+          return {
+            error: 'Ночью вы можете писать только ведущему. Используйте: /ш ведущий <сообщение>'
+          }
+        }
+      } else {
+        // Если игрок оборотень, он может шептать только ведущему или другим оборотням
+        if (target !== 'ведущий' && target !== 'host') {
+          // Проверяем, является ли цель оборотнем (для личного шепота)
+          const targetPlayer = this.findPlayerByName(target)
+          if (targetPlayer && !this.room.isWerewolfRole(targetPlayer.role)) {
+            return {
+              error: 'Ночью оборотни могут шептать только ведущему или другим оборотням. Для общения с командой используйте обычный чат.'
+            }
+          }
+        }
+      }
+    }
+
     // Сначала проверяем группы
     if (this.isGroupName(target)) {
       return this.processGroupWhisper(sender, target, message, messageType)
@@ -187,6 +211,29 @@ export class ChatCommandProcessor {
 
   // Обрабатывает групповой шепот
   processGroupWhisper(sender, groupName, message, messageType) {
+    // Дополнительные ночные ограничения для групповых шепотов
+    if (this.room.gameState === 'night' && messageType === 'player') {
+      const normalizedGroup = groupName.toLowerCase()
+      
+      // Оборотни не могут шептать группе деревня ночью
+      if (this.room.canSeeWerewolfRoles(sender.role)) {
+        if (['деревня', 'жители', 'village', 'villagers'].includes(normalizedGroup)) {
+          return {
+            error: 'Ночью оборотни не могут шептать группе деревня. Используйте обычный чат для общения с командой или /ш ведущий'
+          }
+        }
+      }
+      
+      // Не-оборотни не могут шептать группе оборотни ночью
+      if (!this.room.canSeeWerewolfRoles(sender.role)) {
+        if (['оборотни', 'волки', 'wolves', 'werewolves'].includes(normalizedGroup)) {
+          return {
+            error: 'Ночью вы не можете шептать группе оборотни. Используйте /ш ведущий'
+          }
+        }
+      }
+    }
+
     // Проверяем права отправки в группу
     if (!this.room.canPlayerMessageGroup(sender, groupName)) {
       const groupDisplayName = this.room.getGroupDisplayName(groupName)
@@ -418,9 +465,9 @@ export class ChatCommandProcessor {
     // Во время дня можно шептать
     if (this.room.gameState === 'day') return true
     
-    // Ночью только оборотни могут шептать
+    // Ночью оборотни могут шептать, а все остальные могут писать только ведущему
     if (this.room.gameState === 'night') {
-      return this.room.canSeeWerewolfRoles(sender.role)
+      return true // Разрешаем шепот всем ночью (ограничение будет в processWhisperCommand)
     }
     
     // Во время голосования шепот запрещен

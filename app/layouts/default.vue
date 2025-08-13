@@ -33,6 +33,15 @@
               {{ soundsEnabled ? '🔊' : '🔇' }}
             </button>
             
+            <!-- Кнопка микрофона -->
+            <button 
+              @click="toggleMicrophone" 
+              class="btn btn-secondary btn-small mic-toggle"
+              :title="microphoneEnabled ? 'Выключить микрофон' : 'Включить микрофон'"
+            >
+              {{ microphoneEnabled ? '🎤' : '🎤❌' }}
+            </button>
+            
             <button @click="leaveRoom" class="btn btn-secondary btn-small">
               Покинуть комнату
             </button>
@@ -103,6 +112,8 @@
 <script setup>
 const { isInRoom, room, gameData, player, isHost } = useGame()
 const { isConnected } = useSocket()
+const { soundsEnabled, toggleSounds } = useSounds()
+const { microphoneEnabled, toggleMicrophone } = useVoiceActivity()
 
 const showRules = ref(false)
 const showRolesGuide = ref(false)
@@ -391,6 +402,13 @@ onMounted(() => {
   .header-btn {
     font-size: 11px !important;
     padding: 6px 12px !important;
+  }
+  
+  .sound-toggle, .mic-toggle {
+    min-width: 50px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
   }
 }
 </style>

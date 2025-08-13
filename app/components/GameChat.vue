@@ -52,26 +52,26 @@
       <details class="help-details">
         <summary class="help-summary">💡 Команды чата</summary>
         <div class="help-content">
-          <div class="help-item">
+          <div class="help-item" @click="setMessageText(`/ш `)">
             <code>/ш &lt;игрок&gt; &lt;текст&gt;</code>
             <span>Личное сообщение игроку</span>
           </div>
-          <div class="help-item">
+          <div class="help-item" @click="setMessageText(`/ш `)">
             <code>/ш &lt;группа&gt; &lt;текст&gt;</code>
             <span>Сообщение группе игроков</span>
           </div>
           <!-- ДОБАВЛЯЕМ: Шепот ведущему (только для не-ведущих) -->
-          <div v-if="!isHost" class="help-item">
+          <div v-if="!isHost" class="help-item" @click="setMessageText(`/ш ведущий `)">
             <code>/ш ведущий &lt;текст&gt;</code>
             <span>Сообщение ведущему</span>
           </div>
-          <div class="help-item">
+          <div class="help-item" @click="setMessageText(`/помощь `)">
             <code>/помощь</code>
             <span>Показать все команды</span>
           </div>
           <div class="help-groups" v-if="availableGroups.length > 0">
             <strong>Доступные группы:</strong>
-            <span v-for="group in availableGroups" :key="group" class="group-tag">{{ group }}</span>
+            <span v-for="group in availableGroups" :key="group" class="group-tag" @click="setMessageText(`/ш ${group} `)">{{ group }}</span>
             <!-- ДОБАВЛЯЕМ: Ведущий в список целей -->
             <span v-if="!isHost" class="group-tag host-tag">ведущий</span>
           </div>
@@ -164,9 +164,9 @@ const canSendMessage = computed(() => {
   // During setup and day phases, all players can chat
   if (gameState === 'setup' || gameState === 'day') return true
   
-  // During night phase, only werewolves can chat
+  // During night phase: werewolves can chat normally, others can only whisper to host
   if (gameState === 'night') {
-    return isWerewolfRole(player.role)
+    return true // All can try to send messages, server will handle restrictions
   }
   
   // During voting phase, no one can chat
@@ -183,9 +183,9 @@ const chatPlaceholder = computed(() => {
   if (gameState === 'day') return 'Обсуждение или команда (/ш игрок текст)...'
   if (gameState === 'night') {
     if (isWerewolfRole(player.role)) {
-      return 'Чат команды оборотней или /ш...'
+      return 'Чат команды оборотней или шепот (/ш)...'
     }
-    return 'Ночью чат недоступен'
+    return 'Ночью доступен только шепот ведущему: /ш ведущий <текст>'
   }
   if (gameState === 'voting') return 'Во время голосования чат отключен'
   
@@ -580,6 +580,7 @@ onMounted(() => {
           align-items: center;
           margin-bottom: 4px;
           font-size: 10px;
+          cursor: pointer;
           
           code {
             background: rgba(255, 255, 255, 0.1);
@@ -615,6 +616,7 @@ onMounted(() => {
             border-radius: 3px;
             margin-right: 4px;
             font-size: 9px;
+            cursor: pointer;
           }
           .host-tag {
             background: rgba(102, 126, 234, 0.3);
@@ -674,6 +676,12 @@ onMounted(() => {
       flex: 1;
       font-size: 13px;
       padding: 8px 12px;
+
+      &[disabled] {
+        color: #ffffff64;
+        cursor: not-allowed;
+        user-select: none;
+      }
       
       &:focus {
         border-color: #667eea;

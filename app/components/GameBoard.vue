@@ -117,7 +117,8 @@
                 disconnected: !player.connected,
                 werewolf: player.showRole && isWerewolfRole(player.role),
                 'is-self': player.isSelf,
-                'can-vote': gameState === 'voting' && !isHost && player.alive
+                'can-vote': gameState === 'voting' && !isHost && player.alive,
+                'is-speaking': isSpeaking(player.id)  // Добавить класс
               }"
               @click="votePlayer(player.id)"
             >
@@ -263,8 +264,13 @@ const {
   sendMessage,
   adminAction,
   nextPhase: goToNextPhase,
-  setTimer
+  restartGame: restartNewGame,
+  setTimer,
+  voiceActivity,
+  sendVoiceActivity
 } = useGame()
+
+const { initVoiceDetection, stopVoiceDetection, isSupported } = useVoiceActivity()
 
 const votedPlayer = ref(null)
 const showAdminPanel = ref(null)
@@ -293,6 +299,10 @@ const timerDisplay = computed(() => {
   const seconds = timer.value % 60
   return `${minutes}:${seconds.toString().padStart(2, '0')}`
 })
+
+const isSpeaking = (playerId) => {
+  return voiceActivity.speakingPlayers.has(playerId)
+}
 
 // Helper function to check if role is werewolf-related
 const isWerewolfRole = (role) => {
@@ -390,7 +400,7 @@ const endVoting = () => {
 
 const restartGame = () => {
   if (confirm('Начать новую игру? Все данные текущей игры будут потеряны.')) {
-    goToNextPhase() // This will cycle to setup if we're in ended state
+    restartNewGame() // Use the proper restart function
   }
 }
 
@@ -434,6 +444,25 @@ const whisperToPlayer = (playerName) => {
   const currentText = chatRef.value?.getMessageText() || ''
   chatRef.value?.setMessageText(`/ш ${playerName} ${currentText}`)
 }
+
+// Инициализация голосовой активности при монтировании
+onMounted(async () => {
+  // Инициализируем детекцию голоса если поддерживается
+  if (process.client) {
+    const success = await initVoiceDetection((isActive) => {
+      sendVoiceActivity(isActive)
+    })
+    
+    if (success) {
+      console.log('🎤 Voice activity detection enabled')
+    }
+  }
+})
+
+// Очистка при размонтировании
+onUnmounted(() => {
+  stopVoiceDetection()
+})
 </script>
 
 <style lang="less" scoped>
@@ -663,6 +692,13 @@ const whisperToPlayer = (playerName) => {
       text-align: center;
       transition: all 0.3s ease;
       position: relative;
+
+      &.is-speaking {
+
+        .player-initial {
+          box-shadow: 0 0 0 2px rgb(34 34 34), 0 0 0 6px #00ff8878, 0 0 15px rgba(0, 255, 136, 0.6);
+        }
+      }
       
       &.can-vote {
         cursor: pointer;
@@ -757,6 +793,16 @@ const whisperToPlayer = (playerName) => {
           font-size: 20px;
           font-weight: bold;
           margin: 0 auto;
+          transition: 0.2s;
+        }
+
+        .voice-indicator {
+          position: absolute;
+          top: -8px;
+          left: -8px;
+          font-size: 16px;
+          animation: voiceBounce 0.6s infinite alternate;
+          filter: drop-shadow(0 0 3px rgba(0, 255, 136, 0.8));
         }
         
         .vote-count {
@@ -848,6 +894,26 @@ const whisperToPlayer = (playerName) => {
         margin-top: 4px;
       }
     }
+  }
+}
+
+@keyframes voicePulse {
+  0%, 100% {
+    box-shadow: 0 0 15px rgba(0, 255, 136, 0.6);
+    border-color: #00ff88;
+  }
+  50% {
+    box-shadow: 0 0 25px rgba(0, 255, 136, 0.9);
+    border-color: #00ff66;
+  }
+}
+
+@keyframes voiceBounce {
+  0% {
+    transform: scale(1) rotate(-5deg);
+  }
+  100% {
+    transform: scale(1.2) rotate(5deg);
   }
 }
 

@@ -11,7 +11,7 @@ export function canSendMessage(room, player, messageType) {
   // During day phase, all players can chat
   if (room.gameState === 'day') return true
   
-  // During night phase, only werewolves can chat with each other
+  // During night phase, only werewolves can send regular chat messages
   if (room.gameState === 'night') {
     return room.canSeeWerewolfRoles(player.role)
   }

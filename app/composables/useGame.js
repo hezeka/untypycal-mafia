@@ -8,6 +8,11 @@ const player = reactive({
   role: null
 })
 
+const voiceActivity = reactive({
+  speakingPlayers: new Set(), // ID игроков, которые говорят
+  enabled: false
+})
+
 const room = reactive({
   id: null,
   hostId: null,
@@ -267,6 +272,16 @@ export const useGame = () => {
         if (whisperMessage.playerId !== player.id) {
           playSound('whisper', 0.6)
         }
+      }
+    })
+
+    socket.on('voice-activity-update', ({ playerId, isActive, playerName }) => {
+      if (isActive) {
+        voiceActivity.speakingPlayers.add(playerId)
+        // console.log(`🎤 ${playerName} начал говорить`)
+      } else {
+        voiceActivity.speakingPlayers.delete(playerId)
+        // console.log(`🔇 ${playerName} перестал говорить`)
       }
     })
     
@@ -529,6 +544,50 @@ export const useGame = () => {
     player.id = null
   }
 
+  // Добавить метод для отправки голосовой активности с throttling:
+  let lastVoiceActivitySent = 0
+  let lastVoiceState = null
+  let voiceActivityTimeout = null
+  const VOICE_ACTIVITY_THROTTLE = 400 // 1 секунда
+  
+  const sendVoiceActivity = (isActive) => {
+    if (!socket || !room.id) return
+    
+    const now = Date.now()
+    
+    // Если состояние не изменилось, игнорируем
+    if (lastVoiceState === isActive) return
+    
+    // Сохраняем новое состояние
+    lastVoiceState = isActive
+    
+    // Очищаем предыдущий таймер
+    if (voiceActivityTimeout) {
+      clearTimeout(voiceActivityTimeout)
+      voiceActivityTimeout = null
+    }
+    
+    // Если прошло достаточно времени, отправляем сразу
+    if (now - lastVoiceActivitySent >= VOICE_ACTIVITY_THROTTLE) {
+      lastVoiceActivitySent = now
+      socket.emit('voice-activity', { 
+        roomId: room.id, 
+        isActive 
+      })
+    } else {
+      // Иначе ставим таймер для отправки позже
+      const remainingTime = VOICE_ACTIVITY_THROTTLE - (now - lastVoiceActivitySent)
+      voiceActivityTimeout = setTimeout(() => {
+        lastVoiceActivitySent = Date.now()
+        socket.emit('voice-activity', { 
+          roomId: room.id, 
+          isActive: lastVoiceState 
+        })
+        voiceActivityTimeout = null
+      }, remainingTime)
+    }
+  }
+
   // Actions
   const createRoom = (playerName) => {
     player.id = socket.id
@@ -556,6 +615,11 @@ export const useGame = () => {
   const startGame = () => {
     if (!isHost.value) return
     socket.emit('start-game', { roomId: room.id })
+  }
+
+  const restartGame = () => {
+    if (!isHost.value) return
+    socket.emit('restart-game', { roomId: room.id })
   }
 
   const changePhase = ({ gameState, currentPhase }) => {
@@ -608,7 +672,10 @@ export const useGame = () => {
     selectedRoleObjects,
     chatMessages,
 
+    voiceActivity: readonly(voiceActivity),
+
     // Methods
+    sendVoiceActivity,
     initSocketListeners,
     updateGameData,
     clearRoom,
@@ -617,6 +684,7 @@ export const useGame = () => {
     selectRole,
     removeRole,
     startGame,
+    restartGame,
     changePhase,
     sendMessage,
     votePlayer,

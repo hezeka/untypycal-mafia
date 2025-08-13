@@ -388,6 +388,42 @@ io.on('connection', (socket) => {
     })
   })
 
+  // Новый обработчик для перезапуска игры
+  socket.on('restart-game', (data) => {
+    const room = gameRooms.get(data.roomId)
+    if (!room) return
+
+    if (!room.isHost(socket.id)) {
+      socket.emit('error', { message: 'Только ведущий может перезапустить игру' })
+      return
+    }
+
+    // Принудительно сбрасываем игру в начальное состояние
+    room.players.forEach(player => {
+      if (player.role !== 'game_master') {
+        player.role = null
+        player.alive = true
+        player.protected = false
+        player.votes = 0
+      }
+    })
+    room.selectedRoles = []
+    room.chat = []
+    room.resetVoting()
+    room.gameState = 'setup'
+    room.currentPhase = null
+    room.timer = null
+
+    // Уведомляем всех игроков об обновлении
+    room.players.forEach(player => {
+      io.to(player.id).emit('game-updated', room.getGameData(player.id))
+    })
+
+    logGameAction(data.roomId, 'game_restarted', {
+      hostName: room.players.get(socket.id)?.name
+    })
+  })
+
   socket.on('change-phase', (data) => {
     const room = gameRooms.get(data.roomId)
     if (!room || !room.isHost(socket.id)) {
@@ -533,6 +569,58 @@ io.on('connection', (socket) => {
       recipientsCount: recipients.length
     })
   })
+
+  socket.on('voice-activity', (data) => {
+    const room = gameRooms.get(data.roomId)
+    if (!room) return
+
+    const player = room.players.get(socket.id)
+    if (!player) return
+
+    // Проверяем, может ли игрок говорить в текущей фазе
+    if (!canPlayerSpeak(room, player)) {
+      return // Игнорируем активность если говорить нельзя
+    }
+
+    // Отправляем обновление всем игрокам в комнате
+    room.players.forEach((roomPlayer, playerId) => {
+      if (roomPlayer.connected) {
+        io.to(playerId).emit('voice-activity-update', {
+          playerId: socket.id,
+          playerName: player.name,
+          isActive: data.isActive
+        })
+      }
+    })
+
+    // logGameAction(data.roomId, 'voice_activity', {
+    //   player: player.name,
+    //   isActive: data.isActive,
+    //   gameState: room.gameState
+    // })
+  })
+
+    // Функция проверки прав на речь
+  function canPlayerSpeak(room, player) {
+    // Ведущий может говорить всегда
+    if (room.isHost(player.id)) return true
+    
+    // Во время подготовки все могут говорить
+    if (room.gameState === 'setup') return true
+    
+    // Во время дня все могут говорить
+    if (room.gameState === 'day') return true
+    
+    // Ночью только оборотни могут говорить
+    if (room.gameState === 'night') {
+      return room.canSeeWerewolfRoles(player.role)
+    }
+    
+    // Во время голосования никто не может говорить
+    if (room.gameState === 'voting') return false
+    
+    return false
+  }
 
   // СИСТЕМА ГОЛОСОВАНИЯ
   socket.on('vote-player', (data) => {
