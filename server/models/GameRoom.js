@@ -9,6 +9,7 @@ export class GameRoom {
     this.gameState = 'setup' // setup, night, day, voting, ended
     this.currentPhase = null
     this.timer = null // Timer in seconds
+    this.timerInterval = null // Interval для обратного отсчета
     this.gameData = {
       centerCards: [],
       artifacts: [],
@@ -28,7 +29,8 @@ export class GameRoom {
       protected: false,
       artifact: null,
       votes: 0,
-      connected: true
+      connected: true,
+      muted: false
     }
     
     // If this is the host, assign game_master role
@@ -53,6 +55,55 @@ export class GameRoom {
     const isHostRequesting = this.isHost(requestingSocketId)
     const gameEnded = this.gameState === 'ended'
     
+    // Фильтруем чат для конкретного игрока
+    const filteredChat = this.chat.filter(message => {
+      // Системные сообщения видят все
+      if (message.type === 'system' || message.type === 'player') {
+        return true
+      }
+      
+      // Шепоты видят только участники
+      if (message.type === 'whisper' || message.type === 'group_whisper') {
+        // Ведущий видит все сообщения
+        if (isHostRequesting) {
+          return true
+        }
+        
+        // Автор сообщения всегда видит свое сообщение
+        // Сравниваем по имени, так как socket ID может измениться при переподключении
+        const requestingPlayer = this.players.get(requestingSocketId)
+        if (requestingPlayer && message.playerName === requestingPlayer.name) {
+          return true
+        }
+        
+        // Для личных шепотов - проверяем целевого игрока
+        // Сравниваем по имени цели, так как targetPlayerId может устареть при переподключении
+        if (message.type === 'whisper') {
+          // Проверяем и по ID (на случай если переподключения не было), и по имени
+          if (message.targetPlayerId === requestingSocketId) {
+            return true
+          }
+          // Дополнительно проверяем по имени цели
+          if (requestingPlayer && message.targetPlayerName === requestingPlayer.name) {
+            return true
+          }
+          // Специальный случай для шепотов ведущему
+          if (message.targetPlayerName === 'Ведущий' && this.isHost(requestingSocketId)) {
+            return true
+          }
+        }
+        
+        // Для групповых шепотов нужно проверить, входит ли игрок в группу
+        if (message.type === 'group_whisper') {
+          return this.isPlayerInGroup(requestingSocketId, message.targetGroup)
+        }
+        
+        return false
+      }
+      
+      return true
+    })
+
     // Базовые данные игры
     const baseData = {
       id: this.id,
@@ -62,7 +113,7 @@ export class GameRoom {
       currentPhase: this.currentPhase,
       timer: this.timer,
       gameData: this.gameData,
-      chat: this.chat
+      chat: filteredChat
     }
     
     // Безопасная версия игроков - ИСКЛЮЧАЕМ ВЕДУЩЕГО ИЗ СПИСКА для обычных игроков
@@ -115,7 +166,8 @@ export class GameRoom {
     return {
       ...baseData,
       players: safePlayers,
-      voting: votingData
+      voting: votingData,
+      roles: this.roles // Добавляем конфигурацию ролей с подсказками
     }
   }
 
@@ -264,6 +316,17 @@ export class GameRoom {
       default:
         return []
     }
+  }
+
+  // Проверяет, входит ли игрок в определенную группу
+  isPlayerInGroup(playerId, groupName) {
+    const player = this.players.get(playerId)
+    if (!player || player.role === 'game_master') {
+      return false
+    }
+    
+    const groupMembers = this.getGroupMembers(groupName)
+    return groupMembers.some(member => member.id === playerId)
   }
 
   getGroupDisplayName(groupName) {
@@ -480,5 +543,41 @@ export class GameRoom {
       connected: p.connected,
       hasRole: !!p.role
     }))
+  }
+
+  // Методы для работы с таймером
+  startTimer(seconds, onTick = null, onEnd = null) {
+    this.stopTimer() // Останавливаем предыдущий таймер если есть
+    
+    this.timer = Math.max(0, parseInt(seconds) || 0)
+    console.log(`⏰ Starting timer for ${this.timer} seconds in room ${this.id}`)
+    
+    if (this.timer <= 0) return
+    
+    this.timerInterval = setInterval(() => {
+      this.timer--
+      
+      // Вызываем callback для обновления клиентов
+      if (onTick) onTick(this.timer)
+      
+      // Если время вышло
+      if (this.timer <= 0) {
+        console.log(`⏰ Timer ended for room ${this.id}`)
+        this.stopTimer()
+        if (onEnd) onEnd()
+      }
+    }, 1000)
+  }
+
+  stopTimer() {
+    if (this.timerInterval) {
+      clearInterval(this.timerInterval)
+      this.timerInterval = null
+    }
+    this.timer = null
+  }
+
+  setTimer(seconds) {
+    this.timer = Math.max(0, parseInt(seconds) || 0)
   }
 }

@@ -2,7 +2,17 @@
   <div class="game-page">
     <div class="container">
       <!-- Room not found or loading - показываем ПЕРВЫМ -->
-      <div v-if="!isInRoom" class="loading-section">
+      <div v-if="!isInRoom && !hasUsername" class="loading-section">
+        <div class="card text-center">
+          <div class="card-header">Необходимо установить никнейм</div>
+          <p class="text-muted mb-3">Для участия в игре необходимо установить никнейм</p>
+          <NuxtLink to="/" class="btn btn-primary">
+            Вернуться на главную
+          </NuxtLink>
+        </div>
+      </div>
+      
+      <div v-else-if="!isInRoom && hasUsername" class="loading-section">
         <div class="card text-center">
           <div class="card-header">Присоединение к комнате {{ route.params.id }}</div>
           
@@ -110,7 +120,7 @@
               </div>
               <div class="roles-grid">
                 <RoleCard
-                  v-for="(role, roleId) in roles"
+                  v-for="(role, roleId) in availableRoles"
                   :key="roleId"
                   :role="role"
                   :role-id="roleId"
@@ -125,7 +135,40 @@
           <div class="game-sidebar">
             <!-- Players List -->
             <div class="card mb-2">
-              <div class="card-header">Игроки</div>
+              <div class="card-header">
+                Игроки
+                <span class="player-count-badge">{{ nonHostPlayers.length }}</span>
+              </div>
+              
+              <!-- Player management controls (Host only) -->
+              <div v-if="false && isHost && nonHostPlayers.length > 0" class="player-management-controls">
+                <div class="management-actions">
+                  <button 
+                    @click="kickAllDisconnected"
+                    class="btn btn-outline btn-xs"
+                    :disabled="!hasDisconnectedPlayers"
+                    title="Удалить всех отключившихся"
+                  >
+                    🧹 Очистить
+                  </button>
+                  <button 
+                    @click="muteAllPlayers"
+                    class="btn btn-outline btn-xs"
+                    :disabled="allPlayersMuted"
+                    title="Замутить всех"
+                  >
+                    🔇 Мут
+                  </button>
+                  <button 
+                    @click="unmuteAllPlayers"
+                    class="btn btn-outline btn-xs"
+                    :disabled="!anyPlayersMuted"
+                    title="Размутить всех"
+                  >
+                    🔊 Размут
+                  </button>
+                </div>
+              </div>
               <div class="players-list">
                 <div 
                   v-for="player in players" 
@@ -142,32 +185,85 @@
                     <span class="player-name">
                       {{ player.name }}
                       <span v-if="!player.connected" class="disconnected-badge">😴</span>
-                      <span v-if="!player.connected" class="disconnected-badge">😴</span>
                     </span>
-                    <span v-if="player.id === hostId" class="host-badge">Ведущий</span>
+                    <div class="player-badges">
+                      <span v-if="player.id === hostId" class="host-badge">Ведущий</span>
+                      <!-- Player management controls (only for host and not for themselves) -->
+                      <div v-if="isHost && player.id !== hostId && player.id !== currentPlayerId" class="player-controls">
+                        <button 
+                          @click="kickPlayer(player.id)"
+                          class="btn-player-action btn-kick"
+                          title="Выгнать игрока"
+                        >Выгнать</button>
+                        <!-- <button 
+                          @click="togglePlayerMute(player.id)"
+                          class="btn-player-action btn-mute"
+                          :class="{ 'muted': player.muted }"
+                          :title="player.muted ? 'Разрешить чат' : 'Запретить чат'"
+                        >
+                          {{ player.muted ? '🔊' : '🔇' }}
+                        </button> -->
+                      </div>
+                    </div>
                   </div>
                   
                   <!-- Show role if it's the current player or if game started -->
                   <div v-if="player.role && (player.id === currentPlayerId || gameState !== 'setup')" class="player-role">
-                    <span class="role-badge" :class="roles[player.role]?.color">
-                      {{ roles[player.role]?.name }}
+                    <span class="role-badge" :class="availableRoles[player.role]?.color">
+                      {{ availableRoles[player.role]?.name }}
                     </span>
                   </div>
                 </div>
               </div>
             </div>
 
-            <!-- Selected Roles Display -->
+            <!-- Role Assignment Status -->
             <div class="card mb-2" v-if="selectedRoles.length > 0">
-              <div class="card-header">Выбранные роли</div>
-              <div class="selected-roles-list">
+              <div class="card-header">
+                {{ isHost ? 'Статус распределения ролей' : 'Выбранные роли' }}
+              </div>
+              
+              <!-- For host: show assignment status -->
+              <div v-if="isHost" class="role-assignment-status">
+                <div class="assignment-progress">
+                  <div class="progress-info">
+                    <span>Назначено: {{ assignedRolesCount }}/{{ selectedRoles.length }}</span>
+                    <div class="progress-bar">
+                      <div 
+                        class="progress-fill" 
+                        :style="{ width: (assignedRolesCount / selectedRoles.length * 100) + '%' }"
+                      ></div>
+                    </div>
+                  </div>
+                </div>
+                
+                <div class="roles-status-list">
+                  <div 
+                    v-for="roleId in selectedRoles" 
+                    :key="roleId"
+                    class="role-status-item"
+                    :class="{
+                      'assigned': isRoleAssigned(roleId),
+                      [availableRoles[roleId].color]: true
+                    }"
+                  >
+                    <span class="role-name">{{ availableRoles[roleId].name }}</span>
+                    <span class="assignment-status">
+                      {{ getAssignedPlayerName(roleId) || 'Не назначено' }}
+                    </span>
+                  </div>
+                </div>
+              </div>
+              
+              <!-- For players: show selected roles -->
+              <div v-else class="selected-roles-list">
                 <div 
                   v-for="roleId in selectedRoles" 
                   :key="roleId"
                   class="role-tag"
-                  :class="roles[roleId].color"
+                  :class="availableRoles[roleId].color"
                 >
-                  {{ roles[roleId].name }}
+                  {{ availableRoles[roleId].name }}
                 </div>
               </div>
             </div>
@@ -175,14 +271,60 @@
             <!-- Chat -->
             <GameChat />
 
+            <!-- Game Master Controls (Host only) -->
+            <div v-if="isHost" class="host-controls">
+              <div class="control-section">
+                <h6>Управление ролями</h6>
+                <div class="control-buttons">
+                  <button 
+                    @click="distributeRoles"
+                    class="btn-mini-action"
+                    :disabled="players.length !== selectedRoles.length || players.length < 2"
+                  >🎲</button> <button 
+                    @click="clearRoleAssignments"
+                    class="btn-mini-action"
+                    :disabled="!hasAssignedRoles"
+                  >🔄</button>
+                </div>
+              </div>
+
+              <!-- Manual role assignment -->
+              <div v-if="selectedRoles.length > 0" class="role-assignment-section">
+                <div class="role-assignments">
+                  <div 
+                    v-for="player in playersWithAssignments" 
+                    :key="player.id"
+                    class="player-role-assignment"
+                    v-show="player.id !== hostId"
+                  >
+                    <span class="player-name">{{ player.name }}:</span>
+                    <select 
+                      @change="assignRoleToPlayer(player.id, $event.target.value)"
+                      :value="player.assignedRole || ''"
+                      class="role-select"
+                    >
+                      <option value="">Выберите роль</option>
+                      <option 
+                        v-for="roleId in availableRolesForPlayer(player.id)" 
+                        :key="roleId"
+                        :value="roleId"
+                      >
+                        {{ availableRoles[roleId]?.name }}
+                      </option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+            </div>
+
             <!-- Start Game Button -->
             <button 
               v-if="isHost"
               @click="startGame"
               class="btn btn-success"
-              :disabled="players.length !== selectedRoles.length || players.length < 2"
+              :disabled="!canStartGame"
             >
-              {{ players.length === selectedRoles.length ? 'Начать игру' : `Нужно ${players.length} ролей для игроков` }}
+              {{ getStartGameButtonText() }}
             </button>
           </div>
         </div>
@@ -203,7 +345,6 @@ const {
   isHost, 
   room, 
   gameData, 
-  roles,
   allPlayers,
   initSocketListeners,
   joinRoom: joinGameRoom,
@@ -214,9 +355,19 @@ const {
   sendVoiceActivity
 } = useGame()
 
+const { username, hasUsername } = useUser()
+
 const { initVoiceDetection, stopVoiceDetection, isSupported } = useVoiceActivity()
 
 const { socket } = useSocket()
+
+// Add role assignment property to players
+const playersWithAssignments = computed(() => {
+  return players.value.map(player => ({
+    ...player,
+    assignedRole: roleAssignments.value.get(player.id)
+  }))
+})
 
 // Local reactive data
 const playerName = ref('')
@@ -251,8 +402,186 @@ const canJoin = computed(() => {
          !nameValidation.checking
 })
 
+// Используем роли с сервера
+const availableRoles = computed(() => {
+  return gameData.roles || {}
+})
+
 const isSpeaking = (playerId) => {
   return voiceActivity.speakingPlayers.has(playerId)
+}
+
+// Role assignment management
+const roleAssignments = ref(new Map()) // playerId -> roleId
+
+// Computed properties for role management
+const nonHostPlayers = computed(() => {
+  return players.value.filter(p => p.id !== hostId.value)
+})
+
+const assignedRolesCount = computed(() => {
+  return roleAssignments.value.size
+})
+
+const hasAssignedRoles = computed(() => {
+  return assignedRolesCount.value > 0
+})
+
+const canStartGame = computed(() => {
+  const playersCount = nonHostPlayers.value.length
+  const rolesCount = selectedRoles.value.length
+  
+  // Either all roles are assigned manually, or counts match for auto-distribution
+  const allRolesAssigned = assignedRolesCount.value === rolesCount && rolesCount === playersCount
+  const readyForAutoDistribution = rolesCount === playersCount && playersCount >= 2
+  
+  return allRolesAssigned || readyForAutoDistribution
+})
+
+// Role assignment methods
+const assignRoleToPlayer = (playerId, roleId) => {
+  if (!roleId) {
+    // Remove assignment
+    roleAssignments.value.delete(playerId)
+  } else {
+    // Check if role is already assigned to another player
+    for (const [otherPlayerId, assignedRoleId] of roleAssignments.value) {
+      if (assignedRoleId === roleId && otherPlayerId !== playerId) {
+        // Remove the role from the other player
+        roleAssignments.value.delete(otherPlayerId)
+        break
+      }
+    }
+    // Assign the role
+    roleAssignments.value.set(playerId, roleId)
+  }
+}
+
+const distributeRoles = () => {
+  if (nonHostPlayers.value.length !== selectedRoles.value.length) return
+  
+  // Clear existing assignments
+  roleAssignments.value.clear()
+  
+  // Shuffle roles and assign randomly
+  const shuffledRoles = [...selectedRoles.value].sort(() => Math.random() - 0.5)
+  nonHostPlayers.value.forEach((player, index) => {
+    if (index < shuffledRoles.length) {
+      roleAssignments.value.set(player.id, shuffledRoles[index])
+    }
+  })
+}
+
+const clearRoleAssignments = () => {
+  roleAssignments.value.clear()
+}
+
+const availableRolesForPlayer = (playerId) => {
+  // Get all selected roles
+  const allRoles = [...selectedRoles.value]
+  
+  // Remove roles that are already assigned to other players
+  const assignedToOthers = Array.from(roleAssignments.value.entries())
+    .filter(([otherPlayerId]) => otherPlayerId !== playerId)
+    .map(([_, roleId]) => roleId)
+  
+  return allRoles.filter(roleId => !assignedToOthers.includes(roleId))
+}
+
+const isRoleAssigned = (roleId) => {
+  return Array.from(roleAssignments.value.values()).includes(roleId)
+}
+
+const getAssignedPlayerName = (roleId) => {
+  for (const [playerId, assignedRoleId] of roleAssignments.value) {
+    if (assignedRoleId === roleId) {
+      const player = players.value.find(p => p.id === playerId)
+      return player?.name
+    }
+  }
+  return null
+}
+
+const getStartGameButtonText = () => {
+  const playersCount = nonHostPlayers.value.length
+  const rolesCount = selectedRoles.value.length
+  
+  if (playersCount < 2) {
+    return 'Нужно минимум 2 игрока'
+  }
+  
+  if (rolesCount !== playersCount) {
+    return `Нужно ${playersCount} ролей для игроков`
+  }
+  
+  if (hasAssignedRoles.value && assignedRolesCount.value < rolesCount) {
+    return `Назначено ${assignedRolesCount.value}/${rolesCount} ролей`
+  }
+  
+  return 'Начать игру'
+}
+
+// Player management functions
+const hasDisconnectedPlayers = computed(() => {
+  return nonHostPlayers.value.some(p => !p.connected)
+})
+
+const allPlayersMuted = computed(() => {
+  return nonHostPlayers.value.length > 0 && nonHostPlayers.value.every(p => p.muted)
+})
+
+const anyPlayersMuted = computed(() => {
+  return nonHostPlayers.value.some(p => p.muted)
+})
+
+const kickPlayer = (playerId) => {
+  const player = players.value.find(p => p.id === playerId)
+  if (!player) return
+  
+  if (confirm(`Вы уверены, что хотите выгнать игрока "${player.name}"?`)) {
+    socket.emit('kick-player', {
+      roomId: roomId.value,
+      playerId: playerId
+    })
+  }
+}
+
+const togglePlayerMute = (playerId) => {
+  const player = players.value.find(p => p.id === playerId)
+  if (!player) return
+  
+  socket.emit('toggle-player-mute', {
+    roomId: roomId.value,
+    playerId: playerId,
+    muted: !player.muted
+  })
+}
+
+const kickAllDisconnected = () => {
+  const disconnectedPlayers = nonHostPlayers.value.filter(p => !p.connected)
+  if (disconnectedPlayers.length === 0) return
+  
+  if (confirm(`Удалить ${disconnectedPlayers.length} отключившихся игроков?`)) {
+    socket.emit('kick-disconnected-players', {
+      roomId: roomId.value
+    })
+  }
+}
+
+const muteAllPlayers = () => {
+  if (confirm(`Замутить всех игроков?`)) {
+    socket.emit('mute-all-players', {
+      roomId: roomId.value,
+      muted: true
+    })
+  }
+}
+
+const unmuteAllPlayers = () => {
+  socket.emit('mute-all-players', {
+    roomId: roomId.value,
+    muted: false
+  })
 }
 
 // Валидация имени в реальном времени
@@ -311,6 +640,19 @@ const checkNameAvailability = debounce(() => {
 
 // Обработчики событий сокета
 const setupSocketListeners = () => {
+  socket.on('kicked-from-room', (data) => {
+    alert(data.message)
+    router.push('/')
+  })
+  
+  socket.on('mute-status-changed', (data) => {
+    if (data.muted) {
+      alert('⚠️ ' + data.message)
+    } else {
+      console.log('✅ ' + data.message)
+    }
+  })
+  
   socket.on('name-check-result', (result) => {
     nameValidation.checking = false
     
@@ -374,9 +716,13 @@ function debounce(func, wait) {
 
 // Methods
 const joinRoom = async () => {
-  if (!canJoin.value) return
+  // Use saved username if available, otherwise use input
+  const finalName = hasUsername.value 
+    ? username.value 
+    : (nameValidation.formattedName || playerName.value.trim())
+    
+  if (!finalName) return
   
-  const finalName = nameValidation.formattedName || playerName.value.trim()
   await joinGameRoom({ 
     roomId: roomId.value, 
     playerName: finalName
@@ -392,6 +738,17 @@ const toggleRole = (roleId) => {
 }
 
 const startGame = () => {
+  // If manual assignments exist, send them to the server
+  if (hasAssignedRoles.value) {
+    const assignments = {}
+    roleAssignments.value.forEach((roleId, playerId) => {
+      assignments[playerId] = roleId
+    })
+    socket.emit('assign-roles-manually', {
+      roomId: roomId.value,
+      assignments
+    })
+  }
   startNewGame()
 }
 
@@ -419,21 +776,20 @@ onMounted(async () => {
   
   // Try to reconnect to the room from URL
   const urlRoomId = roomId.value
-  if (urlRoomId) {
-    // Check if user has a saved name, otherwise show join form
+  if (urlRoomId && hasUsername.value) {
+    // Auto-join if we have a saved username
+    console.log(`Attempting to join room ${urlRoomId} as ${username.value}`)
+    joinGameRoom({ 
+      roomId: urlRoomId, 
+      playerName: username.value 
+    })
+  } else if (urlRoomId && !hasUsername.value) {
+    // Set the saved name if available for backward compatibility
     const savedName = localStorage.getItem('playerName')
-    const savedRoom = localStorage.getItem('currentRoom')
-    
-    if (savedName && savedRoom === urlRoomId) {
+    if (savedName) {
       playerName.value = savedName
-      console.log(`Attempting to rejoin room ${urlRoomId} as ${savedName}`)
-      joinGameRoom({ 
-        roomId: urlRoomId, 
-        playerName: savedName 
-      })
-    } else {
-      console.log(`Room ${urlRoomId} found in URL, but no matching saved data`)
     }
+    console.log(`Room ${urlRoomId} found, waiting for username input`)
   }
 })
 
@@ -450,6 +806,21 @@ watch(() => room.id, (newRoomId) => {
     localStorage.setItem('currentRoom', newRoomId)
   }
 })
+
+// Update role assignments when players list changes
+watch(() => players.value, (newPlayers) => {
+  if (!isHost.value) return
+  
+  const currentPlayerIds = new Set(newPlayers.map(p => p.id))
+  const assignmentPlayerIds = new Set(roleAssignments.value.keys())
+  
+  // Remove assignments for players who left
+  for (const playerId of assignmentPlayerIds) {
+    if (!currentPlayerIds.has(playerId)) {
+      roleAssignments.value.delete(playerId)
+    }
+  }
+}, { deep: true })
 
 // Clear localStorage when leaving room
 const clearStoredData = () => {
@@ -702,9 +1073,24 @@ definePageMeta({
     
     .roles-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
       gap: 16px;
       margin-top: 16px;
+    }
+  }
+
+  .btn-mini-action {
+    background: none;
+    border: none;
+    border-radius: 3px;
+    cursor: pointer;
+    font-size: 12px;
+    opacity: 0.6;
+    transition: all 0.2s ease;
+    
+    &:hover {
+      opacity: 1;
+      background: rgba(255, 255, 255, 0.1);
     }
   }
   
@@ -731,6 +1117,84 @@ definePageMeta({
         display: flex;
         justify-content: space-between;
         align-items: center;
+        
+        .player-badges {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+        }
+      }
+      
+      .player-controls {
+        display: flex;
+        gap: 4px;
+        
+        .btn-player-action {
+          background: none;
+          border: none;
+          padding: 4px 6px;
+          border-radius: 3px;
+          cursor: pointer;
+          font-size: 12px;
+          opacity: 0.6;
+          transition: all 0.2s ease;
+          color: #fff;
+          box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.07);
+          
+          &:hover {
+            opacity: 1;
+            background: rgba(255, 255, 255, 0.1);
+          }
+          
+          &.btn-kick:hover {
+            background: rgba(231, 76, 60, 0.2);
+            color: #e74c3c;
+            box-shadow: 0 0 0 1px rgba(255, 74, 74, 0.157);
+          }
+          
+          &.btn-mute {
+            &.muted {
+              color: #e74c3c;
+              opacity: 1;
+            }
+            
+            &:hover {
+              background: rgba(241, 196, 15, 0.2);
+              color: #f1c40f;
+            }
+          }
+        }
+      }
+      
+      .player-count-badge {
+        background: rgba(102, 126, 234, 0.2);
+        color: #667eea;
+        padding: 2px 6px;
+        border-radius: 10px;
+        font-size: 11px;
+        font-weight: 500;
+        margin-left: 8px;
+      }
+      
+      .player-management-controls {
+        padding: 8px;
+        border-top: 1px solid rgba(255, 255, 255, 0.1);
+        background: rgba(0, 0, 0, 0.1);
+        
+        .management-actions {
+          display: flex;
+          gap: 6px;
+          flex-wrap: wrap;
+          
+          .btn-xs {
+            font-size: 10px;
+            padding: 4px 8px;
+            
+            &:disabled {
+              opacity: 0.4;
+            }
+          }
+        }
       }
       
       &.is-host .player-name {
@@ -810,6 +1274,149 @@ definePageMeta({
       &.purple { border-left: 3px solid #9b59b6; }
     }
   }
+  
+  // Host controls styling
+  .host-controls {
+    margin-bottom: 16px;
+    
+    .control-section {
+      margin: 16px 0;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      
+      h6 {
+        margin: 0;
+        color: rgba(255, 255, 255, 0.9);
+        font-size: 14px;
+      }
+      
+      .control-buttons {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        
+        .btn-sm {
+          font-size: 12px;
+          padding: 6px 12px;
+        }
+      }
+    }
+    
+    .role-assignment-section {
+      .role-assignments {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        
+        .player-role-assignment {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          padding: 8px;
+          background: rgba(255, 255, 255, 0.05);
+          border-radius: 4px;
+          
+          .player-name {
+            font-size: 13px;
+            color: rgba(255, 255, 255, 0.9);
+            min-width: 80px;
+          }
+          
+          .role-select {
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            color: white;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            min-width: 140px;
+            
+            option {
+              background: #2c3e50;
+              color: white;
+            }
+            
+            &:focus {
+              outline: none;
+              border-color: #667eea;
+            }
+          }
+        }
+      }
+    }
+  }
+  
+  // Role assignment status styling
+  .role-assignment-status {
+    .assignment-progress {
+      margin-bottom: 12px;
+      
+      .progress-info {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 6px;
+        font-size: 12px;
+        color: rgba(255, 255, 255, 0.7);
+        
+        .progress-bar {
+          flex: 1;
+          height: 4px;
+          background: rgba(255, 255, 255, 0.1);
+          border-radius: 2px;
+          overflow: hidden;
+          
+          .progress-fill {
+            height: 100%;
+            background: #667eea;
+            transition: width 0.3s ease;
+          }
+        }
+      }
+    }
+    
+    .roles-status-list {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      
+      .role-status-item {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 6px 8px;
+        background: rgba(255, 255, 255, 0.05);
+        border-radius: 4px;
+        border-left: 3px solid transparent;
+        
+        &.assigned {
+          background: rgba(102, 126, 234, 0.1);
+        }
+        
+        &.blue { border-left-color: #3498db; }
+        &.red { border-left-color: #e74c3c; }
+        &.brown { border-left-color: #8b4513; }
+        &.purple { border-left-color: #9b59b6; }
+        &.gold { border-left-color: #f1c40f; }
+        
+        .role-name {
+          font-size: 12px;
+          color: rgba(255, 255, 255, 0.9);
+        }
+        
+        .assignment-status {
+          font-size: 11px;
+          color: rgba(255, 255, 255, 0.6);
+          
+          .role-status-item.assigned & {
+            color: #667eea;
+            font-weight: 500;
+          }
+        }
+      }
+    }
+  }
 }
 
 @keyframes voiceGlow {
@@ -837,6 +1444,72 @@ definePageMeta({
   
   .roles-grid {
     grid-template-columns: 1fr !important;
+  }
+  
+  .host-controls {
+    .control-buttons {
+      flex-direction: column;
+      
+      .btn-sm {
+        width: 100%;
+      }
+    }
+  }
+  
+  .player-management-controls {
+    .management-actions {
+      justify-content: center;
+      
+      .btn-xs {
+        flex: 1;
+        min-width: 0;
+      }
+    }
+  }
+  
+  .player-main-info {
+    .player-badges {
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 4px;
+    }
+    
+    .player-controls {
+      margin-top: 4px;
+    }
+    
+    .role-assignment-section .role-assignments .player-role-assignment {
+      flex-direction: column;
+      align-items: stretch;
+      gap: 8px;
+      
+      .player-name {
+        min-width: auto;
+      }
+      
+      .role-select {
+        min-width: auto;
+        width: 100%;
+      }
+    }
+  }
+  
+  .role-assignment-status {
+    .assignment-progress .progress-info {
+      flex-direction: column;
+      align-items: stretch;
+      gap: 8px;
+    }
+    
+    .roles-status-list .role-status-item {
+      flex-direction: column;
+      align-items: stretch;
+      gap: 4px;
+      
+      .assignment-status {
+        text-align: right;
+      }
+    }
   }
 }
 </style>

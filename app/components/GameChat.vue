@@ -73,7 +73,7 @@
             <strong>Доступные группы:</strong>
             <span v-for="group in availableGroups" :key="group" class="group-tag" @click="setMessageText(`/ш ${group} `)">{{ group }}</span>
             <!-- ДОБАВЛЯЕМ: Ведущий в список целей -->
-            <span v-if="!isHost" class="group-tag host-tag">ведущий</span>
+            <span v-if="!isHost" class="group-tag host-tag" @click="setMessageText(`/ш ведущий `)">ведущий</span>
           </div>
         </div>
       </details>
@@ -108,7 +108,7 @@
 </template>
 
 <script setup>
-const { chatMessages, isInRoom, sendMessage: sendGameMessage, gameData, isHost, player, roles } = useGame()
+const { chatMessages, isInRoom, sendMessage: sendGameMessage, gameData, isHost, player } = useGame()
 const { socket } = useSocket()
 
 const newMessage = ref('')
@@ -229,8 +229,8 @@ const getPlayerRoleDisplay = (playerId) => {
     shouldShowRole = true
   }
   
-  if (shouldShowRole && roles[gamePlayer.role]) {
-    return ` (${roles[gamePlayer.role].name})`
+  if (shouldShowRole && gameData.roles?.[gamePlayer.role]) {
+    return ` (${gameData.roles[gamePlayer.role].name})`
   }
   
   return ''

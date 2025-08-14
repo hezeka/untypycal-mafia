@@ -7,26 +7,9 @@
         <div v-if="timer" class="timer-display">
           Осталось времени: {{ timerDisplay }}
         </div>
-        
-        <!-- Информация о голосовании -->
-        <div v-if="gameState === 'voting'" class="voting-info">
-          <div class="voting-stats">
-            Проголосовало: {{ votingStats.submitted }} из {{ votingStats.total }}
-            <span v-if="votingStats.hasVoted" class="voted-indicator">✅ Вы проголосовали</span>
-          </div>
-          <div v-if="votingStats.votedFor" class="vote-choice">
-            Ваш выбор: {{ votingStats.votedFor === 'abstain' ? 'Воздержание' : getPlayerName(votingStats.votedFor) }}
-          </div>
-        </div>
       </div>
       
       <div class="game-controls" v-if="isHost">
-        <button 
-          @click="goToNextPhase"
-          class="btn btn-primary next-phase-btn"
-        >
-          {{ getNextPhaseText() }}
-        </button>
         
         <div class="phase-controls">
           <button 
@@ -51,16 +34,35 @@
             Голосование
           </button>
         </div>
-        
+
         <button 
-          v-if="gameState === 'voting'"
-          @click="endVoting"
-          class="btn btn-danger"
+          @click="goToNextPhase"
+          class="btn btn-primary next-phase-btn"
+          :class="gameState === 'voting' ? 'btn-danger' : ''"
         >
-          Завершить голосование
+          {{ getNextPhaseText() }}
         </button>
       </div>
+      
+      <div class="game-controls" v-else>
+        <div class="player-phase-hint" v-if="playerPhaseHint">
+          <div class="hint-icon">💡</div>
+          <div class="hint-text">{{ playerPhaseHint }}</div>
+        </div>
+        
+        <!-- Информация о голосовании -->
+        <div v-if="gameState === 'voting'" class="voting-info">
+          <div class="voting-stats">
+            Проголосовало: {{ votingStats.submitted }} из {{ votingStats.total }}
+            <span v-if="votingStats.hasVoted" class="voted-indicator">✅ Вы проголосовали</span>
+          </div>
+          <div v-if="votingStats.votedFor" class="vote-choice">
+            Ваш выбор: {{ votingStats.votedFor === 'abstain' ? 'Воздержание' : getPlayerName(votingStats.votedFor) }}
+          </div>
+        </div>
+      </div>
     </div>
+
 
     <div class="game-content">
       <!-- Player's Role Card -->
@@ -68,14 +70,14 @@
         <div class="card">
           <div class="card-header">Ваша роль</div>
           <div v-if="playerRole" class="role-display">
-            <div class="role-card-mini" :class="roles[playerRole].color">
-              <img :src="`/roles/${playerRole}.png`" :alt="roles[playerRole].name" />
+            <div class="role-card-mini" :class="getCurrentRoleConfig(playerRole)?.color">
+              <img :src="`/roles/${playerRole}.png`" :alt="getCurrentRoleConfig(playerRole)?.name" />
               <div class="role-info">
-                <h3>{{ roles[playerRole].name }}</h3>
-                <p>{{ roles[playerRole].description }}</p>
-                <div class="role-goal" v-if="getTeamGoal(roles[playerRole].team) != 'Неизвестно'">
-                  <strong>Цель команды "{{ getTeamName(roles[playerRole].team) }}":</strong>
-                  {{ getTeamGoal(roles[playerRole].team) }}
+                <h3>{{ getCurrentRoleConfig(playerRole)?.name }}</h3>
+                <p>{{ getCurrentRoleConfig(playerRole)?.description }}</p>
+                <div class="role-goal" v-if="getTeamGoal(getCurrentRoleConfig(playerRole)?.team) != 'Неизвестно'">
+                  <strong>Цель команды "{{ getTeamName(getCurrentRoleConfig(playerRole)?.team) }}":</strong>
+                  {{ getTeamGoal(getCurrentRoleConfig(playerRole)?.team) }}
                 </div>
               </div>
             </div>
@@ -133,7 +135,7 @@
               <div class="player-info">
                 <div class="player-name">{{ player.name }}</div>
                 <div v-if="player.showRole && player.role" class="revealed-role">
-                  {{ roles[player.role]?.name }}
+                  {{ getCurrentRoleConfig(player.role)?.name }}
                 </div>
                 <div v-if="player.artifact" class="artifact-indicator">
                   Артефакт
@@ -169,7 +171,7 @@
                     </button>
                     <select v-model="newRole" class="role-select">
                       <option value="">Выбрать роль</option>
-                      <option v-for="(role, roleId) in roles" :key="roleId" :value="roleId">
+                      <option v-for="(role, roleId) in getCurrentRolesConfig()" :key="roleId" :value="roleId">
                         {{ role.name }}
                       </option>
                     </select>
@@ -238,6 +240,41 @@
           </div>
 
           <div class="control-section">
+            <h4>Таймер</h4>
+            <div class="timer-controls">
+              <div class="timer-input-group">
+                <input 
+                  type="number" 
+                  v-model="timerInput" 
+                  placeholder="Минуты" 
+                  min="0" 
+                  max="60"
+                  class="timer-input"
+                >
+                <button 
+                  @click="startTimer" 
+                  class="btn btn-primary btn-small"
+                  :disabled="!timerInput || timerInput <= 0"
+                >
+                  Запустить
+                </button>
+                <button 
+                  @click="stopTimer" 
+                  class="btn btn-secondary btn-small"
+                  :disabled="!timer"
+                >
+                  Стоп
+                </button>
+              </div>
+              <div class="timer-presets">
+                <button @click="setTimerPreset(3)" class="btn btn-secondary btn-tiny">3 мин</button>
+                <button @click="setTimerPreset(5)" class="btn btn-secondary btn-tiny">5 мин</button>
+                <button @click="setTimerPreset(10)" class="btn btn-secondary btn-tiny">10 мин</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="control-section">
             <h4>Действия</h4>
             <div class="action-buttons">
               <button @click="restartGame" class="btn btn-danger btn-small">
@@ -275,14 +312,48 @@ const { initVoiceDetection, stopVoiceDetection, isSupported } = useVoiceActivity
 const votedPlayer = ref(null)
 const showAdminPanel = ref(null)
 const newRole = ref('')
+const timerInput = ref(10) // Значение по умолчанию - 10 минут
 
 const gameState = computed(() => gameData.gameState)
 const currentPhase = computed(() => gameData.currentPhase)
+
+// Подсказка для игрока в зависимости от роли и фазы
+const playerPhaseHint = computed(() => {
+  if (!playerRole.value) return null
+  
+  // Используем роли с сервера, если они есть, иначе локальные
+  const rolesConfig = gameData.roles && Object.keys(gameData.roles).length > 0 
+    ? gameData.roles 
+    : roles
+  
+  const roleConfig = rolesConfig[playerRole.value]
+  if (!roleConfig || !roleConfig.phaseHints) return null
+  
+  return roleConfig.phaseHints[gameState.value] || null
+})
 
 // Безопасное получение роли игрока
 const playerRole = computed(() => {
   return player.role
 })
+
+// Получить конфигурацию роли (с сервера или локальную)
+const getCurrentRoleConfig = (roleId) => {
+  if (!roleId) return null
+  
+  const rolesConfig = gameData.roles && Object.keys(gameData.roles).length > 0 
+    ? gameData.roles 
+    : roles
+    
+  return rolesConfig[roleId] || null
+}
+
+// Получить все роли (с сервера или локальные)
+const getCurrentRolesConfig = () => {
+  return gameData.roles && Object.keys(gameData.roles).length > 0 
+    ? gameData.roles 
+    : roles
+}
 
 const timer = computed(() => gameData.timer)
 
@@ -301,7 +372,45 @@ const timerDisplay = computed(() => {
 })
 
 const isSpeaking = (playerId) => {
-  return voiceActivity.speakingPlayers.has(playerId)
+  if (!voiceActivity.speakingPlayers.has(playerId)) {
+    return false
+  }
+  
+  // Игрок всегда видит свой собственный индикатор
+  if (playerId === player.id) {
+    return true
+  }
+  
+  // Хост (ведущий) всегда видит все индикаторы
+  if (isHost.value) {
+    return true
+  }
+  
+  // Днем и во время голосования все видят все индикаторы
+  if (gameState.value === 'day' || gameState.value === 'voting') {
+    return true
+  }
+  
+  // Ночью применяем правила по ролям
+  if (gameState.value === 'night') {
+    const currentPlayerRole = playerRole.value
+    const speakingPlayer = allPlayersForVoting.value.find(p => p.id === playerId)
+    
+    if (!currentPlayerRole || !speakingPlayer) {
+      return false
+    }
+    
+    // Оборотни видят других оборотней
+    if (isWerewolfRole(currentPlayerRole) && isWerewolfRole(speakingPlayer.role)) {
+      return true
+    }
+    
+    // Жители ночью не видят чужие микрофоны (кроме своего)
+    return false
+  }
+  
+  // По умолчанию показываем индикатор
+  return true
 }
 
 // Helper function to check if role is werewolf-related
@@ -345,7 +454,7 @@ const phaseTitle = computed(() => {
 const phaseDescription = computed(() => {
   const descriptions = {
     night: 'Игроки с ночными способностями выполняют свои действия',
-    day: 'Обсуждение и поиск оборотней. У вас есть 10 минут.',
+    day: 'Обсуждение и поиск оборотней',
     voting: 'Проголосуйте за игрока, которого подозреваете, или воздержитесь',
     ended: 'Игра завершена. Результаты показаны ниже.'
   }
@@ -359,11 +468,12 @@ const availablePhases = computed(() => [
 ])
 
 const nightRoles = computed(() => {
+  const rolesConfig = getCurrentRolesConfig()
   return gameData.selectedRoles
-    .filter(roleId => roles[roleId]?.night)
+    .filter(roleId => rolesConfig[roleId]?.night)
     .map(roleId => ({
       id: roleId,
-      name: roles[roleId].name
+      name: rolesConfig[roleId]?.name || roleId
     }))
 })
 
@@ -380,8 +490,10 @@ const votePlayer = (playerId) => {
 }
 
 const announceRole = (roleId) => {
-  const role = roles[roleId]
-  sendMessage(`${role.name}, проснись и выполни свое действие.`)
+  const role = getCurrentRoleConfig(roleId)
+  if (role) {
+    sendMessage(`${role.name}, проснись и выполни свое действие.`)
+  }
 }
 
 const getNextPhaseText = () => {
@@ -443,6 +555,23 @@ const chatRef = ref(null)
 const whisperToPlayer = (playerName) => {
   const currentText = chatRef.value?.getMessageText() || ''
   chatRef.value?.setMessageText(`/ш ${playerName} ${currentText}`)
+}
+
+// Методы для работы с таймером
+const startTimer = () => {
+  if (timerInput.value && timerInput.value > 0) {
+    const seconds = timerInput.value * 60 // Конвертируем минуты в секунды
+    setTimer(seconds)
+  }
+}
+
+const stopTimer = () => {
+  setTimer(0) // 0 останавливает таймер
+}
+
+const setTimerPreset = (minutes) => {
+  timerInput.value = minutes
+  startTimer()
 }
 
 // Инициализация голосовой активности при монтировании
@@ -532,11 +661,32 @@ onUnmounted(() => {
   }
 }
 
+.player-phase-hint {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  background: rgba(102, 126, 234, 0.1);
+  border: 2px solid rgba(102, 126, 234, 0.3);
+  border-radius: 8px;
+  
+  .hint-icon {
+    font-size: 20px;
+    flex-shrink: 0;
+  }
+  
+  .hint-text {
+    font-size: 14px;
+    line-height: 1.4;
+    color: rgba(255, 255, 255, 0.9);
+  }
+}
+
 .next-phase-btn {
   font-size: 16px;
   font-weight: 600;
   padding: 12px 24px;
-  margin-right: 16px;
+  margin-left: 16px;
 }
 
 .admin-controls {
@@ -582,11 +732,12 @@ onUnmounted(() => {
 .game-header {
   display: flex;
   justify-content: space-between;
-  align-items: flex-start;
+  align-items: cebter;
   margin-bottom: 30px;
   gap: 20px;
   
   .phase-title {
+    margin-top: 8px;
     margin-bottom: 8px;
     font-size: 2rem;
   }
@@ -892,6 +1043,45 @@ onUnmounted(() => {
         color: #f39c12;
         font-size: 12px;
         margin-top: 4px;
+      }
+    }
+
+    .timer-controls {
+      .timer-input-group {
+        display: flex;
+        gap: 8px;
+        margin-bottom: 8px;
+        align-items: center;
+        
+        .timer-input {
+          width: 80px;
+          padding: 6px 8px;
+          border: 1px solid rgba(255, 255, 255, 0.3);
+          border-radius: 4px;
+          background: rgba(255, 255, 255, 0.1);
+          color: white;
+          font-size: 12px;
+          
+          &:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.2);
+          }
+          
+          &::placeholder {
+            color: rgba(255, 255, 255, 0.5);
+          }
+        }
+      }
+      
+      .timer-presets {
+        display: flex;
+        gap: 4px;
+        
+        .btn-tiny {
+          padding: 4px 8px;
+          font-size: 10px;
+        }
       }
     }
   }

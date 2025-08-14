@@ -9,9 +9,11 @@ const analyser = ref(null)
 const animationFrame = ref(null)
 const microphoneEnabled = ref(true) // Новое состояние для управления микрофоном
 
+// Глобальные переменные для сохранения состояния между вызовами композабла
+let lastActivityState = false
+let currentOnActivityChange = null // Сохраняем текущий callback глобально
+
 export const useVoiceActivity = () => {
-  let lastActivityState = false
-  let currentOnActivityChange = null // Сохраняем текущий callback
   const VOLUME_THRESHOLD = 0.01 // Порог громкости
   const SMOOTHING = 0.3 // Сглаживание
   
@@ -19,6 +21,7 @@ export const useVoiceActivity = () => {
     if (!shouldUseMicrophone()) return false
     
     // Сохраняем callback для использования при отключении
+    console.log('💾 Saving callback for voice detection:', typeof onActivityChange)
     currentOnActivityChange = onActivityChange
     
     try {
@@ -96,11 +99,12 @@ export const useVoiceActivity = () => {
   }
   
   const stopVoiceDetection = () => {
-    // Если был активен, уведомляем о прекращении активности
-    if (isActive.value && currentOnActivityChange) {
-      isActive.value = false
-      lastActivityState = false
-      currentOnActivityChange(false) // Уведомляем систему об отключении активности
+    console.log('🔇 Stopping voice detection...')
+    
+    // ВСЕГДА уведомляем о прекращении активности, даже если не было активности
+    if (currentOnActivityChange) {
+      console.log('📤 Sending final voice activity stop event')
+      currentOnActivityChange(false)
     }
     
     // Останавливаем анимацию
@@ -121,31 +125,52 @@ export const useVoiceActivity = () => {
       mediaStream.value = null
     }
     
+    // Сбрасываем состояния, но СОХРАНЯЕМ callback для переинициализации
     isActive.value = false
     isSupported.value = false
     lastActivityState = false
-    currentOnActivityChange = null // Очищаем сохраненный callback
+    // ВАЖНО: НЕ очищаем currentOnActivityChange, чтобы можно было переинициализировать
     
-    console.log('🔇 Voice detection stopped')
+    console.log('✅ Voice detection fully stopped')
   }
 
   // Функция для отключения/включения микрофона
-  const toggleMicrophone = async () => {
+  const toggleMicrophone = async (forceStopCallback = null, forceStartCallback = null) => {
     microphoneEnabled.value = !microphoneEnabled.value
     
     if (!microphoneEnabled.value) {
-      // Полностью отключаем микрофон
+      console.log('🎤❌ Disabling microphone...')
+      
+      // СНАЧАЛА принудительно останавливаем голосовую активность в игре
+      if (forceStopCallback && typeof forceStopCallback === 'function') {
+        forceStopCallback()
+      }
+      
+      // Затем останавливаем детекцию микрофона
       stopVoiceDetection()
-      console.log('🎤❌ Microphone disabled')
+      
+      console.log('✅ Microphone disabled and voice activity stopped')
     } else {
-      console.log('🎤✅ Microphone enabled')
-      // Если у нас есть сохраненный callback, автоматически переинициализируем
+      console.log('🎤✅ Enabling microphone...')
+      
+      // Сначала сбрасываем состояние голосовой активности
+      if (forceStartCallback && typeof forceStartCallback === 'function') {
+        forceStartCallback()
+      }
+      
+      // Затем переинициализируем микрофон если есть callback
       if (currentOnActivityChange) {
+        console.log('🔄 Reusing saved callback for voice detection')
         try {
           await initVoiceDetection(currentOnActivityChange)
+          console.log('✅ Microphone enabled and voice detection restarted')
         } catch (error) {
-          console.warn('Failed to reinitialize microphone:', error)
+          console.warn('❌ Failed to reinitialize microphone:', error)
         }
+      } else {
+        console.warn('⚠️ No callback saved, microphone enabled but not initialized')
+        console.log('🔍 Debug: currentOnActivityChange =', currentOnActivityChange)
+        console.log('🔍 Debug: typeof currentOnActivityChange =', typeof currentOnActivityChange)
       }
     }
   }

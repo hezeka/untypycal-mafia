@@ -9,7 +9,7 @@
       <div class="modal-content">
         <div class="roles-grid">
           <RoleCard
-            v-for="(role, roleId) in roles"
+            v-for="(role, roleId) in props.roles"
             :key="roleId"
             :role="role"
             :role-id="roleId"
@@ -35,12 +35,14 @@ const props = defineProps({
   playerRole: {
     type: String,
     default: null
+  },
+  roles: {
+    type: Object,
+    default: () => ({})
   }
 })
 
 const emit = defineEmits(['close'])
-
-const { roles } = useGame()
 
 const isRoleInGame = (roleId) => {
   return props.gameRoles.includes(roleId)

@@ -35,7 +35,7 @@
             
             <!-- Кнопка микрофона -->
             <button 
-              @click="toggleMicrophone" 
+              @click="handleToggleMicrophone" 
               class="btn btn-secondary btn-small mic-toggle"
               :title="microphoneEnabled ? 'Выключить микрофон' : 'Включить микрофон'"
             >
@@ -44,6 +44,25 @@
             
             <button @click="leaveRoom" class="btn btn-secondary btn-small">
               Покинуть комнату
+            </button>
+          </div>
+          <div v-else-if="hasUsername" class="current-user">
+            <span class="user-icon">👤</span>
+            <span class="username">{{ username }}</span>
+            <button 
+              @click="showUsernameModal = true" 
+              class="btn-change-username"
+              title="Сменить никнейм"
+            >
+              ✏️
+            </button>
+          </div>
+          <div v-else class="no-user">
+            <button 
+              @click="showUsernameModal = true" 
+              class="btn btn-outline btn-sm"
+            >
+              Установить никнейм
             </button>
           </div>
         </div>
@@ -104,23 +123,40 @@
       v-if="showRolesGuide && isInRoom"
       :game-roles="gameRoles"
       :player-role="playerRole"
+      :roles="gameData.roles || {}"
       @close="showRolesGuide = false"
+    />
+    
+    <!-- Username Modal -->
+    <UsernameModal 
+      v-if="showUsernameModal"
+      :has-username="hasUsername"
+      :current-username="username"
+      @close="showUsernameModal = false"
     />
   </div>
 </template>
 
 <script setup>
-const { isInRoom, room, gameData, player, isHost } = useGame()
+const { isInRoom, room, gameData, player, isHost, forceStopVoiceActivity, forceStartVoiceActivity, clearRoom } = useGame()
 const { isConnected } = useSocket()
 const { soundsEnabled, toggleSounds } = useSounds()
 const { microphoneEnabled, toggleMicrophone } = useVoiceActivity()
+const { username, hasUsername } = useUser()
 
 const showRules = ref(false)
 const showRolesGuide = ref(false)
+const showUsernameModal = ref(false)
 
 const roomId = computed(() => room.id)
 const gameRoles = computed(() => gameData.selectedRoles)
 const playerRole = computed(() => player.role)
+
+// Обработчик для кнопки микрофона с принудительными функциями
+const handleToggleMicrophone = async () => {
+  console.log('🔄 Toggling microphone from layout')
+  await toggleMicrophone(forceStopVoiceActivity, forceStartVoiceActivity)
+}
 
 const leaveRoom = () => {
   if (confirm('Вы уверены, что хотите покинуть комнату?')) {
@@ -131,13 +167,13 @@ const leaveRoom = () => {
   }
 }
 
-const { clearRoom } = useGame()
-
 // Обработка клавиши Escape для закрытия модальных окон
 onMounted(() => {
   const handleEscape = (event) => {
     if (event.key === 'Escape') {
-      if (showRules.value) {
+      if (showUsernameModal.value) {
+        showUsernameModal.value = false
+      } else if (showRules.value) {
         showRules.value = false
       } else if (showRolesGuide.value) {
         showRolesGuide.value = false
@@ -161,18 +197,58 @@ onMounted(() => {
 }
 
 .app-header {
-  background: rgba(0, 0, 0, 0.8);
-  backdrop-filter: blur(10px);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
   position: sticky;
   top: 0;
+  background: rgb(10 10 10 / 74%);
+  backdrop-filter: blur(10px);
   z-index: 100;
   
   .header-content {
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    padding: 12px 0;
     display: flex;
-    justify-content: space-between;
     align-items: center;
-    padding: 16px 0;
+    justify-content: space-between;
+    padding: 18px 0;
+    
+    .current-user {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: rgba(255, 255, 255, 0.1);
+      padding: 8px 12px;
+      border-radius: 20px;
+      
+      .user-icon {
+        font-size: 16px;
+      }
+      
+      .username {
+        font-weight: 500;
+        color: rgba(255, 255, 255, 0.9);
+      }
+      
+      .btn-change-username {
+        background: none;
+        border: none;
+        cursor: pointer;
+        font-size: 12px;
+        opacity: 0.7;
+        padding: 2px 4px;
+        border-radius: 3px;
+        transition: all 0.2s ease;
+        
+        &:hover {
+          opacity: 1;
+          background: rgba(255, 255, 255, 0.1);
+        }
+      }
+    }
+    
+    .no-user {
+      display: flex;
+      align-items: center;
+    }
     
     .logo {
       margin: 0;

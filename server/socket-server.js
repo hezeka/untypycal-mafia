@@ -63,6 +63,14 @@ setInterval(() => {
     if (cleaned > 0) {
       logGameAction(roomId, 'cleanup', { playersRemoved: cleaned })
     }
+    
+    // Если в комнате не осталось подключенных игроков, удаляем её
+    const connectedPlayers = Array.from(room.players.values()).filter(p => p.connected)
+    if (connectedPlayers.length === 0) {
+      room.stopTimer() // Останавливаем таймер перед удалением комнаты
+      gameRooms.delete(roomId)
+      logGameAction(roomId, 'room_deleted', { reason: 'no_connected_players' })
+    }
   })
 }, 10 * 60 * 1000)
 
@@ -171,10 +179,10 @@ io.on('connection', (socket) => {
       // Send confirmation to reconnecting player
       socket.emit('join-success', room.getGameData(socket.id))
       
-      logGameAction(data.roomId, 'player_reconnected', { 
-        playerName: data.playerName,
-        role: playerData.role || 'no_role'
-      })
+      // logGameAction(data.roomId, 'player_reconnected', { 
+      //   playerName: data.playerName,
+      //   role: playerData.role || 'no_role'
+      // })
       
       return // ВАЖНО: выходим здесь, не выполняем валидацию ниже
     }
@@ -244,6 +252,50 @@ io.on('connection', (socket) => {
       playerName: nameValidation.name,
       totalPlayers: room.players.size,
       formatted: nameValidation.name !== data.playerName
+    })
+  })
+
+  // Global username availability check
+  socket.on('check-global-username', (data) => {
+    const { username } = data
+    
+    // Check format
+    const validation = validatePlayerName(username, [])
+    if (!validation.valid) {
+      socket.emit('global-username-result', {
+        available: false,
+        error: validation.error,
+        suggestions: validation.suggestions || []
+      })
+      return
+    }
+    
+    // Check uniqueness across all rooms
+    const allPlayerNames = new Set()
+    for (const room of gameRooms.values()) {
+      for (const player of room.players.values()) {
+        if (player.name && player.connected) {
+          allPlayerNames.add(player.name.toLowerCase())
+        }
+      }
+    }
+    
+    const normalizedUsername = username.toLowerCase()
+    if (allPlayerNames.has(normalizedUsername)) {
+      // Generate suggestions
+      const suggestions = suggestAlternativeNames(username, Array.from(allPlayerNames))
+      
+      socket.emit('global-username-result', {
+        available: false,
+        error: 'Это имя уже используется в другой игре',
+        suggestions
+      })
+      return
+    }
+    
+    socket.emit('global-username-result', {
+      available: true,
+      formattedName: validation.name
     })
   })
 
@@ -326,10 +378,10 @@ io.on('connection', (socket) => {
         }
       })
 
-      logGameAction(data.roomId, 'role_selected', { 
-        roleId: data.roleId,
-        totalRoles: room.selectedRoles.length
-      })
+      // logGameAction(data.roomId, 'role_selected', { 
+      //   roleId: data.roleId,
+      //   totalRoles: room.selectedRoles.length
+      // })
     }
   })
 
@@ -351,11 +403,223 @@ io.on('connection', (socket) => {
         }
       })
 
-      logGameAction(data.roomId, 'role_removed', { 
-        roleId: data.roleId,
-        totalRoles: room.selectedRoles.length
-      })
+      // logGameAction(data.roomId, 'role_removed', { 
+      //   roleId: data.roleId,
+      //   totalRoles: room.selectedRoles.length
+      // })
     }
+  })
+
+  // Player management handlers
+  socket.on('kick-player', (data) => {
+    const room = gameRooms.get(data.roomId)
+    if (!room || !room.isHost(socket.id)) {
+      socket.emit('error', { message: 'Только ведущий может удалять игроков' })
+      return
+    }
+
+    const playerToKick = room.players.get(data.playerId)
+    if (!playerToKick) {
+      socket.emit('error', { message: 'Игрок не найден' })
+      return
+    }
+
+    if (data.playerId === room.hostId) {
+      socket.emit('error', { message: 'Нельзя удалить ведущего' })
+      return
+    }
+
+    // Remove player from room
+    room.removePlayer(data.playerId)
+    
+    // Notify the kicked player
+    io.to(data.playerId).emit('kicked-from-room', {
+      message: `Вы были удалены из комнаты ведущим`
+    })
+    
+    // Add system message
+    room.addChatMessage(null, `🚪 Игрок ${playerToKick.name} был удален из комнаты`, 'system')
+    
+    // Update all remaining players
+    room.players.forEach((player, playerId) => {
+      if (player.connected) {
+        io.to(playerId).emit('game-updated', room.getGameData(playerId))
+      }
+    })
+
+    console.log(`Player ${playerToKick.name} kicked from room ${data.roomId}`)
+  })
+
+  socket.on('toggle-player-mute', (data) => {
+    const room = gameRooms.get(data.roomId)
+    if (!room || !room.isHost(socket.id)) {
+      socket.emit('error', { message: 'Только ведущий может мутить игроков' })
+      return
+    }
+
+    const player = room.players.get(data.playerId)
+    if (!player) {
+      socket.emit('error', { message: 'Игрок не найден' })
+      return
+    }
+
+    player.muted = data.muted
+    
+    // Notify the muted/unmuted player
+    io.to(data.playerId).emit('mute-status-changed', {
+      muted: data.muted,
+      message: data.muted ? 'Вам запрещен чат ведущим' : 'Вам разрешен чат'
+    })
+    
+    // Add system message
+    room.addChatMessage(null, `${data.muted ? '🔇' : '🔊'} Игрок ${player.name} ${data.muted ? 'замучен' : 'размучен'}`, 'system')
+    
+    // Update all players
+    room.players.forEach((player, playerId) => {
+      if (player.connected) {
+        io.to(playerId).emit('game-updated', room.getGameData(playerId))
+      }
+    })
+
+    console.log(`Player ${player.name} ${data.muted ? 'muted' : 'unmuted'} in room ${data.roomId}`)
+  })
+
+  socket.on('kick-disconnected-players', (data) => {
+    const room = gameRooms.get(data.roomId)
+    if (!room || !room.isHost(socket.id)) {
+      socket.emit('error', { message: 'Только ведущий может удалять игроков' })
+      return
+    }
+
+    // Find all disconnected players (exclude host)
+    const disconnectedPlayers = Array.from(room.players.values())
+      .filter(p => !p.connected && p.id !== room.hostId)
+    
+    if (disconnectedPlayers.length === 0) {
+      socket.emit('error', { message: 'Нет отключившихся игроков' })
+      return
+    }
+
+    // Remove all disconnected players
+    const kickedNames = []
+    disconnectedPlayers.forEach(player => {
+      kickedNames.push(player.name)
+      room.removePlayer(player.id)
+    })
+    
+    // Add system message
+    room.addChatMessage(null, `🧹 Удалены отключившиеся: ${kickedNames.join(', ')}`, 'system')
+    
+    // Update all remaining players
+    room.players.forEach((player, playerId) => {
+      if (player.connected) {
+        io.to(playerId).emit('game-updated', room.getGameData(playerId))
+      }
+    })
+
+    console.log(`Kicked ${disconnectedPlayers.length} disconnected players from room ${data.roomId}`)
+  })
+
+  socket.on('mute-all-players', (data) => {
+    const room = gameRooms.get(data.roomId)
+    if (!room || !room.isHost(socket.id)) {
+      socket.emit('error', { message: 'Только ведущий может мутить игроков' })
+      return
+    }
+
+    // Mute/unmute all players except host
+    const affectedPlayers = []
+    room.players.forEach(player => {
+      if (player.id !== room.hostId && player.muted !== data.muted) {
+        player.muted = data.muted
+        affectedPlayers.push(player.name)
+        
+        // Notify each affected player
+        io.to(player.id).emit('mute-status-changed', {
+          muted: data.muted,
+          message: data.muted ? 'Все игроки замучены' : 'Все игроки размучены'
+        })
+      }
+    })
+    
+    if (affectedPlayers.length > 0) {
+      // Add system message
+      room.addChatMessage(null, `${data.muted ? '🔇' : '🔊'} Все игроки ${data.muted ? 'замучены' : 'размучены'}`, 'system')
+    }
+    
+    // Update all players
+    room.players.forEach((player, playerId) => {
+      if (player.connected) {
+        io.to(playerId).emit('game-updated', room.getGameData(playerId))
+      }
+    })
+
+    console.log(`${data.muted ? 'Muted' : 'Unmuted'} all players in room ${data.roomId}`)
+  })
+
+  socket.on('assign-roles-manually', (data) => {
+    const room = gameRooms.get(data.roomId)
+    if (!room || !room.isHost(socket.id)) {
+      socket.emit('error', { message: 'Только ведущий может назначать роли' })
+      return
+    }
+
+    if (room.gameState !== 'setup') {
+      socket.emit('error', { message: 'Роли можно назначать только в фазе настройки' })
+      return
+    }
+
+    // Validate assignments
+    const { assignments } = data
+    const assignedRoles = Object.values(assignments)
+    const selectedRoles = room.selectedRoles
+    
+    // Check if all assigned roles are in selected roles
+    for (const roleId of assignedRoles) {
+      if (!selectedRoles.includes(roleId)) {
+        socket.emit('error', { message: `Роль ${roleId} не была выбрана` })
+        return
+      }
+    }
+    
+    // Check for duplicate role assignments
+    const roleCount = {}
+    for (const roleId of assignedRoles) {
+      roleCount[roleId] = (roleCount[roleId] || 0) + 1
+    }
+    
+    for (const [roleId, count] of Object.entries(roleCount)) {
+      const maxCount = selectedRoles.filter(r => r === roleId).length
+      if (count > maxCount) {
+        socket.emit('error', { message: `Роль ${roleId} назначена слишком много раз` })
+        return
+      }
+    }
+    
+    // Apply assignments
+    for (const [playerId, roleId] of Object.entries(assignments)) {
+      const player = room.players.get(playerId)
+      if (player && player.role !== 'game_master') {
+        player.role = roleId
+        console.log(`Manually assigned role ${roleId} to player ${player.name}`)
+      }
+    }
+    
+    // Put remaining unassigned roles in center
+    const assignedRolesList = Object.values(assignments)
+    const unassignedRoles = selectedRoles.filter(roleId => {
+      const assignedCount = assignedRolesList.filter(r => r === roleId).length
+      const selectedCount = selectedRoles.filter(r => r === roleId).length
+      return selectedCount > assignedCount
+    })
+    
+    room.gameData.centerCards = unassignedRoles
+    console.log(`Center cards after manual assignment:`, room.gameData.centerCards)
+    
+    logGameAction(data.roomId, 'roles_assigned_manually', {
+      assignmentsCount: Object.keys(assignments).length,
+      centerCards: room.gameData.centerCards.length
+    })
   })
 
   socket.on('start-game', (data) => {
@@ -371,9 +635,43 @@ io.on('connection', (socket) => {
       return
     }
 
-    room.distributeRoles()
-    room.gameState = 'night'
-    room.currentPhase = 'start'
+    // Check if roles have been manually assigned
+    const playersWithRoles = Array.from(room.players.values())
+      .filter(p => p.role !== 'game_master' && p.role !== null).length
+    
+    // Only auto-distribute if roles haven't been manually assigned
+    if (playersWithRoles === 0) {
+      room.distributeRoles()
+    }
+    
+    room.gameState = 'day'
+    room.currentPhase = 'discussion'
+    
+    // Автоматически запускаем таймер для дневной фазы знакомства
+    const dayTimer = 5 * 60 // 5 минут для знакомства
+    const roomId = data.roomId.toUpperCase()
+    
+    room.startTimer(dayTimer, 
+      // onTick - каждую секунду
+      (remainingTime) => {
+        io.to(roomId).emit('timer-updated', { timer: remainingTime })
+      },
+      // onEnd - когда время истекло
+      () => {
+        io.to(roomId).emit('timer-ended', { message: 'Время фазы истекло!' })
+        room.addChatMessage(null, '⏰ Время дневной фазы знакомства истекло!', 'system')
+        
+        // Отправляем обновленный чат всем игрокам
+        room.players.forEach((player, playerId) => {
+          if (player.connected) {
+            io.to(playerId).emit('game-updated', room.getGameData(playerId))
+          }
+        })
+      }
+    )
+    
+    // Add welcome message
+    room.addChatMessage(null, `🎮 Игра началась! Роли ${playersWithRoles > 0 ? 'назначены ведущим' : 'распределены случайно'}. В центре ${room.gameData.centerCards.length} карт.`, 'system')
     
     // Send personalized game start data to each player
     room.players.forEach((player, playerId) => {
@@ -381,6 +679,9 @@ io.on('connection', (socket) => {
         io.to(playerId).emit('game-started', room.getGameData(playerId))
       }
     })
+    
+    // Отправляем начальное значение таймера
+    io.to(roomId).emit('timer-updated', { timer: dayTimer })
     
     logGameAction(data.roomId, 'game_started', {
       playersCount: room.players.size - 1, // Exclude host
@@ -412,7 +713,7 @@ io.on('connection', (socket) => {
     room.resetVoting()
     room.gameState = 'setup'
     room.currentPhase = null
-    room.timer = null
+    room.stopTimer() // Останавливаем таймер при перезапуске игры
 
     // Уведомляем всех игроков об обновлении
     room.players.forEach(player => {
@@ -440,6 +741,45 @@ io.on('connection', (socket) => {
       room.resetVoting()
     }
     
+    // Автоматически запускаем таймер для определенных фаз
+    const phaseTimers = {
+      'day': 10 * 60, // 10 минут для дневной фазы
+      'voting': 3 * 60, // 3 минуты для голосования  
+      'night': 5 * 60 // 5 минут для ночи
+    }
+    
+    if (phaseTimers[data.gameState]) {
+      const timerSeconds = phaseTimers[data.gameState]
+      const roomId = data.roomId.toUpperCase()
+      
+      room.startTimer(timerSeconds, 
+        // onTick - каждую секунду
+        (remainingTime) => {
+          io.to(roomId).emit('timer-updated', { timer: remainingTime })
+        },
+        // onEnd - когда время истекло
+        () => {
+          io.to(roomId).emit('timer-ended', { message: 'Время фазы истекло!' })
+          room.addChatMessage(null, '⏰ Время фазы истекло!', 'system')
+          
+          // Отправляем обновленный чат всем игрокам
+          room.players.forEach((player, playerId) => {
+            if (player.connected) {
+              io.to(playerId).emit('game-updated', room.getGameData(playerId))
+            }
+          })
+        }
+      )
+      
+      // Отправляем начальное значение таймера
+      io.to(roomId).emit('timer-updated', { timer: timerSeconds })
+    } else {
+      // Останавливаем таймер для фаз без таймера
+      const roomId = data.roomId.toUpperCase()
+      room.stopTimer()
+      io.to(roomId).emit('timer-updated', { timer: null })
+    }
+    
     io.to(data.roomId).emit('phase-changed', {
       gameState: room.gameState,
       currentPhase: room.currentPhase
@@ -452,11 +792,12 @@ io.on('connection', (socket) => {
       }
     })
 
-    logGameAction(data.roomId, 'phase_changed', {
-      oldState,
-      newState: data.gameState,
-      newPhase: data.currentPhase
-    })
+    // logGameAction(data.roomId, 'phase_changed', {
+    //   oldState,
+    //   newState: data.gameState,
+    //   newPhase: data.currentPhase,
+    //   timerStarted: !!phaseTimers[data.gameState]
+    // })
   })
 
   socket.on('send-message', async (data) => {
@@ -512,30 +853,33 @@ io.on('connection', (socket) => {
           result.recipients.forEach(recipientId => {
             io.to(recipientId).emit('new-message', result.helpMessage)
           })
-          logGameAction(data.roomId, 'command_executed', { 
-            player: player.name,
-            command: sanitizedMessage.split(' ')[0],
-            type: 'help'
-          })
+          // logGameAction(data.roomId, 'command_executed', { 
+          //   player: player.name,
+          //   command: sanitizedMessage.split(' ')[0],
+          //   type: 'help'
+          // })
           return
         }
 
         if (result.whisperMessage) {
+          // СОХРАНЯЕМ шепот в серверной истории чата
+          room.chat.push(result.whisperMessage)
+          
           result.recipients.forEach(recipientId => {
             io.to(recipientId).emit('new-whisper', result.whisperMessage)
           })
 
           if (result.whisperMessage.type === 'group_whisper') {
-            logGameAction(data.roomId, 'group_whisper', {
-              from: player.name,
-              to: result.whisperMessage.targetGroupName,
-              membersCount: result.whisperMessage.targetMembers.length
-            })
+            // logGameAction(data.roomId, 'group_whisper', {
+            //   from: player.name,
+            //   to: result.whisperMessage.targetGroupName,
+            //   membersCount: result.whisperMessage.targetMembers.length
+            // })
           } else {
-            logGameAction(data.roomId, 'whisper', {
-              from: player.name,
-              to: result.whisperMessage.targetPlayerName
-            })
+            // logGameAction(data.roomId, 'whisper', {
+            //   from: player.name,
+            //   to: result.whisperMessage.targetPlayerName
+            // })
           }
           return
         }
@@ -563,11 +907,11 @@ io.on('connection', (socket) => {
       io.to(recipientId).emit('new-message', lastMessage)
     })
 
-    logGameAction(data.roomId, 'message', {
-      from: player.name,
-      type: messageType,
-      recipientsCount: recipients.length
-    })
+    // logGameAction(data.roomId, 'message', {
+    //   from: player.name,
+    //   type: messageType,
+    //   recipientsCount: recipients.length
+    // })
   })
 
   socket.on('voice-activity', (data) => {
@@ -657,12 +1001,12 @@ io.on('connection', (socket) => {
       }
     })
 
-    logGameAction(data.roomId, 'vote', {
-      voter: voter.name,
-      target: data.targetId ? room.players.get(data.targetId)?.name : 'ABSTAIN',
-      votesSubmitted: room.votes.size,
-      totalVoters: room.getEligibleVoters().length
-    })
+    // logGameAction(data.roomId, 'vote', {
+    //   voter: voter.name,
+    //   target: data.targetId ? room.players.get(data.targetId)?.name : 'ABSTAIN',
+    //   votesSubmitted: room.votes.size,
+    //   totalVoters: room.getEligibleVoters().length
+    // })
   })
 
   // Завершение голосования
@@ -689,10 +1033,10 @@ io.on('connection', (socket) => {
       room.currentPhase = 'results'
       room.addChatMessage(null, winCondition.message, 'system')
     } else {
-      room.gameState = 'day'
-      room.currentPhase = 'discussion'
-      room.timer = 600 // 10 минут на обсуждение
-      room.addChatMessage(null, `🌅 Наступает новый день. ${winCondition.message}`, 'system')
+      room.gameState = 'night'
+      room.currentPhase = 'start'
+      room.timer = 600 // 10 минут на ночную фазу
+      room.addChatMessage(null, `🌙 Наступает ночь. ${winCondition.message}`, 'system')
     }
 
     // Отправляем результаты всем игрокам
@@ -707,11 +1051,11 @@ io.on('connection', (socket) => {
       }
     })
 
-    logGameAction(data.roomId, 'voting_ended', {
-      eliminated: votingResult.eliminated.length,
-      winner: winCondition.winner,
-      gameEnded: winCondition.gameEnded
-    })
+    // logGameAction(data.roomId, 'voting_ended', {
+    //   eliminated: votingResult.eliminated.length,
+    //   winner: winCondition.winner,
+    //   gameEnded: winCondition.gameEnded
+    // })
   })
 
   socket.on('admin-action', (data) => {
@@ -773,10 +1117,40 @@ io.on('connection', (socket) => {
       return
     }
 
-    room.timer = Math.max(0, parseInt(data.timer) || 0)
-    io.to(data.roomId).emit('timer-updated', { timer: room.timer })
+    const seconds = Math.max(0, parseInt(data.timer) || 0)
+    
+    if (seconds > 0) {
+      // Запускаем обратный отсчет
+      room.startTimer(seconds, 
+        // onTick - каждую секунду
+        (remainingTime) => {
+          const roomId = data.roomId.toUpperCase()
+          io.to(roomId).emit('timer-updated', { timer: remainingTime })
+        },
+        // onEnd - когда время истекло
+        () => {
+          const roomId = data.roomId.toUpperCase()
+          io.to(roomId).emit('timer-ended', { message: 'Время истекло!' })
+          room.addChatMessage(null, '⏰ Время фазы истекло!', 'system')
+          
+          // Отправляем обновленный чат всем игрокам
+          room.players.forEach((player, playerId) => {
+            if (player.connected) {
+              io.to(playerId).emit('game-updated', room.getGameData(playerId))
+            }
+          })
+        }
+      )
+    } else {
+      // Останавливаем таймер
+      room.stopTimer()
+    }
+    
+    // Отправляем текущее значение таймера
+    const roomId = data.roomId.toUpperCase()
+    io.to(roomId).emit('timer-updated', { timer: room.timer })
 
-    logGameAction(data.roomId, 'timer_changed', { timer: room.timer })
+    // logGameAction(data.roomId, 'timer_changed', { timer: room.timer })
   })
 
   socket.on('next-phase', (data) => {
@@ -810,9 +1184,9 @@ io.on('connection', (socket) => {
           nextPhase = 'results'
           room.addChatMessage(null, winCondition.message, 'system')
         } else {
-          nextState = 'day'
-          nextPhase = 'discussion'
-          room.addChatMessage(null, `🌅 Наступает новый день. ${winCondition.message}`, 'system')
+          nextState = 'night'
+          nextPhase = 'start'
+          room.addChatMessage(null, `🌙 Наступает ночь. ${winCondition.message}`, 'system')
         }
         
         // Отправляем результаты голосования
@@ -826,11 +1200,11 @@ io.on('connection', (socket) => {
           }
         })
         
-        logGameAction(data.roomId, 'auto_voting_ended', {
-          eliminated: votingResult.eliminated.length,
-          winner: winCondition.winner,
-          gameEnded: winCondition.gameEnded
-        })
+        // logGameAction(data.roomId, 'auto_voting_ended', {
+        //   eliminated: votingResult.eliminated.length,
+        //   winner: winCondition.winner,
+        //   gameEnded: winCondition.gameEnded
+        // })
         break
       case 'ended':
         nextState = 'setup'
@@ -852,12 +1226,49 @@ io.on('connection', (socket) => {
 
     room.gameState = nextState
     room.currentPhase = nextPhase
-    room.timer = nextState === 'day' ? 600 : null // 10 minutes for day phase
+    
+    // Автоматически запускаем таймер для определенных фаз
+    const phaseTimers = {
+      'day': 10 * 60, // 10 минут для дневной фазы
+      'voting': 3 * 60, // 3 минуты для голосования  
+      'night': 5 * 60 // 5 минут для ночи
+    }
+    
+    if (phaseTimers[nextState]) {
+      const timerSeconds = phaseTimers[nextState]
+      const roomId = data.roomId.toUpperCase()
+      
+      room.startTimer(timerSeconds, 
+        // onTick - каждую секунду
+        (remainingTime) => {
+          io.to(roomId).emit('timer-updated', { timer: remainingTime })
+        },
+        // onEnd - когда время истекло
+        () => {
+          io.to(roomId).emit('timer-ended', { message: 'Время фазы истекло!' })
+          room.addChatMessage(null, '⏰ Время фазы истекло!', 'system')
+          
+          // Отправляем обновленный чат всем игрокам
+          room.players.forEach((player, playerId) => {
+            if (player.connected) {
+              io.to(playerId).emit('game-updated', room.getGameData(playerId))
+            }
+          })
+        }
+      )
+      
+      // Отправляем начальное значение таймера
+      io.to(roomId).emit('timer-updated', { timer: timerSeconds })
+    } else {
+      // Останавливаем таймер для фаз без таймера
+      const roomId = data.roomId.toUpperCase()
+      room.stopTimer()
+      io.to(roomId).emit('timer-updated', { timer: null })
+    }
 
     io.to(data.roomId).emit('phase-changed', {
       gameState: room.gameState,
-      currentPhase: room.currentPhase,
-      timer: room.timer
+      currentPhase: room.currentPhase
     })
 
     // Send personalized game data update to each player
@@ -867,10 +1278,10 @@ io.on('connection', (socket) => {
       }
     })
 
-    logGameAction(data.roomId, 'next_phase', {
-      newState: nextState,
-      newPhase: nextPhase
-    })
+    // logGameAction(data.roomId, 'next_phase', {
+    //   newState: nextState,
+    //   newPhase: nextPhase
+    // })
   })
 
   socket.on('disconnect', (reason) => {
@@ -902,10 +1313,10 @@ io.on('connection', (socket) => {
           })
         }
 
-        logGameAction(roomId, 'player_disconnected', {
-          playerName: player.name,
-          connectedPlayersLeft: connectedPlayersCount
-        })
+        // logGameAction(roomId, 'player_disconnected', {
+        //   playerName: player.name,
+        //   connectedPlayersLeft: connectedPlayersCount
+        // })
         break
       }
     }

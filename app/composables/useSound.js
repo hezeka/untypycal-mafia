@@ -12,7 +12,7 @@ const SOUNDS = {
 }
 
 // Проигрывание звука
-const playSound = (soundType, volume = 0.5) => {
+const playSound = (soundType, volume = 0.3) => {
   if (!soundsEnabled.value || !process.client) return
   
   try {
