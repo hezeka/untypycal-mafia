@@ -1103,14 +1103,20 @@ io.on('connection', (socket) => {
   })
 
   socket.on('admin-action', (data) => {
+    console.log('🎯 Admin action received:', data)
+    
     const room = gameRooms.get(data.roomId)
     if (!room || !room.isHost(socket.id)) {
       socket.emit('error', { message: 'Только ведущий может выполнять эти действия' })
       return
     }
 
+    console.log('🔍 Looking for player with ID:', data.targetId)
+    console.log('📋 Available player IDs:', Array.from(room.players.keys()))
+    
     const targetPlayer = room.players.get(data.targetId)
     if (!targetPlayer) {
+      console.log('❌ Player not found in room.players Map')
       socket.emit('error', { message: 'Игрок не найден' })
       return
     }

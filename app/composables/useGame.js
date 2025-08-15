@@ -226,7 +226,7 @@ export const useGame = () => {
       console.log('🚀 Game started event received')
       
       // Звук начала игры
-      playSound('day', 0.8)
+      playSound('day', 0.3)
       
       // Force update player role when game starts BEFORE updating game data
       const currentPlayerData = newGameData.players?.find(p => 
@@ -249,13 +249,13 @@ export const useGame = () => {
       
       // Звук смены фазы
       if (gameState === 'voting') {
-        playSound('voting', 0.4)
+        playSound('voting', 0.1)
       } else if (gameState === 'night') {
-        playSound('night', 0.4)
+        playSound('night', 0.1)
       } else if (gameState === 'day') {
-        playSound('day', 0.4)
+        playSound('day', 0.1)
       } else {
-        playSound('phaseChange', 0.5)
+        playSound('phaseChange', 0.2)
       }
     })
 
@@ -356,13 +356,25 @@ export const useGame = () => {
 
   // Helper functions
   const updateGameData = (newGameData) => {
+    // Проверяем изменения в состоянии игроков (alive, protected, etc.)
+    const playersChanged = gameData.players && newGameData.players && 
+      gameData.players.some((player, index) => {
+        const newPlayer = newGameData.players[index]
+        return !newPlayer || 
+               player.alive !== newPlayer.alive ||
+               player.protected !== newPlayer.protected ||
+               player.role !== newPlayer.role ||
+               player.connected !== newPlayer.connected
+      })
+    
     // Более строгая проверка на необходимость обновления данных
     const hasSignificantChanges = 
       gameData.id !== newGameData.id ||
       gameData.gameState !== newGameData.gameState ||
       gameData.players?.length !== newGameData.players?.length ||
       gameData.selectedRoles?.length !== newGameData.selectedRoles?.length ||
-      gameData.chat?.length !== newGameData.chat?.length
+      gameData.chat?.length !== newGameData.chat?.length ||
+      playersChanged
     
     if (!hasSignificantChanges) {
       // Данные не изменились значительно, пропускаем обновление
