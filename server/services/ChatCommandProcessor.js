@@ -470,7 +470,12 @@ export class ChatCommandProcessor {
       return true // Разрешаем шепот всем ночью (ограничение будет в processWhisperCommand)
     }
     
-    // Во время голосования шепот запрещен
+    // Во время голосования разрешен только шепот ведущему
+    if (this.room.gameState === 'voting') {
+      const target = args[0]?.toLowerCase()
+      return target === 'ведущий' || target === 'host'
+    }
+    
     return false
   }
 

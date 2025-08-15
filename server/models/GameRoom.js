@@ -165,6 +165,25 @@ export class GameRoom {
       votedFor: this.votes.get(requestingSocketId) || null
     }
     
+    // Для ведущего добавляем подробную информацию о голосах
+    if (isHostRequesting && this.gameState === 'voting') {
+      const votes = []
+      this.votes.forEach((targetId, voterId) => {
+        const voter = this.players.get(voterId)
+        const target = targetId ? this.players.get(targetId) : null
+        
+        if (voter) {
+          votes.push({
+            voter: voterId,
+            voterName: voter.name,
+            target: targetId,
+            targetName: target ? target.name : null
+          })
+        }
+      })
+      votingData.votes = votes
+    }
+    
     return {
       ...baseData,
       players: safePlayers,

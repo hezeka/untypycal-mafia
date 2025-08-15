@@ -241,9 +241,9 @@
               <div v-if="isHost && votingStats.votes" class="detailed-votes">
                 <h5>Подробная статистика:</h5>
                 <div v-for="vote in votingStats.votes" :key="vote.voter" class="vote-detail">
-                  <span class="voter">{{ getPlayerName(vote.voter) }}</span>
+                  <span class="voter">{{ vote.voterName }}</span>
                   →
-                  <span class="target">{{ vote.target ? getPlayerName(vote.target) : 'Воздержание' }}</span>
+                  <span class="target">{{ vote.targetName || 'Воздержание' }}</span>
                 </div>
               </div>
             </div>
@@ -495,7 +495,7 @@ const votePlayer = (playerId) => {
   if (gameState.value !== 'voting' || isHost.value) return
   
   // Запретить голосование мертвым игрокам
-  if (!player.value.alive) return
+  if (!player.alive) return
   
   // playerId может быть null (воздержание) или ID игрока
   votedPlayer.value = playerId
