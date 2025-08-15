@@ -1,5 +1,5 @@
 // app/composables/useVoiceActivity.js
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, onUnmounted, readonly } from 'vue'
 
 const isActive = ref(false)
 const isSupported = ref(false)
@@ -47,6 +47,16 @@ export const useVoiceActivity = () => {
       
       // Запрашиваем доступ к микрофону с таймаутом
       console.log('🔍 Requesting microphone access...')
+
+      // Даем браузеру явно перерисовать UI и выполнить рендер перед запросом доступа.
+      // Ждём два кадра + небольшой буфер — это в большинстве случаев устраняет фриз.
+      await new Promise(resolve => {
+        requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(resolve, 120)))
+      })
+
+      // Не вызываем navigator.permissions.query — на некоторых платформах это добавляет задержку.
+      // Переходим сразу к getUserMedia
+      
       const mediaPromise = navigator.mediaDevices.getUserMedia({ 
         audio: {
           echoCancellation: true,
@@ -66,6 +76,13 @@ export const useVoiceActivity = () => {
       // Создаем аудио контекст
       console.log('🔧 Creating audio context...')
       audioContext.value = new (window.AudioContext || window.webkitAudioContext)()
+      
+      // Проверяем состояние аудио контекста
+      if (audioContext.value.state === 'suspended') {
+        console.log('🔓 Resuming suspended audio context...')
+        await audioContext.value.resume()
+      }
+      
       const source = audioContext.value.createMediaStreamSource(mediaStream.value)
       console.log('✅ Audio context created')
       
@@ -88,6 +105,18 @@ export const useVoiceActivity = () => {
       
     } catch (error) {
       console.error('❌ Failed to initialize voice detection:', error)
+      
+      // Сбрасываем состояния при ошибке
+      if (mediaStream.value) {
+        mediaStream.value.getTracks().forEach(track => track.stop())
+        mediaStream.value = null
+      }
+      if (audioContext.value) {
+        audioContext.value.close()
+        audioContext.value = null
+      }
+      
+      isSupported.value = false
       return false
     }
   }
@@ -162,8 +191,33 @@ export const useVoiceActivity = () => {
     console.log('✅ Voice detection fully stopped')
   }
 
+  const pendingInit = ref(false)
+  let pendingUserGestureListener = null
+
+  const triggerPendingInitOnGesture = () => {
+    if (pendingUserGestureListener) return
+    pendingUserGestureListener = (ev) => {
+      if (!ev.isTrusted) return
+      // удаляем слушатель и запускаем инициализацию
+      document.removeEventListener('pointerdown', pendingUserGestureListener)
+      pendingUserGestureListener = null
+      if (currentOnActivityChange) {
+        initVoiceDetection(currentOnActivityChange)
+          .then(ok => { if (ok) pendingInit.value = false })
+          .catch(err => {
+            console.warn('❌ initVoiceDetection failed on user gesture:', err)
+            pendingInit.value = false
+          })
+      } else {
+        pendingInit.value = false
+      }
+    }
+    document.addEventListener('pointerdown', pendingUserGestureListener, { once: false })
+  }
+
   // Функция для отключения/включения микрофона
-  const toggleMicrophone = async (forceStopCallback = null, forceStartCallback = null, voiceCallback = null) => {
+  // Дополнительно: четвертый аргумент userGestureEvent (если вызов происходит из event handler, передайте event)
+  const toggleMicrophone = async (forceStopCallback = null, forceStartCallback = null, voiceCallback = null, userGestureEvent = null) => {
     microphoneEnabled.value = !microphoneEnabled.value
     
     // Сохраняем состояние в localStorage
@@ -199,13 +253,21 @@ export const useVoiceActivity = () => {
       
       // Затем переинициализируем микрофон если есть callback
       if (currentOnActivityChange) {
-        console.log('🔄 Initializing microphone with saved callback')
-        try {
-          await initVoiceDetection(currentOnActivityChange)
-          console.log('✅ Microphone enabled and voice detection started')
-        } catch (error) {
-          console.warn('❌ Failed to initialize microphone:', error)
-          microphoneEnabled.value = false // Откатываем состояние при ошибке
+        // Если вызов происходит из доверенного пользовательского события — инициализируем сразу.
+        if (userGestureEvent && userGestureEvent.isTrusted) {
+          console.log('🔄 Initializing microphone with saved callback (user gesture)')
+          try {
+            await initVoiceDetection(currentOnActivityChange)
+            console.log('✅ Microphone enabled and voice detection started')
+          } catch (error) {
+            console.warn('❌ Failed to initialize microphone:', error)
+            microphoneEnabled.value = false // Откатываем состояние при ошибке
+          }
+        } else {
+          // Иначе — откладываем инициализацию до следующего доверенного жеста
+          pendingInit.value = true
+          console.log('⏳ Microphone init deferred until user gesture (pointerdown). Call toggleMicrophone from a click to start immediately.')
+          triggerPendingInitOnGesture()
         }
       } else {
         console.warn('⚠️ No callback available, cannot initialize microphone')

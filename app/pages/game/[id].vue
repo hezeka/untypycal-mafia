@@ -788,7 +788,16 @@ onMounted(async () => {
     sendVoiceActivity(isActive)
   }
   
-  // Микрофон будет инициализирован при первом клике пользователя
+  // Автоматически инициализируем микрофон если он включен
+  nextTick(async () => {
+    console.log('🎤 Attempting to initialize voice detection...')
+    const success = await initVoiceDetection(voiceActivityCallback)
+    if (success) {
+      console.log('✅ Voice detection initialized successfully')
+    } else {
+      console.log('❌ Voice detection initialization failed')
+    }
+  })
   
   // Try to reconnect to the room from URL
   const urlRoomId = roomId.value
@@ -854,7 +863,7 @@ onMounted(() => {
       clearStoredData()
       router.push('/')
     }
-  }, 15000) // 15 seconds timeout
+  }, 60000) // 15 seconds timeout
 })
 
 // Clear timeout if room is found
