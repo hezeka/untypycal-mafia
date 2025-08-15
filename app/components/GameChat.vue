@@ -169,7 +169,11 @@ const canSendMessage = computed(() => {
     return true // All can try to send messages, server will handle restrictions
   }
   
-  // During voting phase, no one can chat
+  // During voting phase, players can whisper to host
+  if (gameState === 'voting') {
+    return true // Allow whispers to host
+  }
+  
   return false
 })
 
@@ -187,7 +191,9 @@ const chatPlaceholder = computed(() => {
     }
     return 'Ночью доступен только шепот ведущему: /ш ведущий <текст>'
   }
-  if (gameState === 'voting') return 'Во время голосования чат отключен'
+  if (gameState === 'voting') {
+    return isHost.value ? 'Сообщение всем игрокам...' : 'Шепот ведущему: /ш ведущий <текст>'
+  }
   
   return 'Чат недоступен'
 })

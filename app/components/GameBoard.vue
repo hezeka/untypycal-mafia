@@ -97,7 +97,7 @@
           </div>
           
           <!-- Кнопка воздержания во время голосования -->
-          <div v-if="gameState === 'voting' && !isHost" class="abstain-section">
+          <div v-if="gameState === 'voting' && !isHost && player.alive" class="abstain-section">
             <button 
               @click="votePlayer(null)"
               class="btn abstain-btn"
@@ -129,7 +129,7 @@
                 <div v-if="player.votes > 0" class="vote-count">{{ player.votes }}</div>
                 <div v-if="!player.alive" class="death-marker">💀</div>
                 <div v-else-if="!player.connected" class="disconnected-marker">😴</div>
-                <div v-if="player.protected" class="protection-marker">🛡️</div>
+                <div v-if="player.protected && isHost" class="protection-marker">🛡️</div>
               </div>
               
               <div class="player-info">
@@ -235,6 +235,16 @@
               <p>Проголосовало: {{ votingStats.submitted }} из {{ votingStats.total }} игроков</p>
               <div v-if="votingStats.submitted < votingStats.total" class="missing-votes">
                 Ожидаем голосов от: {{ getMissingVoters() }}
+              </div>
+              
+              <!-- Подробная статистика голосов для ведущего -->
+              <div v-if="isHost && votingStats.votes" class="detailed-votes">
+                <h5>Подробная статистика:</h5>
+                <div v-for="vote in votingStats.votes" :key="vote.voter" class="vote-detail">
+                  <span class="voter">{{ getPlayerName(vote.voter) }}</span>
+                  →
+                  <span class="target">{{ vote.target ? getPlayerName(vote.target) : 'Воздержание' }}</span>
+                </div>
               </div>
             </div>
           </div>
@@ -483,6 +493,9 @@ const changePhase = (gameState, currentPhase) => {
 
 const votePlayer = (playerId) => {
   if (gameState.value !== 'voting' || isHost.value) return
+  
+  // Запретить голосование мертвым игрокам
+  if (!player.value.alive) return
   
   // playerId может быть null (воздержание) или ID игрока
   votedPlayer.value = playerId
@@ -1136,5 +1149,39 @@ onUnmounted(() => {
       flex-direction: column;
     }
   }
+}
+
+.detailed-votes {
+  margin-top: 15px;
+  padding: 10px;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.detailed-votes h5 {
+  margin: 0 0 10px 0;
+  color: #fff;
+  font-size: 14px;
+}
+
+.vote-detail {
+  display: flex;
+  align-items: center;
+  margin-bottom: 5px;
+  font-size: 13px;
+  color: #ccc;
+}
+
+.vote-detail .voter {
+  color: #4fc3f7;
+  font-weight: 500;
+  min-width: 80px;
+}
+
+.vote-detail .target {
+  color: #ff8a65;
+  font-weight: 500;
+  margin-left: 5px;
 }
 </style>
