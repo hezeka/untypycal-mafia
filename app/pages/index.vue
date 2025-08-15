@@ -88,7 +88,7 @@
         </div>
 
         <!-- Правила для имен -->
-        <div class="rules-section">
+        <div class="rules-section" style="display: none;">
           <div class="card">
             <div class="card-header">📋 Правила для имен игроков</div>
             <div class="rules-content">

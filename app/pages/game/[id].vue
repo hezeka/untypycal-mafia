@@ -130,6 +130,29 @@
               </div>
             </div>
           </div>
+          
+          <!-- Roles Display (Players only) -->
+          <div v-else class="roles-section">
+            <div class="card">
+              <div class="card-header">
+                Роли в игре
+                <span class="role-counter">({{ selectedRoles.length }} выбрано ведущим)</span>
+              </div>
+              <div v-if="selectedRoles.length > 0" class="roles-grid">
+                <RoleCard
+                  v-for="(role, roleId) in availableRoles"
+                  :key="roleId"
+                  :role="role"
+                  :role-id="roleId"
+                  :selected="selectedRoles.includes(roleId)"
+                  :readonly="true"
+                />
+              </div>
+              <div v-else class="empty-roles">
+                <p class="text-muted">Ведущий пока не выбрал роли для игры</p>
+              </div>
+            </div>
+          </div>
 
           <!-- Players and Chat -->
           <div class="game-sidebar">
@@ -757,22 +780,23 @@ onMounted(async () => {
   initSocketListeners()
   setupSocketListeners()
   
-  // Инициализируем голосовую активность
-  if (process.client) {
-    try {
-      const success = await initVoiceDetection((isActive) => {
-        sendVoiceActivity(isActive)
-      })
-      
-      if (success) {
-        console.log('🎤 Voice activity detection initialized')
-      } else {
-        console.log('🔇 Voice activity not available')
-      }
-    } catch (error) {
-      console.warn('Voice detection initialization failed:', error)
-    }
+  // Инициализируем микрофон если пользователь его включил
+  console.log('🎤 Checking microphone initialization...')
+  
+  // Создаем callback для голосовой активности
+  const voiceActivityCallback = (isActive) => {
+    sendVoiceActivity(isActive)
   }
+  
+  // Инициализируем микрофон асинхронно с задержкой, чтобы не блокировать UI
+  setTimeout(async () => {
+    try {
+      await initVoiceDetection(voiceActivityCallback)
+      console.log('✅ Voice detection initialization completed')
+    } catch (error) {
+      console.warn('❌ Voice detection initialization failed:', error)
+    }
+  }, 1000) // Задержка в 1 секунду для завершения загрузки страницы
   
   // Try to reconnect to the room from URL
   const urlRoomId = roomId.value
@@ -1108,6 +1132,7 @@ definePageMeta({
       padding: 8px 0;
       border-bottom: 1px solid rgba(255, 255, 255, 0.1);
       transition: 0.2s;
+      padding-right: 8px;
       
       &:last-child {
         border-bottom: none;
@@ -1415,6 +1440,16 @@ definePageMeta({
           }
         }
       }
+    }
+  }
+  
+  .empty-roles {
+    padding: 40px 20px;
+    text-align: center;
+    
+    .text-muted {
+      color: rgba(255, 255, 255, 0.6);
+      font-style: italic;
     }
   }
 }

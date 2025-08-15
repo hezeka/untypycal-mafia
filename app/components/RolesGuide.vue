@@ -8,7 +8,7 @@
       
       <div class="modal-content">
         <div class="roles-grid">
-          <RoleCard
+          <role-card
             v-for="(role, roleId) in props.roles"
             :key="roleId"
             :role="role"
@@ -27,6 +27,8 @@
 </template>
 
 <script setup>
+import RoleCard from './role-card.vue'
+
 const props = defineProps({
   gameRoles: {
     type: Array,
@@ -131,7 +133,19 @@ const getTeamName = (team) => {
 }
 
 .role-guide-item {
-  // pointer-events:all; // Делаем некликабельными
+  pointer-events: none; // Делаем некликабельными в режиме справочника
+  
+  // В режиме справочника всегда показываем информацию
+  &.guide-mode {
+    opacity: 1 !important;
+    filter: grayscale(0) !important;
+    
+    // Всегда показываем информацию о роли в режиме справочника
+    :deep(.role-info) {
+      opacity: 1 !important;
+      transform: translateY(0) !important;
+    }
+  }
   
   &.current-player-role {
     border-color: #2ecc71 !important;

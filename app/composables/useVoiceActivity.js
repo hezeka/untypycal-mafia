@@ -7,7 +7,14 @@ const mediaStream = ref(null)
 const audioContext = ref(null)
 const analyser = ref(null)
 const animationFrame = ref(null)
-const microphoneEnabled = ref(true) // Новое состояние для управления микрофоном
+// Инициализируем состояние микрофона из localStorage или включаем по умолчанию
+const getSavedMicrophoneState = () => {
+  if (!process.client) return true
+  const saved = localStorage.getItem('microphoneEnabled')
+  return saved !== null ? JSON.parse(saved) : true
+}
+
+const microphoneEnabled = ref(getSavedMicrophoneState())
 
 // Глобальные переменные для сохранения состояния между вызовами композабла
 let lastActivityState = false
@@ -18,7 +25,12 @@ export const useVoiceActivity = () => {
   const SMOOTHING = 0.3 // Сглаживание
   
   const initVoiceDetection = async (onActivityChange) => {
-    if (!shouldUseMicrophone()) return false
+    console.log('🎤 initVoiceDetection started')
+    
+    if (!shouldUseMicrophone()) {
+      console.log('🎤 shouldUseMicrophone returned false')
+      return false
+    }
     
     // Сохраняем callback для использования при отключении
     console.log('💾 Saving callback for voice detection:', typeof onActivityChange)
@@ -31,8 +43,11 @@ export const useVoiceActivity = () => {
         return false
       }
       
-      // Запрашиваем доступ к микрофону
-      mediaStream.value = await navigator.mediaDevices.getUserMedia({ 
+      console.log('🎤 Browser support confirmed')
+      
+      // Запрашиваем доступ к микрофону с таймаутом
+      console.log('🔍 Requesting microphone access...')
+      const mediaPromise = navigator.mediaDevices.getUserMedia({ 
         audio: {
           echoCancellation: true,
           noiseSuppression: true,
@@ -40,19 +55,32 @@ export const useVoiceActivity = () => {
         } 
       })
       
+      // Добавляем таймаут в 5 секунд
+      const timeoutPromise = new Promise((_, reject) => {
+        setTimeout(() => reject(new Error('Microphone access timeout')), 5000)
+      })
+      
+      mediaStream.value = await Promise.race([mediaPromise, timeoutPromise])
+      console.log('✅ Microphone access granted')
+      
       // Создаем аудио контекст
+      console.log('🔧 Creating audio context...')
       audioContext.value = new (window.AudioContext || window.webkitAudioContext)()
       const source = audioContext.value.createMediaStreamSource(mediaStream.value)
+      console.log('✅ Audio context created')
       
       // Создаем анализатор
+      console.log('🔧 Creating analyser...')
       analyser.value = audioContext.value.createAnalyser()
       analyser.value.fftSize = 256
       analyser.value.smoothingTimeConstant = SMOOTHING
       source.connect(analyser.value)
+      console.log('✅ Analyser created and connected')
       
       isSupported.value = true
       
       // Запускаем анализ
+      console.log('🚀 Starting volume analysis...')
       startVolumeAnalysis(onActivityChange)
       
       console.log('✅ Voice detection initialized')
@@ -135,8 +163,13 @@ export const useVoiceActivity = () => {
   }
 
   // Функция для отключения/включения микрофона
-  const toggleMicrophone = async (forceStopCallback = null, forceStartCallback = null) => {
+  const toggleMicrophone = async (forceStopCallback = null, forceStartCallback = null, voiceCallback = null) => {
     microphoneEnabled.value = !microphoneEnabled.value
+    
+    // Сохраняем состояние в localStorage
+    if (process.client) {
+      localStorage.setItem('microphoneEnabled', JSON.stringify(microphoneEnabled.value))
+    }
     
     if (!microphoneEnabled.value) {
       console.log('🎤❌ Disabling microphone...')
@@ -158,19 +191,25 @@ export const useVoiceActivity = () => {
         forceStartCallback()
       }
       
+      // Если передан новый callback, сохраняем его
+      if (voiceCallback && typeof voiceCallback === 'function') {
+        console.log('💾 Saving new voice callback for first-time initialization')
+        currentOnActivityChange = voiceCallback
+      }
+      
       // Затем переинициализируем микрофон если есть callback
       if (currentOnActivityChange) {
-        console.log('🔄 Reusing saved callback for voice detection')
+        console.log('🔄 Initializing microphone with saved callback')
         try {
           await initVoiceDetection(currentOnActivityChange)
-          console.log('✅ Microphone enabled and voice detection restarted')
+          console.log('✅ Microphone enabled and voice detection started')
         } catch (error) {
-          console.warn('❌ Failed to reinitialize microphone:', error)
+          console.warn('❌ Failed to initialize microphone:', error)
+          microphoneEnabled.value = false // Откатываем состояние при ошибке
         }
       } else {
-        console.warn('⚠️ No callback saved, microphone enabled but not initialized')
-        console.log('🔍 Debug: currentOnActivityChange =', currentOnActivityChange)
-        console.log('🔍 Debug: typeof currentOnActivityChange =', typeof currentOnActivityChange)
+        console.warn('⚠️ No callback available, cannot initialize microphone')
+        microphoneEnabled.value = false // Откатываем состояние
       }
     }
   }
@@ -182,6 +221,12 @@ export const useVoiceActivity = () => {
     
     // Проверяем, что вкладка активна
     if (document.hidden) return false
+    
+    // Дополнительная проверка: если нет поддержки getUserMedia, не инициализируем
+    if (!navigator.mediaDevices?.getUserMedia) {
+      console.log('📵 getUserMedia not supported, skipping microphone')
+      return false
+    }
     
     return true
   }

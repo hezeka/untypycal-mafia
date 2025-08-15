@@ -2,6 +2,9 @@ import { ref, computed, reactive, readonly } from 'vue'
 import { useSocket } from './useSocket'
 import { useSounds } from './useSound'
 
+// Global state for socket listeners (to prevent multiple initialization)
+let globalListenersInitialized = false
+
 // Global state (persists across components)
 const player = reactive({
   id: null,
@@ -39,7 +42,7 @@ export const useGame = () => {
 
   // Computed properties
   const isInRoom = computed(() => !!room.id)
-  const isHost = computed(() => room.isHost)
+  const isHost = computed(() => room.isHost || player.role === 'game_master')
   
   const currentPlayer = computed(() => {
     // Используем более надежный поиск игрока
@@ -49,26 +52,18 @@ export const useGame = () => {
       p.name === player.name
     )
     
-    if (current) {
-      console.log('✅ Current player found:', { 
-        id: current.id, 
-        name: current.name, 
-        role: current.role,
-        searchedBy: current.id === player.id ? 'player.id' : 
-                   current.id === socket.id ? 'socket.id' : 'player.name'
-      })
-    } else {
-      console.log('❌ Current player NOT found. Search params:', {
-        'player.id': player.id,
-        'socket.id': socket.id,
-        'player.name': player.name,
-        'available_players': gameData.players.map(p => ({ 
-          id: p.id, 
-          name: p.name, 
-          role: p.role ? '[ROLE_HIDDEN]' : null // Скрываем роли в логах
-        }))
-      })
+    // Логируем только при отладке и только важные изменения
+    if (process.env.NODE_ENV === 'development') {
+      if (current && !current._lastLogged) {
+        console.log('✅ Current player found:', { 
+          id: current.id, 
+          name: current.name, 
+          role: current.role || 'no_role'
+        })
+        current._lastLogged = true
+      }
     }
+    
     return current
   })
   
@@ -82,6 +77,14 @@ export const useGame = () => {
 
   // Socket event handlers
   const initSocketListeners = () => {
+    // Предотвращаем множественную инициализацию используя глобальное состояние
+    if (globalListenersInitialized) {
+      console.log('⚠️ Socket listeners already initialized, skipping')
+      return
+    }
+    
+    console.log('🔌 Initializing socket listeners')
+    globalListenersInitialized = true
     socket.on('new-message', (message) => {
       // Существующий код
       const existingMessage = gameData.chat.find(m => m.id === message.id)
@@ -127,7 +130,18 @@ export const useGame = () => {
     })
     
     socket.on('room-created', ({ roomId, gameData: newGameData }) => {
-      console.log('🏠 Room created:', roomId)
+      // Предотвращаем обработку дублирующихся событий
+      if (room.id === roomId && room.isHost) {
+        if (process.env.NODE_ENV === 'development') {
+          console.log('⚠️ Duplicate room-created event ignored for room:', roomId)
+        }
+        return
+      }
+      
+      if (process.env.NODE_ENV === 'development') {
+        console.log('🏠 Room created:', roomId)
+      }
+      
       room.id = roomId
       room.hostId = newGameData.hostId
       room.isHost = newGameData.hostId === socket.id
@@ -139,7 +153,17 @@ export const useGame = () => {
     })
 
     socket.on('join-success', (newGameData) => {
-      console.log('📥 Join success event received for room:', newGameData.id)
+      // Предотвращаем обработку дублирующихся событий
+      if (room.id === newGameData.id && player.role) {
+        if (process.env.NODE_ENV === 'development') {
+          console.log('⚠️ Duplicate join-success event ignored for room:', newGameData.id)
+        }
+        return
+      }
+      
+      if (process.env.NODE_ENV === 'development') {
+        console.log('📥 Join success for room:', newGameData.id)
+      }
       
       // КРИТИЧЕСКИ ВАЖНО: обновляем player.id до всех операций
       player.id = socket.id
@@ -156,48 +180,23 @@ export const useGame = () => {
       )
       
       if (currentPlayerData) {
-        console.log('👤 Current player data from server:', {
-          id: currentPlayerData.id,
-          name: currentPlayerData.name,
-          role: currentPlayerData.role || 'NO_ROLE'
-        })
-        
         // Обновляем все данные игрока СРАЗУ
         player.id = currentPlayerData.id
         player.name = currentPlayerData.name
         
         if (currentPlayerData.role) {
           player.role = currentPlayerData.role
-          console.log(`✅ Restored role: ${currentPlayerData.role}`)
-        } else {
-          console.log('⚠️ No role found in server data')
+          if (process.env.NODE_ENV === 'development') {
+            console.log(`✅ Restored role: ${currentPlayerData.role}`)
+          }
         }
-      } else {
-        console.log('❌ Player not found in server response')
-        console.log('Search attempted with:', {
-          'socket.id': socket.id,
-          'player.name': player.name
-        })
-        console.log('Available players:', newGameData.players?.map(p => ({
-          id: p.id,
-          name: p.name,
-          hasRole: !!p.role
-        })))
       }
       
       // Теперь обновляем данные игры
       updateGameData(newGameData)
-      
-      console.log('🎮 Final player state:', { 
-        id: player.id, 
-        name: player.name, 
-        role: player.role || 'NO_ROLE'
-      })
     })
 
     socket.on('game-updated', (newGameData) => {
-      const oldRole = player.role
-      
       // Update room info if not set
       if (!room.id && newGameData.id) {
         room.id = newGameData.id
@@ -212,9 +211,11 @@ export const useGame = () => {
         p.name === player.name
       )
       
-      if (currentPlayerData && currentPlayerData.role && currentPlayerData.role !== oldRole) {
+      if (currentPlayerData && currentPlayerData.role && currentPlayerData.role !== player.role) {
         player.role = currentPlayerData.role
-        console.log(`Role updated to: ${currentPlayerData.role}`)
+        if (process.env.NODE_ENV === 'development') {
+          console.log(`Role updated to: ${currentPlayerData.role}`)
+        }
       }
       
       updateGameData(newGameData)
@@ -301,9 +302,10 @@ export const useGame = () => {
 
     socket.on('kicked', ({ message }) => {
       alert(message)
-      // Redirect to home page
-      if (typeof window !== 'undefined') {
-        window.location.href = '/'
+      // Clear room state and redirect to home page
+      clearRoom()
+      if (process.client) {
+        navigateTo('/')
       }
     })
 
@@ -349,15 +351,32 @@ export const useGame = () => {
 
   // Helper functions
   const updateGameData = (newGameData) => {
-    // Безопасно обновляем данные, скрывая роли в логах
-    console.log('📊 Updating game data:', {
-      id: newGameData.id,
-      gameState: newGameData.gameState,
-      playersCount: newGameData.players?.length || 0,
-      selectedRolesCount: newGameData.selectedRoles?.length || 0,
-      chatLength: newGameData.chat?.length || 0
-      // НЕ логируем массив players с ролями
-    })
+    // Более строгая проверка на необходимость обновления данных
+    const hasSignificantChanges = 
+      gameData.id !== newGameData.id ||
+      gameData.gameState !== newGameData.gameState ||
+      gameData.players?.length !== newGameData.players?.length ||
+      gameData.selectedRoles?.length !== newGameData.selectedRoles?.length ||
+      gameData.chat?.length !== newGameData.chat?.length
+    
+    if (!hasSignificantChanges) {
+      // Данные не изменились значительно, пропускаем обновление
+      if (process.env.NODE_ENV === 'development') {
+        console.log('⏭️ Skipping updateGameData - no significant changes')
+      }
+      return
+    }
+    
+    // Логируем только при значительных изменениях
+    if (process.env.NODE_ENV === 'development') {
+      console.log('📊 Updating game data:', {
+        id: newGameData.id,
+        gameState: newGameData.gameState,
+        playersCount: newGameData.players?.length || 0,
+        selectedRolesCount: newGameData.selectedRoles?.length || 0,
+        chatLength: newGameData.chat?.length || 0
+      })
+    }
     
     Object.assign(gameData, newGameData)
     
@@ -371,23 +390,68 @@ export const useGame = () => {
       
       if (currentPlayerData && currentPlayerData.role) {
         player.role = currentPlayerData.role
-        console.log(`🔄 Role updated in updateGameData: ${currentPlayerData.role}`)
+        if (process.env.NODE_ENV === 'development') {
+          console.log(`🔄 Role updated in updateGameData: ${currentPlayerData.role}`)
+        }
       }
     }
   }
 
+  const removeSocketListeners = () => {
+    if (!globalListenersInitialized) {
+      return
+    }
+    
+    console.log('🔌 Removing socket listeners')
+    
+    // Удаляем все обработчики событий
+    socket.off('new-message')
+    socket.off('new-whisper')
+    socket.off('voice-activity-update')
+    socket.off('room-created')
+    socket.off('join-success')
+    socket.off('game-updated')
+    socket.off('game-started')
+    socket.off('phase-changed')
+    socket.off('whisper-error')
+    socket.off('vote-updated')
+    socket.off('voting-ended')
+    socket.off('timer-updated')
+    socket.off('timer-ended')
+    socket.off('kicked')
+    socket.off('command-error')
+    socket.off('error')
+    socket.off('name-check-result')
+    socket.off('name-suggestions')
+    
+    globalListenersInitialized = false
+    console.log('✅ Socket listeners removed')
+  }
+
   const clearRoom = () => {
+    // Очищаем данные комнаты
     room.id = null
     room.hostId = null
     room.isHost = false
+    
+    // Очищаем данные игры
     gameData.players = []
     gameData.selectedRoles = []
     gameData.gameState = 'setup'
     gameData.currentPhase = null
     gameData.chat = []
     gameData.timer = null
+    
+    // Очищаем данные игрока
     player.role = null
     player.id = null
+    player.name = ''
+    
+    // Очищаем голосовую активность
+    voiceActivity.speakingPlayers.clear()
+    voiceActivity.enabled = false
+    
+    console.log('🧹 Room state cleared completely')
   }
 
   // Добавить метод для отправки голосовой активности с throttling:
@@ -547,6 +611,46 @@ export const useGame = () => {
     socket.emit('change-timer', { roomId: room.id, timer })
   }
 
+  // Load default roles from server
+  const loadDefaultRoles = async () => {
+    if (process.client && (!gameData.roles || Object.keys(gameData.roles).length === 0)) {
+      try {
+        console.log('🔄 Loading roles from API...')
+        const response = await fetch('/api/roles')
+        
+        if (response.ok) {
+          const roles = await response.json()
+          console.log('✅ Successfully loaded', Object.keys(roles).length, 'roles from API')
+          gameData.roles = roles
+          return roles
+        } else {
+          throw new Error(`API returned ${response.status}`)
+        }
+      } catch (error) {
+        console.error('❌ Could not load roles from API:', error.message)
+        return {}
+      }
+    }
+    return gameData.roles || {}
+  }
+
+  // Get all roles (from game data or load default roles)
+  const getAllRoles = async () => {
+    // If we have roles in game data, return them
+    if (gameData.roles && Object.keys(gameData.roles).length > 0) {
+      return gameData.roles
+    }
+    
+    // If no roles loaded yet, load them
+    if (process.client) {
+      const loadedRoles = await loadDefaultRoles()
+      return loadedRoles
+    }
+    
+    // Return current roles
+    return gameData.roles || {}
+  }
+
   return {
     // State
     player: readonly(player),
@@ -570,6 +674,7 @@ export const useGame = () => {
     forceStopVoiceActivity,
     forceStartVoiceActivity,
     initSocketListeners,
+    removeSocketListeners,
     updateGameData,
     clearRoom,
     createRoom,
@@ -584,6 +689,7 @@ export const useGame = () => {
     endVoting,
     adminAction,
     nextPhase,
-    setTimer
+    setTimer,
+    getAllRoles
   }
 }

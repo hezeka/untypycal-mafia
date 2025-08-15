@@ -1,8 +1,8 @@
 <template>
   <div 
     class="role-card" 
-    :class="[role.color, { selected: selected }]"
-    @click="$emit('toggle', roleId)"
+    :class="[role.color, { selected: selected, readonly: readonly }]"
+    @click="!readonly && $emit('toggle', roleId)"
   >
     <div class="role-image">
       <img :src="`/roles/compressed/${roleId}.webp`" :alt="role.name" />
@@ -36,6 +36,10 @@ const props = defineProps({
   selected: {
     type: Boolean,
     default: false
+  },
+  readonly: {
+    type: Boolean,
+    default: false
   }
 })
 
@@ -64,6 +68,21 @@ const getTeamName = (team) => {
   opacity: .8;
   filter: grayscale(.8);
   transition: 0.2s;
+  
+  &.readonly {
+    cursor: default;
+    
+    &:hover {
+      transform: none;
+      box-shadow: none;
+      border-color: rgba(255, 255, 255, 0.1);
+    }
+    
+    &.selected {
+      opacity: 1;
+      filter: grayscale(0);
+    }
+  }
   
   &:hover {
     transform: translateY(-4px);

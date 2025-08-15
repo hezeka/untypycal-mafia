@@ -4,9 +4,9 @@
       <div class="container">
         <div class="header-content">
           <div class="navigation">
-            <a href="/" class="logo">
+            <NuxtLink to="/" class="logo">
               Нетипичка
-            </a>
+            </NuxtLink>
             <div class="vr"></div>
             <a @click="showRolesGuide = true" class="nav-link">
               Роли
@@ -37,7 +37,8 @@
             <button 
               @click="handleToggleMicrophone" 
               class="btn btn-secondary btn-small mic-toggle"
-              :title="microphoneEnabled ? 'Выключить микрофон' : 'Включить микрофон'"
+              :class="{ 'mic-disabled': !microphoneEnabled }"
+              :title="microphoneEnabled ? 'Выключить микрофон' : 'Включить микрофон (первый раз может потребовать разрешения)'"
             >
               {{ microphoneEnabled ? '🎤' : '🎤❌' }}
             </button>
@@ -120,10 +121,10 @@
     
     <!-- Roles Guide Modal -->
     <RolesGuide 
-      v-if="showRolesGuide && isInRoom"
+      v-if="showRolesGuide"
       :game-roles="gameRoles"
       :player-role="playerRole"
-      :roles="gameData.roles || {}"
+      :roles="allRoles"
       @close="showRolesGuide = false"
     />
     
@@ -138,7 +139,7 @@
 </template>
 
 <script setup>
-const { isInRoom, room, gameData, player, isHost, forceStopVoiceActivity, forceStartVoiceActivity, clearRoom } = useGame()
+const { isInRoom, room, gameData, player, isHost, forceStopVoiceActivity, forceStartVoiceActivity, clearRoom, getAllRoles } = useGame()
 const { isConnected } = useSocket()
 const { soundsEnabled, toggleSounds } = useSounds()
 const { microphoneEnabled, toggleMicrophone } = useVoiceActivity()
@@ -149,23 +150,60 @@ const showRolesGuide = ref(false)
 const showUsernameModal = ref(false)
 
 const roomId = computed(() => room.id)
-const gameRoles = computed(() => gameData.selectedRoles)
+const gameRoles = computed(() => gameData.selectedRoles || [])
 const playerRole = computed(() => player.role)
+const allRoles = computed(() => {
+  // Если роли есть в gameData, используем их
+  if (gameData.roles && Object.keys(gameData.roles).length > 0) {
+    return gameData.roles
+  }
+  
+  // Иначе получаем роли через getAllRoles()
+  const roles = getAllRoles()
+  return roles || {}
+})
 
 // Обработчик для кнопки микрофона с принудительными функциями
 const handleToggleMicrophone = async () => {
   console.log('🔄 Toggling microphone from layout')
-  await toggleMicrophone(forceStopVoiceActivity, forceStartVoiceActivity)
+  
+  // Создаем callback для голосовой активности
+  const voiceActivityCallback = (isActive) => {
+    sendVoiceActivity(isActive)
+  }
+  
+  await toggleMicrophone(forceStopVoiceActivity, forceStartVoiceActivity, voiceActivityCallback)
 }
 
-const leaveRoom = () => {
+const leaveRoom = async () => {
   if (confirm('Вы уверены, что хотите покинуть комнату?')) {
+    // Закрываем все модальные окна
     showRolesGuide.value = false
     showRules.value = false
+    showUsernameModal.value = false
+    
+    // Очищаем состояние игры
     clearRoom()
-    location.reload()
+    
+    // Навигируем на главную страницу используя Nuxt навигацию
+    await navigateTo('/')
   }
 }
+
+// Отслеживание изменений маршрута для очистки состояния
+const route = useRoute()
+watch(() => route.path, (newPath, oldPath) => {
+  // Если переходим с игровой страницы на главную или другую страницу
+  if (oldPath?.startsWith('/game/') && !newPath.startsWith('/game/')) {
+    console.log('🔄 Route changed from game to non-game page, clearing room state')
+    clearRoom()
+    
+    // Дополнительно очищаем модальные окна
+    showRolesGuide.value = false
+    showRules.value = false
+    showUsernameModal.value = false
+  }
+}, { immediate: false })
 
 // Обработка клавиши Escape для закрытия модальных окон
 onMounted(() => {
@@ -182,6 +220,25 @@ onMounted(() => {
   }
   
   window.addEventListener('keydown', handleEscape)
+  
+  // Очистка состояния при первом монтировании, если не находимся в игровой комнате
+  const currentPath = route.path
+  if (!currentPath.startsWith('/game/') && isInRoom.value) {
+    console.log('🧹 Page loaded outside game, clearing stale room state')
+    clearRoom()
+  }
+  
+  // Предзагружаем роли для справочника
+  const loadRoles = async () => {
+    try {
+      const roles = await getAllRoles()
+      console.log('Roles loaded for guide:', Object.keys(roles || {}).length)
+    } catch (error) {
+      console.error('Failed to load roles:', error)
+    }
+  }
+  
+  loadRoles()
   
   onUnmounted(() => {
     window.removeEventListener('keydown', handleEscape)
@@ -259,6 +316,13 @@ onMounted(() => {
       -webkit-text-fill-color: transparent;
       background-clip: text;
       padding-bottom: 6px;
+      text-decoration: none;
+      transition: all 0.3s ease;
+      
+      &:hover {
+        opacity: 0.8;
+        transform: translateY(-1px);
+      }
     }
 
     .navigation {
@@ -485,6 +549,16 @@ onMounted(() => {
     display: flex;
     align-items: center;
     justify-content: center;
+  }
+  
+  .mic-disabled {
+    opacity: 0.6;
+    border-color: rgba(231, 76, 60, 0.3) !important;
+    
+    &:hover {
+      border-color: rgba(231, 76, 60, 0.6) !important;
+      background: rgba(231, 76, 60, 0.1) !important;
+    }
   }
 }
 </style>
