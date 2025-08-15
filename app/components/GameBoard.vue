@@ -495,13 +495,6 @@ const changePhase = (gameState, currentPhase) => {
 const votePlayer = (playerId) => {
   if (gameState.value !== 'voting' || isHost.value) return
   
-  // Запретить голосование мертвым игрокам
-  console.log('🗳️ Voting check - player:', player)
-  if (!player || !player.alive) {
-    console.log('❌ Voting blocked - player not alive or undefined')
-    return
-  }
-  
   // playerId может быть null (воздержание) или ID игрока
   votedPlayer.value = playerId
   voteForPlayer(playerId)
