@@ -85,6 +85,7 @@ export const useGame = () => {
     
     console.log('🔌 Initializing socket listeners')
     globalListenersInitialized = true
+    
     socket.on('new-message', (message) => {
       // Существующий код
       const existingMessage = gameData.chat.find(m => m.id === message.id)
@@ -225,7 +226,7 @@ export const useGame = () => {
       console.log('🚀 Game started event received')
       
       // Звук начала игры
-      playSound('gameStart', 0.8)
+      playSound('day', 0.8)
       
       // Force update player role when game starts BEFORE updating game data
       const currentPlayerData = newGameData.players?.find(p => 
@@ -248,9 +249,13 @@ export const useGame = () => {
       
       // Звук смены фазы
       if (gameState === 'voting') {
-        playSound('voting', 0.7)
+        playSound('voting', 0.4)
+      } else if (gameState === 'night') {
+        playSound('night', 0.4)
+      } else if (gameState === 'day') {
+        playSound('day', 0.4)
       } else {
-        playSound('phaseChange', 0.6)
+        playSound('phaseChange', 0.5)
       }
     })
 
@@ -268,7 +273,7 @@ export const useGame = () => {
 
     socket.on('voting-ended', ({ eliminated, reason, winCondition, gameData: newGameData }) => {
       // Звук окончания голосования
-      playSound('notification', 0.7)
+      // playSound('notification', 0.7)
       
       // Показываем результаты голосования
       if (eliminated.length > 0) {
@@ -545,10 +550,10 @@ export const useGame = () => {
   }
 
   // Actions
-  const createRoom = (playerName) => {
+  const createRoom = (playerName, isPrivate = false) => {
     player.id = socket.id
     player.name = playerName
-    socket.emit('create-room', { playerName })
+    socket.emit('create-room', { playerName, isPrivate })
   }
 
   const joinRoom = ({ roomId, playerName }) => {

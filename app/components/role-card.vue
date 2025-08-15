@@ -113,6 +113,7 @@ const getTeamName = (team) => {
     width: 100%;
     overflow: hidden;
     font-size: 0;
+    aspect-ratio: 235 / 319;
     
     img {
       width: 100%;

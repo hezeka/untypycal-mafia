@@ -56,6 +56,33 @@ console.log('🌐 CORS origins:', corsOrigins)
 // Game rooms storage
 const gameRooms = new Map()
 
+// Возвращает список публичных комнат в удобном виде
+export function listPublicRooms() {
+  console.log('Listing public rooms...', gameRooms)
+  const rooms = []
+  for (const [roomId, room] of gameRooms.entries()) {
+    if (room.isPrivate) continue
+
+    const hostPlayer = room.players.get(room.hostId)
+    const hostName = hostPlayer ? hostPlayer.name : null
+    const playerCount = room.players.size
+    const selectedRolesCount = Array.isArray(room.selectedRoles) ? room.selectedRoles.length : 0
+
+    // Предположение: maxPlayers = количество выбранных ролей + ведущий
+    const maxPlayers = selectedRolesCount > 0 ? selectedRolesCount + 1 : null
+
+    rooms.push({
+      id: room.id,
+      hostName,
+      playerCount,
+      maxPlayers,
+      gameState: room.gameState,
+      selectedRolesCount
+    })
+  }
+  return rooms
+}
+
 // Cleanup disconnected players every 10 minutes
 setInterval(() => {
   gameRooms.forEach((room, roomId) => {
@@ -86,7 +113,8 @@ io.on('connection', (socket) => {
     }
 
     const roomId = generateRoomId()
-    const room = new GameRoom(roomId, socket.id, roles)
+    const isPrivate = data.isPrivate || false
+    const room = new GameRoom(roomId, socket.id, roles, isPrivate)
     room.addPlayer(socket.id, nameValidation.name)
     
     // Ensure host has the game_master role
@@ -103,8 +131,10 @@ io.on('connection', (socket) => {
     logGameAction(roomId, 'room_created', { 
       hostName: nameValidation.name,
       hostId: socket.id,
+      isPrivate: isPrivate,
       formattedName: nameValidation.name !== data.playerName ? `"${data.playerName}" -> "${nameValidation.name}"` : 'no formatting'
     })
+    console.log(`ALL ROOMS ${gameRooms.size}`, listPublicRooms())
   })
 
   socket.on('join-room', (data) => {

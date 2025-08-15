@@ -5,10 +5,12 @@ const soundsEnabled = ref(true)
 const SOUNDS = {
   message: 'message.mp3',
   whisper: 'whisper.mp3',
-  gameStart: 'game-start.mp3',
+  gameStart: 'day.mp3',
   phaseChange: 'phase-change.mp3',
   voting: 'voting.mp3',
-  notification: 'notification.mp3'
+  notification: 'notification.mp3',
+  day: 'day.mp3',
+  night: 'night.mp3'
 }
 
 // Проигрывание звука

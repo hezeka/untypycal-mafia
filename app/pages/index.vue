@@ -13,6 +13,28 @@
           <div class="card action-card">
             <div class="card-header">Создать комнату</div>
             <p class="text-muted mb-2">Станьте ведущим и создайте новую игру</p>
+            
+            <!-- <div class="privacy-toggle mb-3">
+              <label class="privacy-label">
+                <input 
+                  type="checkbox" 
+                  v-model="isPrivateRoom" 
+                  class="privacy-checkbox"
+                  :disabled="!hasUsername"
+                >
+                <span class="privacy-text">
+                  <span class="privacy-icon">{{ isPrivateRoom ? '🔒' : '🌍' }}</span>
+                  {{ isPrivateRoom ? 'Приватная игра' : 'Публичная игра' }}
+                </span>
+              </label>
+              <p class="privacy-description">
+                {{ isPrivateRoom 
+                  ? 'Только по ссылке - игра не будет отображаться на главной странице' 
+                  : 'Отображается на главной странице для всех' 
+                }}
+              </p>
+            </div> -->
+            
             <button 
               @click="createRoom" 
               class="btn btn-primary"
@@ -60,6 +82,38 @@
             >
               {{ hasUsername ? 'Присоединиться' : 'Сначала установите никнейм' }}
             </button>
+          </div>
+        </div>
+
+        <!-- Публичные игры -->
+        <div class="public-games-section" v-if="publicRooms.length > 0">
+          <div class="card">
+            <div class="card-header">🌍 Публичные игры</div>
+            <div class="public-rooms-grid">
+              <div 
+                v-for="room in publicRooms" 
+                :key="room.id"
+                class="public-room-card"
+                @click="joinPublicRoom(room.id)"
+              >
+                <div class="room-header">
+                  <span class="room-id">{{ room.id }}</span>
+                  <span class="room-status" :class="`status-${room.gameState}`">
+                    {{ getGameStateText(room.gameState) }}
+                  </span>
+                </div>
+                <div class="room-info">
+                  <div class="room-host">👑 {{ room.hostName }}</div>
+                  <div class="room-players">👥 {{ room.playerCount }}/{{ room.maxPlayers }}</div>
+                  <div class="room-roles" v-if="room.selectedRolesCount > 0">
+                    🎭 {{ room.selectedRolesCount }} ролей
+                  </div>
+                </div>
+              </div>
+            </div>
+            <p class="public-games-note">
+              💡 Нажмите на игру чтобы присоединиться
+            </p>
           </div>
         </div>
 
@@ -230,6 +284,8 @@ const {
 const roomCode = ref('')
 const showUsernameModal = ref(false)
 const newUsername = ref('')
+const isPrivateRoom = ref(false)
+const publicRooms = ref([])
 
 // Validation states
 const roomValidation = reactive({
@@ -346,7 +402,7 @@ const createRoom = async () => {
     return
   }
   
-  await createGameRoom(username.value)
+  await createGameRoom(username.value, isPrivateRoom.value)
 }
 
 const joinRoom = () => {
@@ -360,6 +416,37 @@ const joinRoom = () => {
   
   const code = roomCode.value.trim().toUpperCase()
   navigateTo(`/game/${code}`)
+}
+
+const joinPublicRoom = (roomId) => {
+  if (!hasUsername.value) {
+    showUsernameModal.value = true
+    return
+  }
+  
+  navigateTo(`/game/${roomId}`)
+}
+
+const getGameStateText = (gameState) => {
+  const stateTexts = {
+    'setup': 'Набор',
+    'day': 'День', 
+    'night': 'Ночь',
+    'voting': 'Голосование',
+    'ended': 'Завершена'
+  }
+  return stateTexts[gameState] || gameState
+}
+
+const loadPublicRooms = async () => {
+  try {
+    const response = await fetch('/api/public-rooms')
+    if (response.ok) {
+      publicRooms.value = await response.json()
+    }
+  } catch (error) {
+    console.error('Failed to load public rooms:', error)
+  }
 }
 
 // Watch for room creation to redirect
@@ -390,6 +477,7 @@ watch(() => showUsernameModal.value, (isOpen) => {
 // Initialize socket listeners on mount
 onMounted(() => {
   initSocketListeners()
+  loadPublicRooms()
   
   // Auto-open username modal if no username set
   if (!hasUsername.value) {
@@ -398,6 +486,9 @@ onMounted(() => {
       showUsernameModal.value = true
     }, 500)
   }
+  
+  // Refresh public rooms every 30 seconds
+  // setInterval(loadPublicRooms, 30000)
 })
 </script>
 
@@ -676,6 +767,147 @@ onMounted(() => {
       line-height: 1.4;
       color: rgba(255, 255, 255, 0.8);
     }
+  }
+}
+
+.privacy-toggle {
+  .privacy-label {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    cursor: pointer;
+    margin: 0;
+    
+    .privacy-checkbox {
+      width: 18px;
+      height: 18px;
+      accent-color: #667eea;
+      cursor: pointer;
+    }
+    
+    .privacy-text {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-weight: 500;
+      color: rgba(255, 255, 255, 0.9);
+      
+      .privacy-icon {
+        font-size: 16px;
+      }
+    }
+    
+    &:hover .privacy-text {
+      color: #667eea;
+    }
+  }
+  
+  .privacy-description {
+    margin: 8px 0 0 30px;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.6);
+    line-height: 1.4;
+  }
+}
+
+.public-games-section {
+  margin: 40px 0;
+  
+  .public-rooms-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 16px;
+    margin: 20px 0;
+  }
+  
+  .public-room-card {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 12px;
+    padding: 16px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    
+    &:hover {
+      background: rgba(255, 255, 255, 0.08);
+      border-color: #667eea;
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(102, 126, 234, 0.2);
+    }
+    
+    .room-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+      
+      .room-id {
+        font-weight: 600;
+        font-size: 18px;
+        color: #667eea;
+        font-family: 'Courier New', monospace;
+        letter-spacing: 1px;
+      }
+      
+      .room-status {
+        padding: 4px 8px;
+        border-radius: 16px;
+        font-size: 12px;
+        font-weight: 500;
+        
+        &.status-setup {
+          background: rgba(46, 204, 113, 0.2);
+          color: #2ecc71;
+        }
+        
+        &.status-day {
+          background: rgba(243, 156, 18, 0.2);
+          color: #f39c12;
+        }
+        
+        &.status-night {
+          background: rgba(155, 89, 182, 0.2);
+          color: #9b59b6;
+        }
+        
+        &.status-voting {
+          background: rgba(231, 76, 60, 0.2);
+          color: #e74c3c;
+        }
+        
+        &.status-ended {
+          background: rgba(149, 165, 166, 0.2);
+          color: #95a5a6;
+        }
+      }
+    }
+    
+    .room-info {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      font-size: 14px;
+      
+      .room-host {
+        color: rgba(255, 255, 255, 0.9);
+        font-weight: 500;
+      }
+      
+      .room-players {
+        color: rgba(255, 255, 255, 0.7);
+      }
+      
+      .room-roles {
+        color: rgba(255, 255, 255, 0.7);
+      }
+    }
+  }
+  
+  .public-games-note {
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.6);
+    text-align: center;
+    margin: 16px 0 0 0;
   }
 }
 

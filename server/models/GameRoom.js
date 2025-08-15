@@ -1,9 +1,10 @@
 import { v4 as uuidv4 } from 'uuid'
 
 export class GameRoom {
-  constructor(id, hostId, roles) {
+  constructor(id, hostId, roles, isPrivate = false) {
     this.id = id
     this.hostId = hostId
+    this.isPrivate = isPrivate
     this.players = new Map()
     this.selectedRoles = []
     this.gameState = 'setup' // setup, night, day, voting, ended
@@ -108,6 +109,7 @@ export class GameRoom {
     const baseData = {
       id: this.id,
       hostId: this.hostId,
+      isPrivate: this.isPrivate,
       selectedRoles: this.selectedRoles,
       gameState: this.gameState,
       currentPhase: this.currentPhase,
