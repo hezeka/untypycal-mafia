@@ -277,6 +277,7 @@
                 </button>
               </div>
               <div class="timer-presets">
+                <button @click="setTimerPreset(1)" class="btn btn-secondary btn-tiny">1 мин</button>
                 <button @click="setTimerPreset(3)" class="btn btn-secondary btn-tiny">3 мин</button>
                 <button @click="setTimerPreset(5)" class="btn btn-secondary btn-tiny">5 мин</button>
                 <button @click="setTimerPreset(10)" class="btn btn-secondary btn-tiny">10 мин</button>
@@ -495,7 +496,11 @@ const votePlayer = (playerId) => {
   if (gameState.value !== 'voting' || isHost.value) return
   
   // Запретить голосование мертвым игрокам
-  if (!player.alive) return
+  console.log('🗳️ Voting check - player:', player)
+  if (!player || !player.alive) {
+    console.log('❌ Voting blocked - player not alive or undefined')
+    return
+  }
   
   // playerId может быть null (воздержание) или ID игрока
   votedPlayer.value = playerId
