@@ -1,6 +1,7 @@
 
 import { Server } from 'socket.io'
 import http from 'http'
+import express from 'express'
 import { GameRoom } from './models/GameRoom.js'
 import { ChatCommandProcessor } from './services/ChatCommandProcessor.js'
 import { roles, validateRole } from './config/roles.js'
@@ -21,7 +22,11 @@ import {
   getPhaseDisplayName
 } from './utils/gameHelpers.js'
 
-const server = http.createServer()
+// Создаем Express приложение
+const app = express()
+app.use(express.json())
+
+const server = http.createServer(app)
 
 // Настройки CORS для работы через nginx
 const corsOrigins = process.env.NODE_ENV === 'production' 
@@ -56,20 +61,29 @@ console.log('🌐 CORS origins:', corsOrigins)
 // Game rooms storage
 const gameRooms = new Map()
 
+// HTTP API endpoint для получения публичных комнат
+app.get('/api/public-rooms', (req, res) => {
+  try {
+    const publicRooms = listPublicRooms()
+    res.json(publicRooms)
+  } catch (error) {
+    console.error('HTTP API error:', error)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
 // Возвращает список публичных комнат в удобном виде
 export function listPublicRooms() {
-  console.log('Listing public rooms...', gameRooms)
   const rooms = []
+  
   for (const [roomId, room] of gameRooms.entries()) {
     if (room.isPrivate) continue
 
     const hostPlayer = room.players.get(room.hostId)
-    const hostName = hostPlayer ? hostPlayer.name : null
+    const hostName = hostPlayer ? hostPlayer.name : 'Unknown'
     const playerCount = room.players.size
     const selectedRolesCount = Array.isArray(room.selectedRoles) ? room.selectedRoles.length : 0
-
-    // Предположение: maxPlayers = количество выбранных ролей + ведущий
-    const maxPlayers = selectedRolesCount > 0 ? selectedRolesCount + 1 : null
+    const maxPlayers = selectedRolesCount > 0 ? selectedRolesCount + 1 : 10
 
     rooms.push({
       id: room.id,
@@ -80,6 +94,7 @@ export function listPublicRooms() {
       selectedRolesCount
     })
   }
+  
   return rooms
 }
 
@@ -134,7 +149,6 @@ io.on('connection', (socket) => {
       isPrivate: isPrivate,
       formattedName: nameValidation.name !== data.playerName ? `"${data.playerName}" -> "${nameValidation.name}"` : 'no formatting'
     })
-    console.log(`ALL ROOMS ${gameRooms.size}`, listPublicRooms())
   })
 
   socket.on('join-room', (data) => {

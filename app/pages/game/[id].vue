@@ -788,15 +788,7 @@ onMounted(async () => {
     sendVoiceActivity(isActive)
   }
   
-  // Инициализируем микрофон асинхронно с задержкой, чтобы не блокировать UI
-  setTimeout(async () => {
-    try {
-      await initVoiceDetection(voiceActivityCallback)
-      console.log('✅ Voice detection initialization completed')
-    } catch (error) {
-      console.warn('❌ Voice detection initialization failed:', error)
-    }
-  }, 1000) // Задержка в 1 секунду для завершения загрузки страницы
+  // Микрофон будет инициализирован при первом клике пользователя
   
   // Try to reconnect to the room from URL
   const urlRoomId = roomId.value

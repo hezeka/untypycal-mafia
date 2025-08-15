@@ -3,10 +3,82 @@ import { v4 as uuidv4 } from 'uuid'
 
 const gameRooms = new Map()
 
+// Инициализация централизованного хранилища
+const initRoomStorage = async () => {
+  try {
+    // Простая реализация хранилища прямо здесь
+    class RoomStorage {
+      constructor() {
+        this.rooms = new Map()
+      }
+
+      addRoom(room) {
+        this.rooms.set(room.id, room)
+        console.log(`📥 Room ${room.id} synced. Total rooms: ${this.rooms.size}`)
+        console.log(`📥 Room details:`, {
+          id: room.id,
+          isPrivate: room.isPrivate,
+          hostId: room.hostId,
+          playersCount: room.players.size
+        })
+      }
+
+      getPublicRooms() {
+        const publicRooms = []
+        
+        for (const room of this.rooms.values()) {
+          if (room.isPrivate) continue
+
+          const hostPlayer = room.players.get(room.hostId)
+          const hostName = hostPlayer ? hostPlayer.name : 'Unknown'
+          const playerCount = room.players.size
+          const selectedRolesCount = Array.isArray(room.selectedRoles) ? room.selectedRoles.length : 0
+          const maxPlayers = selectedRolesCount > 0 ? selectedRolesCount + 1 : 10
+          
+          publicRooms.push({
+            id: room.id,
+            hostName,
+            playerCount,
+            maxPlayers,
+            gameState: room.gameState,
+            selectedRolesCount
+          })
+        }
+        
+        console.log(`Found ${publicRooms.length} public rooms out of ${this.rooms.size} total`)
+        return publicRooms
+      }
+    }
+    
+    globalThis.roomStorage = new RoomStorage()
+    globalThis.syncGameRoom = (room) => {
+      console.log('🔄 syncGameRoom called for room:', room.id, 'isPrivate:', room.isPrivate)
+      if (!room) {
+        console.error('❌ syncGameRoom: room is null/undefined!')
+        return
+      }
+      if (!globalThis.roomStorage) {
+        console.error('❌ syncGameRoom: roomStorage is not available!')
+        return
+      }
+      globalThis.roomStorage.addRoom(room)
+    }
+    
+    console.log('✅ Room storage initialized in socket plugin')
+    console.log('✅ globalThis.syncGameRoom type:', typeof globalThis.syncGameRoom)
+    console.log('✅ globalThis.roomStorage type:', typeof globalThis.roomStorage)
+  } catch (error) {
+    console.error('❌ Failed to initialize room storage:', error)
+  }
+}
+
+initRoomStorage()
+
 // Простая функция-конструктор GameRoom
 function GameRoom(id, hostId) {
   this.id = id
   this.hostId = hostId
+  this.isPrivate = false
   this.players = new Map()
   this.selectedRoles = []
   this.gameState = 'setup'
@@ -50,6 +122,7 @@ GameRoom.prototype.getGameData = function(requestingSocketId) {
   return {
     id: this.id,
     hostId: this.hostId,
+    isPrivate: this.isPrivate,
     selectedRoles: this.selectedRoles,
     gameState: this.gameState,
     currentPhase: this.currentPhase,
@@ -68,6 +141,8 @@ GameRoom.prototype.getGameData = function(requestingSocketId) {
 
 export default defineNitroPlugin(async (nitroApp) => {
   console.log('🔌 Initializing Socket.IO plugin...')
+  console.log('🔌 Plugin location: server/plugins/socket.js')
+  console.log('🔌 Process PID:', process.pid)
   
   nitroApp.hooks.hook('listen', (server) => {
     console.log('🚀 Socket.IO server starting...')
@@ -82,13 +157,60 @@ export default defineNitroPlugin(async (nitroApp) => {
 
       // Create room
       socket.on('create-room', (data) => {
+        console.log('🏠 Creating room with data:', data)
+        
         const roomId = Math.random().toString(36).substring(2, 8).toUpperCase()
         const room = new GameRoom(roomId, socket.id)
+        room.isPrivate = data.isPrivate || false
         room.addPlayer(socket.id, data.playerName)
+        
+        console.log(`🏠 Room ${roomId} created:`, {
+          isPrivate: room.isPrivate,
+          hostId: room.hostId,
+          playerName: data.playerName
+        })
+        
+        // Сохраняем в локальный Map
         gameRooms.set(roomId, room)
+        console.log(`📦 Room stored in gameRooms. Total: ${gameRooms.size}`)
+        
+        // Синхронизируем с централизованным хранилищем
+        console.log('🔄 Checking globalThis.syncGameRoom:', typeof globalThis.syncGameRoom)
+        console.log('🔄 Checking globalThis.roomStorage:', typeof globalThis.roomStorage)
+        
+        if (globalThis.syncGameRoom) {
+          console.log('📤 Syncing room to global storage...')
+          globalThis.syncGameRoom(room)
+        } else {
+          console.log('❌ syncGameRoom not available! Using fallback...')
+          // Fallback: добавляем функцию получения публичных комнат прямо из gameRooms
+          globalThis.getPublicRoomsFromLocal = () => {
+            const publicRooms = []
+            for (const room of gameRooms.values()) {
+              if (!room.isPrivate) {
+                const hostPlayer = room.players.get(room.hostId)
+                const hostName = hostPlayer ? hostPlayer.name : 'Unknown'
+                const playerCount = room.players.size
+                const selectedRolesCount = Array.isArray(room.selectedRoles) ? room.selectedRoles.length : 0
+                const maxPlayers = selectedRolesCount > 0 ? selectedRolesCount + 1 : 10
+                
+                publicRooms.push({
+                  id: room.id,
+                  hostName,
+                  playerCount,
+                  maxPlayers,
+                  gameState: room.gameState,
+                  selectedRolesCount
+                })
+              }
+            }
+            return publicRooms
+          }
+        }
+        
         socket.join(roomId)
         socket.emit('room-created', { roomId, gameData: room.getGameData(socket.id) })
-        console.log(`Room ${roomId} created by ${data.playerName}`)
+        console.log(`✅ Room ${roomId} setup complete`)
       })
 
       // Join room
@@ -342,6 +464,11 @@ export default defineNitroPlugin(async (nitroApp) => {
           const player = room.players.get(socket.id)
           if (player) {
             player.connected = false
+            
+            // Синхронизируем изменения с централизованным хранилищем
+            if (globalThis.syncGameRoom) {
+              globalThis.syncGameRoom(room)
+            }
             
             room.players.forEach((remainingPlayer, playerId) => {
               if (remainingPlayer.connected) {

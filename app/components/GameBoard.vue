@@ -574,18 +574,10 @@ const setTimerPreset = (minutes) => {
   startTimer()
 }
 
-// Инициализация голосовой активности при монтировании
-onMounted(async () => {
-  // Инициализируем детекцию голоса если поддерживается
-  if (process.client) {
-    const success = await initVoiceDetection((isActive) => {
-      sendVoiceActivity(isActive)
-    })
-    
-    if (success) {
-      console.log('🎤 Voice activity detection enabled')
-    }
-  }
+// Микрофон инициализируется только при клике пользователя на кнопку микрофона
+onMounted(() => {
+  // Готов к инициализации, но не инициализируем автоматически
+  console.log('🎤 GameBoard ready for voice activity (will init on user click)')
 })
 
 // Очистка при размонтировании

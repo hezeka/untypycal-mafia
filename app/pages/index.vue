@@ -14,29 +14,8 @@
             <div class="card-header">Создать комнату</div>
             <p class="text-muted mb-2">Станьте ведущим и создайте новую игру</p>
             
-            <!-- <div class="privacy-toggle mb-3">
-              <label class="privacy-label">
-                <input 
-                  type="checkbox" 
-                  v-model="isPrivateRoom" 
-                  class="privacy-checkbox"
-                  :disabled="!hasUsername"
-                >
-                <span class="privacy-text">
-                  <span class="privacy-icon">{{ isPrivateRoom ? '🔒' : '🌍' }}</span>
-                  {{ isPrivateRoom ? 'Приватная игра' : 'Публичная игра' }}
-                </span>
-              </label>
-              <p class="privacy-description">
-                {{ isPrivateRoom 
-                  ? 'Только по ссылке - игра не будет отображаться на главной странице' 
-                  : 'Отображается на главной странице для всех' 
-                }}
-              </p>
-            </div> -->
-            
             <button 
-              @click="createRoom" 
+              @click="showCreateRoomModal" 
               class="btn btn-primary"
               :disabled="!hasUsername"
             >
@@ -86,10 +65,10 @@
         </div>
 
         <!-- Публичные игры -->
-        <div class="public-games-section" v-if="publicRooms.length > 0">
+        <div class="public-games-section">
           <div class="card">
             <div class="card-header">🌍 Публичные игры</div>
-            <div class="public-rooms-grid">
+            <div v-if="publicRooms.length > 0" class="public-rooms-grid">
               <div 
                 v-for="room in publicRooms" 
                 :key="room.id"
@@ -111,7 +90,13 @@
                 </div>
               </div>
             </div>
-            <p class="public-games-note">
+            
+            <div v-else class="no-public-games">
+              <p>В данный момент нет активных публичных игр</p>
+              <p class="text-muted">Создайте свою публичную игру или присоединитесь по коду комнаты</p>
+            </div>
+            
+            <p v-if="publicRooms.length > 0" class="public-games-note">
               💡 Нажмите на игру чтобы присоединиться
             </p>
           </div>
@@ -180,6 +165,53 @@
         </div>
       </div>
       
+      <!-- Create Room Modal -->
+      <div v-if="showCreateModal" class="modal-overlay">
+        <div class="bg-overlay" @click="showCreateModal = false"></div>
+        <div class="loading-section">
+          <div class="card text-center">
+            <div class="card-header">Создать игру</div>
+            
+            <form @submit.prevent="createRoom" class="join-form">
+              <div class="privacy-switch-container">
+                <label class="privacy-switch">
+                  <input 
+                    type="checkbox" 
+                    v-model="isPrivateRoom"
+                    class="switch-input"
+                  >
+                  <span class="switch-slider"></span>
+                </label>
+                <span class="privacy-label-text">Приватная игра</span>
+              </div>
+              
+              <p class="privacy-description">
+                {{ isPrivateRoom 
+                  ? 'Только по ссылке - игра не будет отображаться на главной странице' 
+                  : 'Публичная игра будет отображаться на главной странице для всех' 
+                }}
+              </p>
+              
+              <div style="display: flex; gap: 16px; justify-content: center; margin-top: 20px;">
+                <button 
+                  type="submit" 
+                  class="btn btn-primary"
+                >
+                  Создать игру
+                </button>
+                <button 
+                  type="button"
+                  @click="showCreateModal = false" 
+                  class="btn btn-secondary"
+                >
+                  Отмена
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      </div>
+
       <!-- Username Modal -->
       <div v-if="showUsernameModal" class="modal-overlay">
         <div class="bg-overlay" @click="showUsernameModal = false"></div>
@@ -283,6 +315,7 @@ const {
 // Local reactive data
 const roomCode = ref('')
 const showUsernameModal = ref(false)
+const showCreateModal = ref(false)
 const newUsername = ref('')
 const isPrivateRoom = ref(false)
 const publicRooms = ref([])
@@ -395,14 +428,18 @@ const selectSuggestion = (suggestion) => {
   validation.isChecking = false
 }
 
-// Room methods
-const createRoom = async () => {
+const showCreateRoomModal = () => {
   if (!hasUsername.value) {
     showUsernameModal.value = true
     return
   }
-  
+  showCreateModal.value = true
+}
+
+// Room methods
+const createRoom = async () => {
   await createGameRoom(username.value, isPrivateRoom.value)
+  showCreateModal.value = false
 }
 
 const joinRoom = () => {
@@ -488,7 +525,7 @@ onMounted(() => {
   }
   
   // Refresh public rooms every 30 seconds
-  // setInterval(loadPublicRooms, 30000)
+  setInterval(loadPublicRooms, 30000)
 })
 </script>
 
@@ -810,6 +847,73 @@ onMounted(() => {
   }
 }
 
+.privacy-switch-container {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin: 20px 0;
+}
+
+.privacy-switch {
+  position: relative;
+  display: inline-block;
+  width: 50px;
+  height: 24px;
+
+  .switch-input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+
+    &:checked + .switch-slider {
+      background-color: #667eea;
+    }
+
+    &:checked + .switch-slider:before {
+      transform: translateX(26px);
+    }
+  }
+
+  .switch-slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: #ccc;
+    transition: .4s;
+    border-radius: 24px;
+
+    &:before {
+      position: absolute;
+      content: "";
+      height: 18px;
+      width: 18px;
+      left: 3px;
+      bottom: 3px;
+      background-color: white;
+      transition: .4s;
+      border-radius: 50%;
+    }
+  }
+}
+
+.privacy-label-text {
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.privacy-description {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.7);
+  line-height: 1.4;
+  text-align: center;
+  margin: 16px 0;
+  max-width: 400px;
+}
+
 .public-games-section {
   margin: 40px 0;
   
@@ -908,6 +1012,21 @@ onMounted(() => {
     color: rgba(255, 255, 255, 0.6);
     text-align: center;
     margin: 16px 0 0 0;
+  }
+  
+  .no-public-games {
+    text-align: center;
+    padding: 40px 20px;
+    color: rgba(255, 255, 255, 0.7);
+    
+    p {
+      margin: 8px 0;
+      
+      &.text-muted {
+        font-size: 14px;
+        color: rgba(255, 255, 255, 0.5);
+      }
+    }
   }
 }
 
