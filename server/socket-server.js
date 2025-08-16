@@ -130,7 +130,7 @@ io.on('connection', (socket) => {
     const roomId = generateRoomId()
     const isPrivate = data.isPrivate || false
     const room = new GameRoom(roomId, socket.id, roles, isPrivate)
-    room.addPlayer(socket.id, nameValidation.name)
+    room.addPlayer(socket.id, nameValidation.name, data.preferredColor)
     
     // Ensure host has the game_master role
     const hostPlayer = room.players.get(socket.id)
@@ -267,7 +267,7 @@ io.on('connection', (socket) => {
       return
     }
 
-    room.addPlayer(socket.id, nameValidation.name)
+    room.addPlayer(socket.id, nameValidation.name, data.preferredColor)
     
     socket.join(data.roomId.toUpperCase())
     
@@ -1201,6 +1201,47 @@ io.on('connection', (socket) => {
     io.to(roomId).emit('timer-updated', { timer: room.timer })
 
     // logGameAction(data.roomId, 'timer_changed', { timer: room.timer })
+  })
+
+  // Обработчик смены цвета игрока
+  socket.on('change-player-color', (data) => {
+    console.log('🎨 Server: Received change-player-color event:', data)
+    const room = gameRooms.get(data.roomId)
+    if (!room) {
+      console.log('❌ Server: Room not found:', data.roomId)
+      return
+    }
+
+    const player = room.players.get(socket.id)
+    if (!player) {
+      console.log('❌ Server: Player not found:', socket.id)
+      return
+    }
+    console.log('👤 Server: Player found:', { id: player.id, name: player.name, currentColor: player.color })
+
+    // Смена цвета разрешена только на этапе setup
+    if (room.gameState !== 'setup') {
+      console.log('⚠️ Server: Color change not allowed, game state:', room.gameState)
+      socket.emit('error', { message: 'Смена цвета разрешена только на этапе подбора ролей' })
+      return
+    }
+
+    const result = room.changePlayerColor(socket.id, data.color)
+    console.log('🔄 Server: Color change result:', result)
+    if (!result.success) {
+      console.log('❌ Server: Color change failed:', result.error)
+      socket.emit('error', { message: result.error })
+      return
+    }
+    console.log('✅ Server: Color changed successfully, player color now:', player.color)
+
+    // Отправляем обновленные данные всем игрокам
+    room.players.forEach((player, playerId) => {
+      if (player.connected) {
+        console.log('📤 Server: Sending game-updated to player:', playerId)
+        io.to(playerId).emit('game-updated', room.getGameData(playerId))
+      }
+    })
   })
 
   socket.on('next-phase', (data) => {

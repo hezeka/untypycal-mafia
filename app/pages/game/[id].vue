@@ -195,13 +195,14 @@
               <div class="players-list">
                 <div 
                   v-for="player in players" 
-                  :key="player.id"
+                  :key="`${player.id}-${getPlayerColor(player)}`"
                   class="player-item"
                   :class="{ 
                     'is-host': player.id === hostId,
                     'is-disconnected': !player.connected,
                     'is-self': player.id === currentPlayerId,
-                    'is-speaking': isSpeaking(player.id)
+                    'is-speaking': isSpeaking(player.id),
+                    [`color-${getColorClassName(getPlayerColor(player))}`]: getPlayerColor(player)
                   }"
                 >
                   <div class="player-main-info">
@@ -228,6 +229,17 @@
                         </button> -->
                       </div>
                     </div>
+                  </div>
+                  
+                  <!-- Color picker button for current player on setup stage -->
+                  <div v-if="player.id === currentPlayerId && gameState === 'setup'" class="player-color-picker">
+                    <button 
+                      class="color-button"
+                      :style="{ backgroundColor: getColorHex(currentPlayerColor) }"
+                      @click="showColorPalette = true"
+                      title="Выбрать цвет"
+                    >
+                    </button>
                   </div>
                   
                   <!-- Show role if it's the current player or if game started -->
@@ -356,10 +368,30 @@
       <!-- Game in Progress -->
       <GameBoard v-else />
     </div>
+    
+    <!-- Color Palette Modal -->
+    <div v-if="showColorPalette" class="modal-overlay" @click="showColorPalette = false">
+      <div class="modal-content" @click.stop>
+        <div class="modal-header">
+          <h3>Выберите цвет</h3>
+          <button @click="showColorPalette = false" class="close-button">×</button>
+        </div>
+        <div class="modal-body">
+          <ColorPalette 
+            :selected-color="currentPlayerColor"
+            :taken-colors="takenColors"
+            @color-selected="selectColor"
+            :key="currentPlayerColor"
+          />
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup>
+import ColorPalette from '~/components/ColorPalette.vue'
+
 const route = useRoute()
 const router = useRouter()
 
@@ -375,7 +407,12 @@ const {
   removeRole,
   startGame: startNewGame,
   voiceActivity,
-  sendVoiceActivity
+  sendVoiceActivity,
+  changePlayerColor,
+  getTakenColors,
+  getPlayerColor: getPlayerColorFromUseGame,
+  getColorHex: getColorHexFromUseGame,
+  player: currentPlayer
 } = useGame()
 
 const { username, hasUsername } = useUser()
@@ -403,6 +440,10 @@ const nameValidation = reactive({
   formattedName: null
 })
 
+// Color palette modal
+const showColorPalette = ref(false)
+const localPlayerColor = ref(null) // Локальное состояние для немедленного отображения
+
 // Computed properties
 const roomId = computed(() => route.params.id)
 const hostId = computed(() => room.hostId)
@@ -410,8 +451,38 @@ const gameState = computed(() => gameData.gameState)
 const players = computed(() => allPlayers.value)
 const selectedRoles = computed(() => gameData.selectedRoles)
 
+// Реактивный список занятых цветов
+const takenColors = computed(() => {
+  const colors = getTakenColors()
+  console.log('🎨 takenColors computed:', colors)
+  return colors
+})
+
 const currentPlayerId = computed(() => {
   return socket?.id
+})
+
+const currentPlayerColor = computed(() => {
+  // Приоритет: локальное состояние > данные с сервера > localStorage > purple
+  const allPlayers = gameData.players
+  const playerId = currentPlayerId.value
+  
+  // Найдем игрока в gameData.players по currentPlayerId
+  const playerFromGameData = allPlayers?.find(p => p.id === playerId)
+  const savedColor = process.client ? localStorage.getItem('playerColor') : null
+  
+  // Используем локальное состояние если оно установлено, иначе данные с сервера
+  const color = localPlayerColor.value || playerFromGameData?.color || currentPlayer.color || savedColor || 'purple'
+  
+  console.log('🎨 Current player color computed:', color)
+  console.log('🔴 Local player color:', localPlayerColor.value)
+  console.log('🎮 Player from gameData:', playerFromGameData)
+  console.log('🎯 Current player from useGame:', currentPlayer)
+  console.log('💾 Saved color from localStorage:', savedColor)
+  console.log('🆔 Current player ID:', playerId)
+  console.log('📊 All players count:', allPlayers?.length || 0)
+  
+  return color
 })
 
 const hostName = computed(() => {
@@ -737,6 +808,44 @@ function debounce(func, wait) {
   }
 }
 
+// Color selection methods
+const getColorClassName = (colorName) => {
+  // Теперь color уже хранится как название класса
+  return colorName || 'purple'
+}
+
+// Получить цвет для конкретного игрока (с учетом локального состояния для текущего игрока)
+const getPlayerColor = (player) => {
+  if (player.id === currentPlayerId.value) {
+    return currentPlayerColor.value
+  }
+  return getPlayerColorFromUseGame(player)
+}
+
+const getColorHex = (colorName) => {
+  return getColorHexFromUseGame(colorName)
+}
+
+const selectColor = (color) => {
+  console.log('🎨 Selecting color:', color)
+  console.log('🎯 Current player:', currentPlayer)
+  console.log('🏠 Is in room:', isInRoom.value)
+  console.log('🆔 Room ID:', room.id)
+  console.log('💾 About to call changePlayerColor with:', color)
+  
+  // НЕМЕДЛЕННО устанавливаем локальное состояние для мгновенного отображения
+  localPlayerColor.value = color
+  console.log('🔴 Local player color set to:', color)
+  
+  changePlayerColor(color)
+  
+  // Также сохраняем цвет локально для немедленного отображения
+  localStorage.setItem('playerColor', color)
+  
+  console.log('✅ Color selection completed, modal closing')
+  showColorPalette.value = false
+}
+
 // Methods
 const joinRoom = async () => {
   // Use saved username if available, otherwise use input
@@ -779,6 +888,15 @@ const startGame = () => {
 onMounted(async () => {
   initSocketListeners()
   setupSocketListeners()
+  
+  // Инициализируем локальный цвет из localStorage если нет данных с сервера
+  nextTick(() => {
+    const savedColor = localStorage.getItem('playerColor')
+    if (savedColor && !gameData.players?.find(p => p.id === currentPlayerId.value)?.color) {
+      localPlayerColor.value = savedColor
+      console.log('🎨 Initialized local color from localStorage:', savedColor)
+    }
+  })
   
   // Инициализируем микрофон если пользователь его включил
   console.log('🎤 Checking microphone initialization...')
@@ -843,6 +961,34 @@ watch(() => players.value, (newPlayers) => {
   for (const playerId of assignmentPlayerIds) {
     if (!currentPlayerIds.has(playerId)) {
       roleAssignments.value.delete(playerId)
+    }
+  }
+}, { deep: true })
+
+// Watch for game data changes to sync local color and trigger reactivity
+watch(() => gameData.players, (newPlayers, oldPlayers) => {
+  if (newPlayers && localPlayerColor.value) {
+    const currentPlayerData = newPlayers.find(p => p.id === currentPlayerId.value)
+    if (currentPlayerData?.color && currentPlayerData.color === localPlayerColor.value) {
+      // Сервер подтвердил изменение цвета, можем очистить локальное состояние
+      localPlayerColor.value = null
+      console.log('🔄 Server confirmed color change, clearing local state')
+    }
+  }
+  
+  // Логируем изменения цветов для отладки
+  if (process.env.NODE_ENV === 'development' && newPlayers && oldPlayers) {
+    const colorChanges = newPlayers.filter((newPlayer, index) => {
+      const oldPlayer = oldPlayers.find(p => p.id === newPlayer.id)
+      return oldPlayer && oldPlayer.color !== newPlayer.color
+    })
+    
+    if (colorChanges.length > 0) {
+      console.log('🎨 Player color changes detected:', colorChanges.map(p => ({ 
+        id: p.id, 
+        name: p.name, 
+        newColor: p.color 
+      })))
     }
   }
 }, { deep: true })
@@ -1134,6 +1280,8 @@ definePageMeta({
       border-bottom: 1px solid rgba(255, 255, 255, 0.1);
       transition: 0.2s;
       padding-right: 8px;
+      position: relative;
+      padding-left: 16px;
       
       &:last-child {
         border-bottom: none;
@@ -1229,10 +1377,6 @@ definePageMeta({
       }
       
       &.is-self {
-        background: rgba(102, 126, 234, 0.1);
-        border-radius: 4px;
-        padding: 8px;
-        margin: 4px 0;
       }
       
       &.is-disconnected {
@@ -1246,7 +1390,6 @@ definePageMeta({
       &.is-speaking {
         background: rgba(0, 255, 136, 0.03);
         border-left: 3px solid #2bb173;
-        padding-left: 12px;
 
         .player-name {
           color: #1ecd7b !important;
@@ -1280,6 +1423,41 @@ definePageMeta({
           &.gold { background: rgba(241, 196, 15, 0.2); color: #f1c40f; }
         }
       }
+      
+      .player-color-picker {
+        position: absolute;
+        right: 8px;
+        top: 50%;
+        transform: translateY(-50%);
+        
+        .color-button {
+          width: 24px;
+          height: 24px;
+          border: 2px solid rgba(255, 255, 255, 0.3);
+          border-radius: 50%;
+          cursor: pointer;
+          transition: all 0.2s ease;
+          
+          &:hover {
+            transform: scale(1.1);
+            border-color: rgba(255, 255, 255, 0.6);
+          }
+        }
+      }
+      
+      // Color classes for player items
+      &.color-red { border-left: 3px solid #e74c3c; }
+      &.color-orange { border-left: 3px solid #e67e22; }
+      &.color-yellow { border-left: 3px solid #f1c40f; }
+      &.color-green { border-left: 3px solid #2ecc71; }
+      &.color-blue { border-left: 3px solid #3498db; }
+      &.color-purple { border-left: 3px solid #9b59b6; }
+      &.color-pink { border-left: 3px solid #e91e63; }
+      &.color-brown { border-left: 3px solid #795548; }
+      &.color-grey { border-left: 3px solid #607d8b; }
+      &.color-deep-orange { border-left: 3px solid #ff5722; }
+      &.color-dark-green { border-left: 3px solid #4caf50; }
+      &.color-cyan { border-left: 3px solid #00bcd4; }
     }
   }
   
@@ -1547,5 +1725,61 @@ definePageMeta({
       }
     }
   }
+}
+
+/* Color palette modal */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.8);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
+}
+
+.modal-content {
+  background: linear-gradient(135deg, #2c3e50 0%, #34495e 100%);
+  border-radius: 12px;
+  padding: 0;
+  max-width: 400px;
+  width: 90%;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 20px 24px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  
+  h3 {
+    margin: 0;
+    color: #fff;
+    font-size: 18px;
+  }
+  
+  .close-button {
+    background: none;
+    border: none;
+    color: #fff;
+    font-size: 24px;
+    cursor: pointer;
+    opacity: 0.7;
+    transition: opacity 0.2s;
+    
+    &:hover {
+      opacity: 1;
+    }
+  }
+}
+
+.modal-body {
+  padding: 24px;
 }
 </style>

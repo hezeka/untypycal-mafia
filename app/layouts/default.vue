@@ -33,15 +33,28 @@
               {{ soundsEnabled ? '🔊' : '🔇' }}
             </button>
             
-            <!-- Кнопка микрофона -->
-            <button 
-              @click="handleToggleMicrophone" 
-              class="btn btn-secondary btn-small mic-toggle"
-              :class="{ 'mic-disabled': !microphoneEnabled }"
-              :title="microphoneEnabled ? 'Выключить микрофон' : 'Включить микрофон (первый раз может потребовать разрешения)'"
-            >
-              {{ microphoneEnabled ? '🎤' : '🎤❌' }}
-            </button>
+            <!-- Кнопка микрофона с настройками -->
+            <div class="mic-button-container">
+              <button 
+                @click="handleToggleMicrophone" 
+                @mouseenter="showMicSettings = true"
+                @mouseleave="handleMicMouseLeave"
+                class="btn btn-secondary btn-small mic-toggle"
+                :class="{ 'mic-disabled': !microphoneEnabled }"
+                :title="microphoneEnabled ? 'Выключить микрофон' : 'Включить микрофон (первый раз может потребовать разрешения)'"
+              >
+                {{ microphoneEnabled ? '🎤' : '🎤❌' }}
+                <span v-if="microphoneEnabled" class="settings-indicator">⚙️</span>
+              </button>
+              
+              <MicrophoneSettings 
+                :is-visible="showMicSettings && microphoneEnabled"
+                @close="showMicSettings = false"
+                @applied="onMicSettingsApplied"
+                @mouseenter="cancelMicHide"
+                @mouseleave="handleMicMouseLeave"
+              />
+            </div>
             
             <button @click="leaveRoom" class="btn btn-secondary btn-small">
               Покинуть комнату
@@ -135,19 +148,57 @@
       :current-username="username"
       @close="showUsernameModal = false"
     />
+    
+    <!-- Microphone Permission Modal -->
+    <MicrophonePermissionModal 
+      ref="micPermissionModal"
+      :is-visible="showMicPermissionModal"
+      @close="showMicPermissionModal = false"
+      @permission-granted="onMicPermissionGranted"
+      @permission-denied="onMicPermissionDenied"
+      @retry="retryMicrophonePermission"
+    />
   </div>
 </template>
 
 <script setup>
-const { isInRoom, room, gameData, player, isHost, forceStopVoiceActivity, forceStartVoiceActivity, clearRoom, getAllRoles } = useGame()
+import MicrophoneSettings from '~/components/MicrophoneSettings.vue'
+import MicrophonePermissionModal from '~/components/MicrophonePermissionModal.vue'
+
+const { isInRoom, room, gameData, player, isHost, forceStopVoiceActivity, forceStartVoiceActivity, clearRoom, getAllRoles, sendVoiceActivity } = useGame()
 const { isConnected } = useSocket()
 const { soundsEnabled, toggleSounds } = useSounds()
-const { microphoneEnabled, toggleMicrophone } = useVoiceActivity()
+const { microphoneEnabled, toggleMicrophone, retryMicrophoneEnable } = useVoiceActivity()
 const { username, hasUsername } = useUser()
 
 const showRules = ref(false)
 const showRolesGuide = ref(false)
 const showUsernameModal = ref(false)
+const showMicSettings = ref(false)
+const showMicPermissionModal = ref(false)
+
+// Refs
+const micPermissionModal = ref(null)
+
+// Microphone settings logic
+let micHideTimeout = null
+
+const handleMicMouseLeave = () => {
+  micHideTimeout = setTimeout(() => {
+    showMicSettings.value = false
+  }, 200) // Small delay to allow moving to settings panel
+}
+
+const cancelMicHide = () => {
+  if (micHideTimeout) {
+    clearTimeout(micHideTimeout)
+    micHideTimeout = null
+  }
+}
+
+const onMicSettingsApplied = () => {
+  console.log('✅ Настройки микрофона применены')
+}
 
 const roomId = computed(() => room.id)
 const gameRoles = computed(() => gameData.selectedRoles || [])
@@ -164,15 +215,71 @@ const allRoles = computed(() => {
 })
 
 // Обработчик для кнопки микрофона с принудительными функциями
-const handleToggleMicrophone = async () => {
+const handleToggleMicrophone = async (event) => {
   console.log('🔄 Toggling microphone from layout')
+  
+  // Если микрофон включен, просто выключаем
+  if (microphoneEnabled.value) {
+    await toggleMicrophone(forceStopVoiceActivity, forceStartVoiceActivity, null, event)
+    return
+  }
+  
+  // Если микрофон выключен, показываем модальное окно и запрашиваем разрешение
+  showMicPermissionModal.value = true
   
   // Создаем callback для голосовой активности
   const voiceActivityCallback = (isActive) => {
     sendVoiceActivity(isActive)
   }
   
-  await toggleMicrophone(forceStopVoiceActivity, forceStartVoiceActivity, voiceActivityCallback)
+  try {
+    const result = await toggleMicrophone(forceStopVoiceActivity, forceStartVoiceActivity, voiceActivityCallback, event)
+    
+    if (result) {
+      // Разрешение получено
+      micPermissionModal.value?.handlePermissionGranted()
+    } else {
+      // Разрешение не получено
+      micPermissionModal.value?.handlePermissionDenied()
+    }
+  } catch (error) {
+    console.error('❌ Microphone permission error:', error)
+    micPermissionModal.value?.handlePermissionError(error)
+  }
+}
+
+// Обработчики модального окна разрешений
+const onMicPermissionGranted = () => {
+  console.log('✅ Microphone permission granted')
+  setTimeout(() => {
+    showMicPermissionModal.value = false
+  }, 2000) // Показываем успех 2 секунды
+}
+
+const onMicPermissionDenied = () => {
+  console.log('❌ Microphone permission denied')
+  // Модальное окно остается открытым для показа инструкций
+}
+
+const retryMicrophonePermission = async (event) => {
+  console.log('🔄 Retrying microphone permission')
+  
+  const voiceActivityCallback = (isActive) => {
+    sendVoiceActivity(isActive)
+  }
+  
+  try {
+    const result = await retryMicrophoneEnable(voiceActivityCallback, event)
+    
+    if (result) {
+      micPermissionModal.value?.handlePermissionGranted()
+    } else {
+      micPermissionModal.value?.handlePermissionDenied()
+    }
+  } catch (error) {
+    console.error('❌ Microphone retry error:', error)
+    micPermissionModal.value?.handlePermissionError(error)
+  }
 }
 
 const leaveRoom = async () => {
@@ -500,6 +607,39 @@ onMounted(() => {
   }
 }
 
+// Microphone button styles
+.mic-button-container {
+  position: relative;
+  display: inline-block;
+}
+
+.mic-toggle {
+  position: relative;
+  
+  .settings-indicator {
+    position: absolute;
+    top: -2px;
+    right: -2px;
+    font-size: 8px;
+    opacity: 0.7;
+    transition: opacity 0.2s ease;
+  }
+  
+  &:hover .settings-indicator {
+    opacity: 1;
+  }
+}
+
+.mic-disabled {
+  opacity: 0.6;
+  border-color: rgba(231, 76, 60, 0.3);
+  
+  &:hover {
+    border-color: rgba(231, 76, 60, 0.6);
+    background: rgba(231, 76, 60, 0.1);
+  }
+}
+
 @keyframes slideIn {
   from {
     transform: translateX(100%);
@@ -549,6 +689,11 @@ onMounted(() => {
     display: flex;
     align-items: center;
     justify-content: center;
+  }
+  
+  .mic-button-container {
+    position: relative;
+    display: inline-block;
   }
   
   .mic-disabled {

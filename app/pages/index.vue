@@ -67,7 +67,7 @@
         <!-- Публичные игры -->
         <div class="public-games-section">
           <div class="card">
-            <div class="card-header">🌍 Публичные игры</div>
+            <div class="card-header">Публичные игры</div>
             <div v-if="publicRooms.length > 0" class="public-rooms-grid">
               <div 
                 v-for="room in publicRooms" 

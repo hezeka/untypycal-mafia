@@ -212,10 +212,22 @@ export const useGame = () => {
         p.name === player.name
       )
       
-      if (currentPlayerData && currentPlayerData.role && currentPlayerData.role !== player.role) {
-        player.role = currentPlayerData.role
+      if (currentPlayerData) {
+        // Debug logging for color updates
         if (process.env.NODE_ENV === 'development') {
-          console.log(`Role updated to: ${currentPlayerData.role}`)
+          console.log('🎨 Client: Received game-updated with player data:', {
+            playerId: currentPlayerData.id,
+            playerName: currentPlayerData.name,
+            color: currentPlayerData.color,
+            role: currentPlayerData.role
+          })
+        }
+        
+        if (currentPlayerData.role && currentPlayerData.role !== player.role) {
+          player.role = currentPlayerData.role
+          if (process.env.NODE_ENV === 'development') {
+            console.log(`Role updated to: ${currentPlayerData.role}`)
+          }
         }
       }
       
@@ -356,15 +368,16 @@ export const useGame = () => {
 
   // Helper functions
   const updateGameData = (newGameData) => {
-    // Проверяем изменения в состоянии игроков (alive, protected, etc.)
+    // Проверяем изменения в состоянии игроков (alive, protected, color, etc.)
     const playersChanged = gameData.players && newGameData.players && 
-      gameData.players.some((player, index) => {
-        const newPlayer = newGameData.players[index]
+      gameData.players.some((player) => {
+        const newPlayer = newGameData.players.find(p => p.id === player.id)
         return !newPlayer || 
                player.alive !== newPlayer.alive ||
                player.protected !== newPlayer.protected ||
                player.role !== newPlayer.role ||
-               player.connected !== newPlayer.connected
+               player.connected !== newPlayer.connected ||
+               player.color !== newPlayer.color  // ДОБАВЛЕНО: проверка изменения цвета!
       })
     
     // Более строгая проверка на необходимость обновления данных
@@ -391,7 +404,9 @@ export const useGame = () => {
         gameState: newGameData.gameState,
         playersCount: newGameData.players?.length || 0,
         selectedRolesCount: newGameData.selectedRoles?.length || 0,
-        chatLength: newGameData.chat?.length || 0
+        chatLength: newGameData.chat?.length || 0,
+        playersChanged,
+        playersColors: newGameData.players?.map(p => ({ id: p.id, name: p.name, color: p.color }))
       })
     }
     
@@ -562,17 +577,83 @@ export const useGame = () => {
   }
 
   // Actions
+  // Функции для работы с цветом
+  const getSavedColor = () => {
+    if (!process.client) return 'purple'
+    return localStorage.getItem('playerColor') || 'purple'
+  }
+
+  const saveColor = (color) => {
+    if (!process.client) return
+    localStorage.setItem('playerColor', color)
+  }
+
+  const changePlayerColor = (color) => {
+    console.log('🎨 useGame: changePlayerColor called with:', color)
+    console.log('🏠 useGame: isInRoom:', isInRoom.value)
+    console.log('🆔 useGame: room.id:', room.id)
+    
+    if (!isInRoom.value) {
+      console.log('❌ useGame: Not in room, aborting color change')
+      return
+    }
+    
+    console.log('📤 useGame: Emitting change-player-color event')
+    socket.emit('change-player-color', { roomId: room.id, color })
+    saveColor(color)
+    console.log('💾 useGame: Color saved to localStorage:', color)
+  }
+
+  const getTakenColors = () => {
+    const takenColors = gameData.players ? gameData.players.map(p => p.color).filter(Boolean) : []
+    if (process.env.NODE_ENV === 'development') {
+      console.log('🎨 getTakenColors called, returning:', takenColors)
+    }
+    return takenColors
+  }
+
+  // Получить цвет для любого игрока (учитывает локальные изменения для текущего игрока)
+  const getPlayerColor = (targetPlayer) => {
+    if (targetPlayer.id === player.id) {
+      // Для текущего игрока проверяем localStorage если цвет еще не синхронизирован с сервером
+      const savedColor = process.client ? localStorage.getItem('playerColor') : null
+      return targetPlayer.color || savedColor || 'purple'
+    }
+    return targetPlayer.color || 'purple'
+  }
+
+  // Получить HEX цвет по названию
+  const getColorHex = (colorName) => {
+    const colorMap = {
+      'red': '#e74c3c',
+      'orange': '#e67e22', 
+      'yellow': '#f1c40f',
+      'green': '#2ecc71',
+      'blue': '#3498db',
+      'purple': '#9b59b6',
+      'pink': '#e91e63',
+      'brown': '#795548',
+      'grey': '#607d8b',
+      'deep-orange': '#ff5722',
+      'dark-green': '#4caf50',
+      'cyan': '#00bcd4'
+    }
+    return colorMap[colorName] || '#9b59b6'
+  }
+
   const createRoom = (playerName, isPrivate = false) => {
     player.id = socket.id
     player.name = playerName
-    socket.emit('create-room', { playerName, isPrivate })
+    const preferredColor = getSavedColor()
+    socket.emit('create-room', { playerName, isPrivate, preferredColor })
   }
 
   const joinRoom = ({ roomId, playerName }) => {
     player.id = socket.id
     player.name = playerName
     room.id = roomId // Set room ID immediately for UI
-    socket.emit('join-room', { roomId, playerName })
+    const preferredColor = getSavedColor()
+    socket.emit('join-room', { roomId, playerName, preferredColor })
   }
 
   const selectRole = (roleId) => {
@@ -707,6 +788,13 @@ export const useGame = () => {
     adminAction,
     nextPhase,
     setTimer,
-    getAllRoles
+    getAllRoles,
+    
+    // Color methods
+    changePlayerColor,
+    getTakenColors,
+    getSavedColor,
+    getPlayerColor,
+    getColorHex
   }
 }

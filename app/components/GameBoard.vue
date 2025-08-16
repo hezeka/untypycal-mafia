@@ -85,6 +85,7 @@
           <div v-else class="no-role">
             {{ gameState === 'setup' ? 'Роль будет назначена после начала игры' : 'Роль не назначена' }}
           </div>
+          
         </div>
       </div>
 
@@ -110,7 +111,7 @@
           <div class="players-grid">
             <div 
               v-for="player in playersToShow" 
-              :key="player.id"
+              :key="`${player.id}-${getPlayerColor(player)}`"
               class="player-card"
               :class="{ 
                 voted: votedPlayer === player.id,
@@ -125,7 +126,12 @@
               @click="votePlayer(player.id)"
             >
               <div class="player-avatar">
-                <div class="player-initial">{{ player.name[0].toUpperCase() }}</div>
+                <div 
+                  class="player-initial" 
+                  :style="{ backgroundColor: getColorHex(getPlayerColor(player)) }"
+                >
+                  {{ player.name[0].toUpperCase() }}
+                </div>
                 <div v-if="player.votes > 0" class="vote-count">{{ player.votes }}</div>
                 <div v-if="!player.alive" class="death-marker">💀</div>
                 <div v-else-if="!player.connected" class="disconnected-marker">😴</div>
@@ -144,6 +150,7 @@
                   <button
                     @click="whisperToPlayer(player.name)"
                     class="btn btn-secondary btn-tiny"
+                    v-if="!player.isSelf"
                   >
                     📩
                   </button>
@@ -315,7 +322,9 @@ const {
   restartGame: restartNewGame,
   setTimer,
   voiceActivity,
-  sendVoiceActivity
+  sendVoiceActivity,
+  getPlayerColor,
+  getColorHex
 } = useGame()
 
 const { initVoiceDetection, stopVoiceDetection, isSupported } = useVoiceActivity()
@@ -940,7 +949,6 @@ onUnmounted(() => {
           width: 50px;
           height: 50px;
           border-radius: 50%;
-          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
           display: flex;
           align-items: center;
           justify-content: center;
@@ -948,6 +956,8 @@ onUnmounted(() => {
           font-weight: bold;
           margin: 0 auto;
           transition: 0.2s;
+          background-image: linear-gradient(45deg, #bb4dffb6, transparent);
+          text-shadow: 0 2px 17px #ff00f7;
         }
 
         .voice-indicator {
@@ -1182,4 +1192,5 @@ onUnmounted(() => {
   font-weight: 500;
   margin-left: 5px;
 }
+
 </style>

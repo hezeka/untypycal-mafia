@@ -21,7 +21,25 @@ export class GameRoom {
     this.roles = roles // Ссылка на объект ролей
   }
 
-  addPlayer(socketId, name) {
+  addPlayer(socketId, name, preferredColor = null) {
+    // Палитра из 12 цветов для игроков (4 колонки, 3 ряда)
+    const availableColors = [
+      'red', 'orange', 'yellow', 'green',        // Красный, Оранжевый, Желтый, Зеленый
+      'blue', 'purple', 'pink', 'brown',         // Синий, Фиолетовый, Розовый, Коричневый  
+      'grey', 'deep-orange', 'dark-green', 'cyan' // Серый, Темно-оранжевый, Темно-зеленый, Голубой
+    ]
+    
+    // Получаем занятые цвета
+    const usedColors = Array.from(this.players.values()).map(p => p.color)
+    
+    // Определяем цвет игрока
+    let playerColor = preferredColor
+    if (!playerColor || usedColors.includes(playerColor)) {
+      // Если предпочитаемый цвет не указан или занят, выбираем случайный свободный
+      const freeColors = availableColors.filter(color => !usedColors.includes(color))
+      playerColor = freeColors.length > 0 ? freeColors[Math.floor(Math.random() * freeColors.length)] : 'purple'
+    }
+    
     const player = {
       id: socketId,
       name: name,
@@ -31,7 +49,8 @@ export class GameRoom {
       artifact: null,
       votes: 0,
       connected: true,
-      muted: false
+      muted: false,
+      color: playerColor
     }
     
     // If this is the host, assign game_master role
@@ -153,7 +172,8 @@ export class GameRoom {
         protected: player.protected,
         artifact: player.artifact,
         votes: player.votes,
-        connected: player.connected
+        connected: player.connected,
+        color: player.color
       }
     })
     
@@ -564,6 +584,59 @@ export class GameRoom {
       connected: p.connected,
       hasRole: !!p.role
     }))
+  }
+
+  // Метод для смены цвета игрока
+  changePlayerColor(socketId, newColor) {
+    console.log('🎨 GameRoom: changePlayerColor called:', { socketId, newColor })
+    const availableColors = [
+      'red', 'orange', 'yellow', 'green',
+      'blue', 'purple', 'pink', 'brown',
+      'grey', 'deep-orange', 'dark-green', 'cyan'
+    ]
+    
+    if (!availableColors.includes(newColor)) {
+      console.log('❌ GameRoom: Invalid color:', newColor)
+      return { success: false, error: 'Недопустимый цвет' }
+    }
+    
+    // Проверяем, что цвет не занят другим игроком
+    const usedColors = Array.from(this.players.values())
+      .filter(p => p.id !== socketId)
+      .map(p => p.color)
+    
+    console.log('🔍 GameRoom: Used colors by other players:', usedColors)
+    
+    if (usedColors.includes(newColor)) {
+      console.log('❌ GameRoom: Color already taken:', newColor)
+      return { success: false, error: 'Этот цвет уже занят' }
+    }
+    
+    const player = this.players.get(socketId)
+    if (!player) {
+      console.log('❌ GameRoom: Player not found:', socketId)
+      return { success: false, error: 'Игрок не найден' }
+    }
+    
+    const oldColor = player.color
+    player.color = newColor
+    console.log('✅ GameRoom: Color changed:', { playerId: socketId, playerName: player.name, oldColor, newColor })
+    return { success: true }
+  }
+
+  // Получить доступные цвета для игрока
+  getAvailableColors(excludeSocketId = null) {
+    const availableColors = [
+      'red', 'orange', 'yellow', 'green',
+      'blue', 'purple', 'pink', 'brown', 
+      'grey', 'deep-orange', 'dark-green', 'cyan'
+    ]
+    
+    const usedColors = Array.from(this.players.values())
+      .filter(p => p.id !== excludeSocketId)
+      .map(p => p.color)
+    
+    return availableColors.filter(color => !usedColors.includes(color))
   }
 
   // Методы для работы с таймером
