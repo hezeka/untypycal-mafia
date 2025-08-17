@@ -5,6 +5,19 @@ import { useSounds } from './useSound'
 // Global state for socket listeners (to prevent multiple initialization)
 let globalListenersInitialized = false
 
+// SECURITY: Frontend sanitization helper
+const sanitizeForDisplay = (text) => {
+  if (!text || typeof text !== 'string') return ''
+  
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#x27;')
+    .replace(/\//g, '&#x2F;')
+}
+
 // Global state (persists across components)
 const player = reactive({
   id: null,
@@ -45,12 +58,8 @@ export const useGame = () => {
   const isHost = computed(() => room.isHost || player.role === 'game_master')
   
   const currentPlayer = computed(() => {
-    // Используем более надежный поиск игрока
-    const current = gameData.players.find(p => 
-      p.id === player.id || 
-      p.id === socket.id || 
-      p.name === player.name
-    )
+    // ИСПРАВЛЕНИЕ: Используем имя как основной идентификатор для надежности
+    const current = gameData.players.find(p => p.name === player.name)
     
     // Логируем только при отладке и только важные изменения
     if (process.env.NODE_ENV === 'development') {
@@ -67,7 +76,7 @@ export const useGame = () => {
     return current
   })
   
-  const otherPlayers = computed(() => gameData.players.filter(p => p.id !== player.id && p.role !== 'game_master'))
+  const otherPlayers = computed(() => gameData.players.filter(p => p.name !== player.name && p.role !== 'game_master'))
   const allPlayers = computed(() => gameData.players.filter(p => p.role !== 'game_master'))
   const allPlayersForVoting = computed(() => gameData.players.filter(p => p.role !== 'game_master'))
   const selectedRoleObjects = computed(() => 
@@ -77,10 +86,10 @@ export const useGame = () => {
 
   // Socket event handlers
   const initSocketListeners = () => {
-    // Предотвращаем множественную инициализацию используя глобальное состояние
+    // ИСПРАВЛЕНИЕ: ВСЕГДА очищаем перед инициализацией для предотвращения дублирования
     if (globalListenersInitialized) {
-      console.log('⚠️ Socket listeners already initialized, skipping')
-      return
+      console.log('🔄 Reinitializing socket listeners - removing old ones first')
+      removeSocketListeners()
     }
     
     console.log('🔌 Initializing socket listeners')
@@ -90,10 +99,17 @@ export const useGame = () => {
       // Существующий код
       const existingMessage = gameData.chat.find(m => m.id === message.id)
       if (!existingMessage) {
-        gameData.chat.push(message)
+        // SECURITY: Sanitize message content for frontend display
+        const sanitizedMessage = {
+          ...message,
+          content: sanitizeForDisplay(message.content),
+          playerName: sanitizeForDisplay(message.playerName)
+        }
+        
+        gameData.chat.push(sanitizedMessage)
         
         // ДОБАВЛЯЕМ ЗВУК - только если сообщение не от текущего игрока
-        if (message.playerId !== player.id) {
+        if (message.playerName !== player.name) {
           if (message.type === 'system') {
             playSound('notification', 0.7)
           } else {
@@ -110,11 +126,18 @@ export const useGame = () => {
       // Проверяем, нет ли уже такого сообщения
       const existingWhisper = gameData.chat.find(m => m.id === whisperMessage.id)
       if (!existingWhisper) {
+        // SECURITY: Sanitize whisper content for frontend display
+        const sanitizedWhisper = {
+          ...whisperMessage,
+          content: sanitizeForDisplay(whisperMessage.content),
+          playerName: sanitizeForDisplay(whisperMessage.playerName)
+        }
+        
         // ДОБАВЛЯЕМ шепот в общий чат как обычное сообщение
-        gameData.chat.push(whisperMessage)
+        gameData.chat.push(sanitizedWhisper)
         
         // ДОБАВЛЯЕМ ЗВУК - только если шепот не от текущего игрока
-        if (whisperMessage.playerId !== player.id) {
+        if (whisperMessage.playerName !== player.name) {
           playSound('whisper', 0.6)
         }
       }
@@ -176,7 +199,6 @@ export const useGame = () => {
       
       // Restore player role from server data СРАЗУ, до updateGameData
       const currentPlayerData = newGameData.players?.find(p => 
-        p.id === socket.id || 
         p.name === player.name
       )
       
@@ -207,8 +229,6 @@ export const useGame = () => {
       
       // Check if current player's role changed BEFORE updating game data
       const currentPlayerData = newGameData.players?.find(p => 
-        p.id === player.id || 
-        p.id === socket.id ||
         p.name === player.name
       )
       
@@ -242,8 +262,6 @@ export const useGame = () => {
       
       // Force update player role when game starts BEFORE updating game data
       const currentPlayerData = newGameData.players?.find(p => 
-        p.id === player.id || 
-        p.id === socket.id ||
         p.name === player.name
       )
       
@@ -326,6 +344,15 @@ export const useGame = () => {
       }
     })
 
+    socket.on('room-deleted', ({ message, roomId }) => {
+      alert(message)
+      // Clear room state and redirect to home page
+      clearRoom()
+      if (process.client) {
+        navigateTo('/')
+      }
+    })
+
     socket.on('command-error', ({ message }) => {
       // Показываем ошибку команды - будет обработана в компоненте GameChat
       console.log('Command error:', message)
@@ -368,55 +395,55 @@ export const useGame = () => {
 
   // Helper functions
   const updateGameData = (newGameData) => {
-    // Проверяем изменения в состоянии игроков (alive, protected, color, etc.)
-    const playersChanged = gameData.players && newGameData.players && 
-      gameData.players.some((player) => {
-        const newPlayer = newGameData.players.find(p => p.id === player.id)
-        return !newPlayer || 
-               player.alive !== newPlayer.alive ||
-               player.protected !== newPlayer.protected ||
-               player.role !== newPlayer.role ||
-               player.connected !== newPlayer.connected ||
-               player.color !== newPlayer.color  // ДОБАВЛЕНО: проверка изменения цвета!
-      })
+    // ИСПРАВЛЕНИЕ: Улучшенная checksum система с учетом голосования и всех данных
+    const createChecksum = (data) => JSON.stringify({
+      id: data.id,
+      gameState: data.gameState,
+      currentPhase: data.currentPhase,
+      playersCount: data.players?.length || 0,
+      selectedRolesCount: data.selectedRoles?.length || 0,
+      chatLength: data.chat?.length || 0,
+      timer: data.timer,
+      // ИСПРАВЛЕНИЕ: Добавляем данные голосования в checksum (включая детальные голоса для ведущего)
+      voting: data.voting ? {
+        total: data.voting.total,
+        submitted: data.voting.submitted,
+        hasVoted: data.voting.hasVoted,
+        votedFor: data.voting.votedFor,
+        // Добавляем хеш всех голосов для ведущего
+        votesHash: data.voting.votes ? 
+          data.voting.votes.map(v => `${v.voter}>${v.target || 'null'}`).sort().join('|') : 
+          null
+      } : null,
+      // Улучшенный hash игроков с голосами
+      playersHash: data.players?.map(p => 
+        `${p.id}:${p.alive}:${p.connected}:${p.color}:${p.role || 'none'}:${p.votes || 0}:${p.protected || false}`
+      ).join('|') || ''
+    })
     
-    // Более строгая проверка на необходимость обновления данных
-    const hasSignificantChanges = 
-      gameData.id !== newGameData.id ||
-      gameData.gameState !== newGameData.gameState ||
-      gameData.players?.length !== newGameData.players?.length ||
-      gameData.selectedRoles?.length !== newGameData.selectedRoles?.length ||
-      gameData.chat?.length !== newGameData.chat?.length ||
-      playersChanged
+    const gameDataChecksum = createChecksum(gameData)
+    const newGameDataChecksum = createChecksum(newGameData)
     
-    if (!hasSignificantChanges) {
-      // Данные не изменились значительно, пропускаем обновление
+    // ОПТИМИЗАЦИЯ: Быстрое сравнение по checksum
+    if (gameDataChecksum === newGameDataChecksum) {
       if (process.env.NODE_ENV === 'development') {
-        console.log('⏭️ Skipping updateGameData - no significant changes')
+        console.log('⚡ Skipping updateGameData - checksums match')
       }
       return
     }
     
     // Логируем только при значительных изменениях
     if (process.env.NODE_ENV === 'development') {
-      console.log('📊 Updating game data:', {
-        id: newGameData.id,
-        gameState: newGameData.gameState,
-        playersCount: newGameData.players?.length || 0,
-        selectedRolesCount: newGameData.selectedRoles?.length || 0,
-        chatLength: newGameData.chat?.length || 0,
-        playersChanged,
-        playersColors: newGameData.players?.map(p => ({ id: p.id, name: p.name, color: p.color }))
-      })
+      console.log('📊 Updating game data (checksums differ)')
     }
     
+    // ОПТИМИЗАЦИЯ: Batch update для лучшей производительности
+    const oldGameData = { ...gameData }
     Object.assign(gameData, newGameData)
     
     // Обновляем роль текущего игрока только если она ещё не установлена
     if (!player.role) {
       const currentPlayerData = newGameData.players?.find(p => 
-        p.id === player.id || 
-        p.id === socket.id ||
         p.name === player.name
       )
       
@@ -431,33 +458,27 @@ export const useGame = () => {
 
   const removeSocketListeners = () => {
     if (!globalListenersInitialized) {
+      console.log('⚠️ Socket listeners not initialized, skipping removal')
       return
     }
     
     console.log('🔌 Removing socket listeners')
     
-    // Удаляем все обработчики событий
-    socket.off('new-message')
-    socket.off('new-whisper')
-    socket.off('voice-activity-update')
-    socket.off('room-created')
-    socket.off('join-success')
-    socket.off('game-updated')
-    socket.off('game-started')
-    socket.off('phase-changed')
-    socket.off('whisper-error')
-    socket.off('vote-updated')
-    socket.off('voting-ended')
-    socket.off('timer-updated')
-    socket.off('timer-ended')
-    socket.off('kicked')
-    socket.off('command-error')
-    socket.off('error')
-    socket.off('name-check-result')
-    socket.off('name-suggestions')
+    // ИСПРАВЛЕНИЕ: Используем removeAllListeners для полной очистки
+    const eventsToRemove = [
+      'new-message', 'new-whisper', 'voice-activity-update', 'room-created', 
+      'join-success', 'game-updated', 'game-started', 'phase-changed',
+      'whisper-error', 'vote-updated', 'voting-ended', 'timer-updated',
+      'timer-ended', 'kicked', 'room-deleted', 'command-error', 'error',
+      'name-check-result', 'name-suggestions'
+    ]
+    
+    eventsToRemove.forEach(eventName => {
+      socket.removeAllListeners(eventName)
+    })
     
     globalListenersInitialized = false
-    console.log('✅ Socket listeners removed')
+    console.log('✅ Socket listeners removed completely')
   }
 
   const clearRoom = () => {
@@ -614,7 +635,7 @@ export const useGame = () => {
 
   // Получить цвет для любого игрока (учитывает локальные изменения для текущего игрока)
   const getPlayerColor = (targetPlayer) => {
-    if (targetPlayer.id === player.id) {
+    if (targetPlayer.name === player.name) {
       // Для текущего игрока проверяем localStorage если цвет еще не синхронизирован с сервером
       const savedColor = process.client ? localStorage.getItem('playerColor') : null
       return targetPlayer.color || savedColor || 'purple'
@@ -795,6 +816,9 @@ export const useGame = () => {
     getTakenColors,
     getSavedColor,
     getPlayerColor,
-    getColorHex
+    getColorHex,
+    
+    // Security helper
+    sanitizeForDisplay
   }
 }

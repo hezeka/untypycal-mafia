@@ -89,14 +89,22 @@ const FORBIDDEN_NAMES = [
   'игрок', 'player', 'гость', 'guest', 'аноним', 'anonymous', 'null', 'undefined'
 ]
 
-// Форматирование и валидация имени игрока
+// SECURITY: Enhanced player name validation with XSS protection
 export function validatePlayerName(name, existingPlayers = []) {
   if (!name || typeof name !== 'string') {
     return { valid: false, error: 'Имя не может быть пустым' }
   }
   
-  // Убираем лишние пробелы и форматируем
-  let formattedName = name.trim()
+  // SECURITY: Sanitize input to prevent XSS
+  let formattedName = name
+    .trim()
+    // Remove potential XSS vectors
+    .replace(/[<>'"&]/g, '')
+    .replace(/javascript:/gi, '')
+    .replace(/vbscript:/gi, '')
+    .replace(/on\w+\s*=/gi, '')
+    // Remove control characters
+    .replace(/[\x00-\x1F\x7F]/g, '')
   
   if (formattedName.length < 1) {
     return { valid: false, error: 'Имя не может быть пустым' }
@@ -106,11 +114,11 @@ export function validatePlayerName(name, existingPlayers = []) {
     return { valid: false, error: 'Имя слишком длинное (максимум 15 символов)' }
   }
   
-  // Проверяем на запрещенные символы
+  // SECURITY: Strict character validation - only alphanumeric, underscore, hyphen
   if (!/^[a-zA-Zа-яА-Я0-9_-]+$/.test(formattedName)) {
     return { 
       valid: false, 
-      error: 'Имя может содержать только буквы, цифры, дефис и подчеркивание. Пробелы и слеши запрещены!' 
+      error: 'Имя может содержать только буквы, цифры, дефис и подчеркивание. Пробелы и специальные символы запрещены!' 
     }
   }
   
@@ -122,7 +130,7 @@ export function validatePlayerName(name, existingPlayers = []) {
     }
   }
   
-  // Проверяем на запрещенные имена
+  // SECURITY: Enhanced forbidden names check
   const lowercaseName = formattedName.toLowerCase()
   if (FORBIDDEN_NAMES.includes(lowercaseName)) {
     return { 
@@ -131,11 +139,28 @@ export function validatePlayerName(name, existingPlayers = []) {
     }
   }
   
-  // Проверяем, что имя не похоже на команду
-  if (lowercaseName.startsWith('/') || lowercaseName.includes('/')) {
+  // SECURITY: Block command-like patterns
+  if (lowercaseName.startsWith('/') || 
+      lowercaseName.includes('/') ||
+      lowercaseName.startsWith('!') ||
+      lowercaseName.startsWith('.') ||
+      lowercaseName.startsWith('#')) {
     return { 
       valid: false, 
-      error: 'Имя не может содержать слеши (символ /)' 
+      error: 'Имя не может содержать служебные символы (/, !, ., #)' 
+    }
+  }
+  
+  // SECURITY: Block potential injection patterns in names
+  const dangerousPatterns = [
+    'script', 'iframe', 'object', 'embed', 'form', 'input',
+    'eval', 'alert', 'confirm', 'prompt', 'document', 'window'
+  ]
+  
+  if (dangerousPatterns.some(pattern => lowercaseName.includes(pattern))) {
+    return {
+      valid: false,
+      error: 'Имя содержит запрещенные слова. Выберите другое.'
     }
   }
   
@@ -151,7 +176,7 @@ export function validatePlayerName(name, existingPlayers = []) {
     }
   }
   
-  // Применяем форматирование
+  // Применяем безопасное форматирование
   formattedName = formatPlayerName(formattedName)
   
   return { valid: true, name: formattedName }
@@ -247,7 +272,7 @@ export function logGameAction(roomId, action, details = {}) {
   console.log(`[${timestamp}] 🎮 Room ${roomId}: ${action}`, details)
 }
 
-// Sanitize message content
+// SECURITY: Enhanced sanitize message content with comprehensive XSS protection
 export function sanitizeMessage(message) {
   if (!message || typeof message !== 'string') {
     return ''
@@ -255,9 +280,22 @@ export function sanitizeMessage(message) {
   
   return message
     .trim()
+    // Basic HTML encoding
+    .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
-    .substring(0, 300) // Max length
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#x27;')
+    .replace(/\//g, '&#x2F;')
+    // Remove potential script injection patterns
+    .replace(/javascript:/gi, '')
+    .replace(/vbscript:/gi, '')
+    .replace(/on\w+\s*=/gi, '')
+    .replace(/data:(?!image\/(?:png|jpg|jpeg|gif|svg\+xml))/gi, '')
+    // Remove control characters except tab, newline
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '')
+    // Limit length
+    .substring(0, 500) // Увеличили лимит до 500 символов
 }
 
 // Check if room can start game

@@ -295,10 +295,10 @@ export const useVoiceActivity = () => {
     analyze()
   }
   
-  const stopVoiceDetection = () => {
-    console.log('🔇 Stopping voice detection...')
+  const stopVoiceDetection = (fullStop = true) => {
+    console.log(`🔇 Stopping voice detection (full: ${fullStop})...`)
     
-    // ВСЕГДА уведомляем о прекращении активности, даже если не было активности
+    // ВСЕГДА уведомляем о прекращении активности
     if (currentOnActivityChange) {
       console.log('📤 Sending final voice activity stop event')
       currentOnActivityChange(false)
@@ -310,38 +310,39 @@ export const useVoiceActivity = () => {
       animationFrame.value = null
     }
     
-    // Сначала останавливаем все треки медиа потока
-    if (mediaStream.value) {
-      console.log('🛑 Stopping media stream tracks...')
-      mediaStream.value.getTracks().forEach(track => {
-        console.log('🛑 Stopping track:', track.kind, track.label)
-        track.stop()
-      })
-      mediaStream.value = null
-      console.log('✅ Media stream cleared')
+    if (fullStop) {
+      // ПОЛНАЯ остановка - закрываем все ресурсы
+      if (mediaStream.value) {
+        console.log('🛑 Stopping media stream tracks (full stop)...')
+        mediaStream.value.getTracks().forEach(track => {
+          console.log('🛑 Stopping track:', track.kind, track.label)
+          track.stop()
+        })
+        mediaStream.value = null
+        console.log('✅ Media stream cleared')
+      }
+      
+      if (audioContext.value) {
+        console.log('🛑 Closing audio context...')
+        audioContext.value.close().then(() => {
+          console.log('✅ Audio context closed')
+        }).catch((error) => {
+          console.warn('⚠️ Error closing audio context:', error)
+        })
+        audioContext.value = null
+      }
+      
+      // Сбрасываем анализатор
+      analyser.value = null
+      isSupported.value = false
     }
     
-    // Затем закрываем аудио контекст
-    if (audioContext.value) {
-      console.log('🛑 Closing audio context...')
-      audioContext.value.close().then(() => {
-        console.log('✅ Audio context closed')
-      }).catch((error) => {
-        console.warn('⚠️ Error closing audio context:', error)
-      })
-      audioContext.value = null
-    }
-    
-    // Сбрасываем анализатор
-    analyser.value = null
-    
-    // Сбрасываем состояния, но СОХРАНЯЕМ callback для переинициализации
+    // Сбрасываем активные состояния
     isActive.value = false
-    isSupported.value = false
     lastActivityState = false
-    // ВАЖНО: НЕ очищаем currentOnActivityChange, чтобы можно было переинициализировать
+    // ВАЖНО: НЕ очищаем currentOnActivityChange и медиа ресурсы при мягкой остановке
     
-    console.log('✅ Voice detection fully stopped')
+    console.log(`✅ Voice detection stopped (full: ${fullStop})`)
   }
 
   const pendingInit = ref(false)
@@ -368,8 +369,7 @@ export const useVoiceActivity = () => {
     document.addEventListener('pointerdown', pendingUserGestureListener, { once: false })
   }
 
-  // Функция для отключения/включения микрофона
-  // Дополнительно: четвертый аргумент userGestureEvent (если вызов происходит из event handler, передайте event)
+  // ИСПРАВЛЕНИЕ: Оптимизированная функция для отключения/включения микрофона
   const toggleMicrophone = async (forceStopCallback = null, forceStartCallback = null, voiceCallback = null, userGestureEvent = null) => {
     const wasEnabled = microphoneEnabled.value
     const targetState = !wasEnabled
@@ -389,16 +389,21 @@ export const useVoiceActivity = () => {
         forceStopCallback()
       }
       
-      // Затем останавливаем детекцию микрофона
-      stopVoiceDetection()
+      // ИСПРАВЛЕНИЕ: Мягкое отключение - останавливаем только анализ, НЕ закрываем поток
+      if (animationFrame.value) {
+        cancelAnimationFrame(animationFrame.value)
+        animationFrame.value = null
+      }
       
-      // Даем браузеру время полностью освободить ресурсы
-      await new Promise(resolve => setTimeout(resolve, 100))
+      // Отправляем событие о прекращении активности
+      if (currentOnActivityChange) {
+        currentOnActivityChange(false)
+      }
       
-      console.log('✅ Microphone disabled and voice activity stopped')
-      return true // Указываем, что операция прошла успешно
+      console.log('✅ Microphone disabled (soft shutdown)')
+      return true
     } else {
-      // Включаем микрофон - НЕ МЕНЯЕМ СОСТОЯНИЕ СРАЗУ
+      // Включаем микрофон
       console.log('🎤✅ Trying to enable microphone...')
       
       // Сначала сбрасываем состояние голосовой активности
@@ -408,41 +413,56 @@ export const useVoiceActivity = () => {
       
       // Если передан новый callback, сохраняем его
       if (voiceCallback && typeof voiceCallback === 'function') {
-        console.log('💾 Saving new voice callback for first-time initialization')
+        console.log('💾 Saving new voice callback')
         currentOnActivityChange = voiceCallback
       }
       
-      // Затем переинициализируем микрофон если есть callback
+      // ИСПРАВЛЕНИЕ: Проверяем, можем ли возобновить существующий поток
+      if (mediaStream.value && analyser.value && currentOnActivityChange) {
+        console.log('🔄 Resuming existing microphone stream')
+        
+        // Проверяем, что поток все еще активен
+        const activeTracks = mediaStream.value.getTracks().filter(track => track.readyState === 'live')
+        if (activeTracks.length > 0) {
+          // Поток активен - просто возобновляем анализ
+          microphoneEnabled.value = true
+          if (process.client) {
+            localStorage.setItem('microphoneEnabled', JSON.stringify(true))
+          }
+          startVolumeAnalysis(currentOnActivityChange)
+          console.log('✅ Microphone resumed without reinitialization')
+          return true
+        } else {
+          console.log('🔄 Stream inactive, need full reinitialization')
+        }
+      }
+      
+      // Полная инициализация если нет активного потока
       if (currentOnActivityChange) {
-        // Если вызов происходит из доверенного пользовательского события — инициализируем сразу.
         if (userGestureEvent && userGestureEvent.isTrusted) {
-          console.log('🔄 Initializing microphone with saved callback (user gesture)')
+          console.log('🔄 Full microphone initialization (user gesture)')
           try {
             const result = await initVoiceDetection(currentOnActivityChange)
             if (result) {
-              // ТОЛЬКО СЕЙЧАС включаем состояние и сохраняем
               microphoneEnabled.value = true
               if (process.client) {
                 localStorage.setItem('microphoneEnabled', JSON.stringify(true))
               }
-              console.log('✅ Microphone enabled and voice detection started')
+              console.log('✅ Microphone fully initialized')
               return true
             } else {
               console.warn('❌ Failed to initialize microphone: permission denied')
-              // Состояние уже false, не нужно менять
               return false
             }
           } catch (error) {
             console.warn('❌ Failed to initialize microphone:', error)
-            // Состояние уже false, не нужно менять
-            throw error // Пробрасываем ошибку для обработки в UI
+            throw error
           }
         } else {
-          // Иначе — откладываем инициализацию до следующего доверенного жеста
+          // Откладываем инициализацию до следующего доверенного жеста
           pendingInit.value = true
-          console.log('⏳ Microphone init deferred until user gesture (pointerdown). Call toggleMicrophone from a click to start immediately.')
+          console.log('⏳ Microphone init deferred until user gesture')
           triggerPendingInitOnGesture()
-          // В этом случае считаем что операция успешна (будет выполнена позже)
           microphoneEnabled.value = true
           if (process.client) {
             localStorage.setItem('microphoneEnabled', JSON.stringify(true))
@@ -451,7 +471,6 @@ export const useVoiceActivity = () => {
         }
       } else {
         console.warn('⚠️ No callback available, cannot initialize microphone')
-        // Состояние уже false, не нужно менять
         return false
       }
     }
@@ -474,19 +493,32 @@ export const useVoiceActivity = () => {
     return true
   }
   
-  // Обработка изменений видимости вкладки
+  // ИСПРАВЛЕНИЕ: Более умная обработка изменений видимости вкладки
   const handleVisibilityChange = async () => {
     if (document.hidden && isSupported.value) {
-      // Вкладка скрыта - отключаем микрофон
-      console.log('🎤💤 Tab hidden, stopping microphone...')
-      stopVoiceDetection()
+      // Вкладка скрыта - приостанавливаем анализ, но НЕ закрываем полностью микрофон
+      console.log('🎤💤 Tab hidden, pausing voice activity...')
       
-      // Даем браузеру время полностью освободить ресурсы
-      await new Promise(resolve => setTimeout(resolve, 100))
+      if (animationFrame.value) {
+        cancelAnimationFrame(animationFrame.value)
+        animationFrame.value = null
+      }
       
-      console.log('✅ Microphone paused (tab hidden)')
+      // Отправляем финальное событие о прекращении активности
+      if (currentOnActivityChange) {
+        currentOnActivityChange(false)
+      }
+      
+      console.log('✅ Voice activity paused (tab hidden)')
+    } else if (!document.hidden && mediaStream.value && analyser.value) {
+      // ИСПРАВЛЕНИЕ: Вкладка стала видимой - возобновляем анализ БЕЗ переинициализации
+      console.log('🎤🔄 Tab visible, resuming voice activity...')
+      
+      if (currentOnActivityChange && !animationFrame.value) {
+        startVolumeAnalysis(currentOnActivityChange)
+        console.log('✅ Voice activity resumed')
+      }
     }
-    // При возврате к вкладке микрофон нужно будет переинициализировать вручную
   }
 
   // Инициализируем обработчики событий
@@ -497,13 +529,17 @@ export const useVoiceActivity = () => {
   // Очистка при размонтировании
   onUnmounted(async () => {
     console.log('🧹 Cleaning up voice activity on unmount...')
-    stopVoiceDetection()
+    stopVoiceDetection(true) // Полная остановка при размонтировании
     
     // Даем браузеру время полностью освободить ресурсы
     await new Promise(resolve => setTimeout(resolve, 100))
     
     if (process.client) {
       document.removeEventListener('visibilitychange', handleVisibilityChange)
+      if (pendingUserGestureListener) {
+        document.removeEventListener('pointerdown', pendingUserGestureListener)
+        pendingUserGestureListener = null
+      }
     }
     
     console.log('✅ Voice activity cleanup completed')

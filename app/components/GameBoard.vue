@@ -98,7 +98,7 @@
           </div>
           
           <!-- Кнопка воздержания во время голосования -->
-          <div v-if="gameState === 'voting' && !isHost && player.alive" class="abstain-section">
+          <div v-if="gameState === 'voting' && !isHost && currentPlayer?.alive" class="abstain-section">
             <button 
               @click="votePlayer(null)"
               class="btn abstain-btn"
@@ -120,7 +120,7 @@
                 disconnected: !player.connected,
                 werewolf: player.showRole && isWerewolfRole(player.role),
                 'is-self': player.isSelf,
-                'can-vote': gameState === 'voting' && !isHost && player.alive,
+                'can-vote': gameState === 'voting' && !isHost && currentPlayer?.alive,
                 'is-speaking': isSpeaking(player.id)  // Добавить класс
               }"
               @click="votePlayer(player.id)"
@@ -311,6 +311,7 @@ const {
   isHost, 
   gameData, 
   allPlayersForVoting,
+  currentPlayer,
   player, 
   roles,
   changePhase: changeGamePhase,
@@ -457,7 +458,7 @@ const playersToShow = computed(() => {
       showRole: isHost.value || // Ведущий видит все роли
                gameState.value === 'ended' || // В конце игры все видят все роли
                (canSeeWerewolfRoles.value && isWerewolfRole(p.role)), // Оборотни видят других оборотней
-      isSelf: p.id === player.id
+      isSelf: p.name === player.name
     }))
 })
 

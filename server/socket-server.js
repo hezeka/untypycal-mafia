@@ -61,6 +61,113 @@ console.log('🌐 CORS origins:', corsOrigins)
 // Game rooms storage
 const gameRooms = new Map()
 
+// SECURITY: Throttling для предотвращения DoS атак
+const voiceActivityThrottle = new Map() // socketId -> lastEventTime
+const VOICE_ACTIVITY_THROTTLE_MS = 150 // Максимум 1 событие в 150ms
+
+// SECURITY: Лимиты создания комнат для предотвращения спама
+const roomsPerIP = new Map() // IP -> { count: number, rooms: Set<roomId> }
+const MAX_ROOMS_PER_IP = 3 // Максимум 3 комнаты с одного IP
+
+// SECURITY: Rate limiting для сообщений и команд
+const messageRateLimit = new Map() // socketId -> { count: number, resetTime: number }
+const MAX_MESSAGES_PER_MINUTE = 20 // Максимум 20 сообщений в минуту
+const RATE_LIMIT_WINDOW = 60 * 1000 // 1 минута
+
+// OPTIMIZATION: Batching и throttling для game-updated событий
+const gameUpdateQueue = new Map() // roomId -> { timeout: NodeJS.Timeout, pendingUpdate: boolean }
+const GAME_UPDATE_THROTTLE = 100 // Максимум 1 обновление в 100ms
+
+// Функции для управления лимитами IP
+function getClientIP(socket) {
+  return socket.handshake.address || socket.conn.remoteAddress || 'unknown'
+}
+
+function addRoomToIP(ip, roomId) {
+  if (!roomsPerIP.has(ip)) {
+    roomsPerIP.set(ip, { count: 0, rooms: new Set() })
+  }
+  const ipData = roomsPerIP.get(ip)
+  ipData.rooms.add(roomId)
+  ipData.count = ipData.rooms.size
+}
+
+function removeRoomFromIP(ip, roomId) {
+  if (roomsPerIP.has(ip)) {
+    const ipData = roomsPerIP.get(ip)
+    ipData.rooms.delete(roomId)
+    ipData.count = ipData.rooms.size
+    if (ipData.count === 0) {
+      roomsPerIP.delete(ip)
+    }
+  }
+}
+
+// SECURITY: Функции для rate limiting сообщений
+function checkMessageRateLimit(socketId) {
+  const now = Date.now()
+  const userLimit = messageRateLimit.get(socketId)
+  
+  if (!userLimit || now > userLimit.resetTime) {
+    // Создаем новый период или сбрасываем старый
+    messageRateLimit.set(socketId, {
+      count: 1,
+      resetTime: now + RATE_LIMIT_WINDOW
+    })
+    return true
+  }
+  
+  if (userLimit.count >= MAX_MESSAGES_PER_MINUTE) {
+    return false // Превышен лимит
+  }
+  
+  userLimit.count++
+  return true
+}
+
+function clearMessageRateLimit(socketId) {
+  messageRateLimit.delete(socketId)
+}
+
+// OPTIMIZATION: Функции для batched game updates
+function scheduleGameUpdate(roomId) {
+  const existingQueue = gameUpdateQueue.get(roomId)
+  
+  // Если уже есть запланированное обновление, не планируем новое
+  if (existingQueue && existingQueue.pendingUpdate) {
+    return
+  }
+  
+  // Планируем обновление через throttle период
+  const timeout = setTimeout(() => {
+    const room = gameRooms.get(roomId)
+    if (room) {
+      // Отправляем персонализированные данные всем игрокам
+      room.players.forEach((player, playerId) => {
+        if (player.connected) {
+          io.to(playerId).emit('game-updated', room.getGameData(playerId))
+        }
+      })
+    }
+    
+    // Очищаем очередь
+    gameUpdateQueue.delete(roomId)
+  }, GAME_UPDATE_THROTTLE)
+  
+  gameUpdateQueue.set(roomId, { 
+    timeout: timeout, 
+    pendingUpdate: true 
+  })
+}
+
+function clearGameUpdateQueue(roomId) {
+  const existingQueue = gameUpdateQueue.get(roomId)
+  if (existingQueue) {
+    clearTimeout(existingQueue.timeout)
+    gameUpdateQueue.delete(roomId)
+  }
+}
+
 // HTTP API endpoint для получения публичных комнат
 app.get('/api/public-rooms', (req, res) => {
   try {
@@ -98,23 +205,102 @@ export function listPublicRooms() {
   return rooms
 }
 
-// Cleanup disconnected players every 10 minutes
+// MEMORY LEAK FIX: Более агрессивная очистка отключенных игроков каждые 2 минуты
 setInterval(() => {
+  const now = Date.now()
+  const FIVE_MINUTES = 5 * 60 * 1000
+  
   gameRooms.forEach((room, roomId) => {
-    const cleaned = cleanupDisconnectedPlayers(room, 30)
+    // Уменьшили timeout с 30 минут до 2 минут для отключенных игроков
+    const cleaned = cleanupDisconnectedPlayers(room, 2)
     if (cleaned > 0) {
       logGameAction(roomId, 'cleanup', { playersRemoved: cleaned })
+    }
+    
+    // FEATURE: Проверяем, не отключился ли ведущий дольше 5 минут
+    const hostPlayer = room.players.get(room.hostId)
+    if (hostPlayer && !hostPlayer.connected && hostPlayer.disconnectedAt) {
+      const disconnectedTime = now - hostPlayer.disconnectedAt
+      
+      if (disconnectedTime > FIVE_MINUTES) {
+        // Ведущий отключен дольше 5 минут - удаляем комнату
+        console.log(`👑💀 Host "${hostPlayer.name}" disconnected for ${Math.round(disconnectedTime / 1000 / 60)} minutes, deleting room ${roomId}`)
+        
+        // Уведомляем всех оставшихся игроков
+        room.players.forEach((player, playerId) => {
+          if (player.connected && playerId !== room.hostId) {
+            io.to(playerId).emit('room-deleted', { 
+              message: 'Комната была удалена, так как ведущий отключился дольше 5 минут',
+              roomId: roomId 
+            })
+          }
+        })
+        
+        room.stopTimer()
+        clearGameUpdateQueue(roomId) // OPTIMIZATION: Очищаем очередь обновлений
+        gameRooms.delete(roomId)
+        
+        // SECURITY: Удаляем комнату из IP счетчика
+        roomsPerIP.forEach((ipData, ip) => {
+          if (ipData.rooms.has(roomId)) {
+            removeRoomFromIP(ip, roomId)
+          }
+        })
+        
+        logGameAction(roomId, 'room_deleted', { 
+          reason: 'host_disconnected_too_long',
+          disconnectedMinutes: Math.round(disconnectedTime / 1000 / 60),
+          hostName: hostPlayer.name
+        })
+        return // Переходим к следующей комнате
+      }
     }
     
     // Если в комнате не осталось подключенных игроков, удаляем её
     const connectedPlayers = Array.from(room.players.values()).filter(p => p.connected)
     if (connectedPlayers.length === 0) {
       room.stopTimer() // Останавливаем таймер перед удалением комнаты
+      clearGameUpdateQueue(roomId) // OPTIMIZATION: Очищаем очередь обновлений
       gameRooms.delete(roomId)
+      
+      // SECURITY: Удаляем комнату из IP счетчика
+      roomsPerIP.forEach((ipData, ip) => {
+        if (ipData.rooms.has(roomId)) {
+          removeRoomFromIP(ip, roomId)
+        }
+      })
+      
       logGameAction(roomId, 'room_deleted', { reason: 'no_connected_players' })
     }
   })
-}, 10 * 60 * 1000)
+}, 2 * 60 * 1000) // Изменили с 10 минут на 2 минуты
+
+// MEMORY LEAK FIX: Дополнительная очистка throttling данных каждые 5 минут
+setInterval(() => {
+  const now = Date.now()
+  let cleanedVoiceCount = 0
+  let cleanedMessageCount = 0
+  
+  // Очищаем старые throttling записи (старше 5 минут)
+  voiceActivityThrottle.forEach((lastTime, socketId) => {
+    if (now - lastTime > 5 * 60 * 1000) {
+      voiceActivityThrottle.delete(socketId)
+      cleanedVoiceCount++
+    }
+  })
+  
+  // Очищаем старые rate limit записи (истекшие)
+  messageRateLimit.forEach((limitData, socketId) => {
+    if (now > limitData.resetTime) {
+      messageRateLimit.delete(socketId)
+      cleanedMessageCount++
+    }
+  })
+  
+  if (cleanedVoiceCount > 0 || cleanedMessageCount > 0) {
+    console.log(`🧹 Cleaned ${cleanedVoiceCount} voice throttle and ${cleanedMessageCount} message rate limit entries`)
+  }
+}, 5 * 60 * 1000)
 
 io.on('connection', (socket) => {
   console.log('✅ User connected:', socket.id, 'from', socket.handshake.headers.origin || 'unknown')
@@ -124,6 +310,61 @@ io.on('connection', (socket) => {
     const nameValidation = validatePlayerName(data.playerName, [])
     if (!nameValidation.valid) {
       socket.emit('error', { message: nameValidation.error })
+      return
+    }
+
+    const clientIP = getClientIP(socket)
+    
+    // FEATURE: Удаляем старые комнаты этого игрока перед созданием новой
+    const roomsToDelete = []
+    gameRooms.forEach((room, roomId) => {
+      // Ищем комнаты где этот socket.id является хостом
+      if (room.hostId === socket.id) {
+        roomsToDelete.push(roomId)
+      }
+    })
+    
+    // Удаляем найденные старые комнаты
+    let deletedCount = 0
+    roomsToDelete.forEach(roomId => {
+      const room = gameRooms.get(roomId)
+      if (room) {
+        // Уведомляем всех игроков в комнате об удалении
+        room.players.forEach((player, playerId) => {
+          if (player.connected && playerId !== socket.id) {
+            io.to(playerId).emit('room-deleted', { 
+              message: 'Комната была удалена, так как ведущий создал новую комнату',
+              roomId: roomId 
+            })
+          }
+        })
+        
+        room.stopTimer()
+        clearGameUpdateQueue(roomId) // OPTIMIZATION: Очищаем очередь обновлений
+        gameRooms.delete(roomId)
+        
+        // Удаляем из IP счетчика
+        removeRoomFromIP(clientIP, roomId)
+        
+        deletedCount++
+        logGameAction(roomId, 'room_deleted', { 
+          reason: 'host_created_new_room',
+          newRoomCreation: true 
+        })
+      }
+    })
+    
+    if (deletedCount > 0) {
+      console.log(`🗑️ Deleted ${deletedCount} old rooms for host ${socket.id}`)
+    }
+
+    // SECURITY: Проверяем лимит создания комнат с одного IP (после удаления старых)
+    const currentRooms = roomsPerIP.get(clientIP)?.count || 0
+    
+    if (currentRooms >= MAX_ROOMS_PER_IP) {
+      socket.emit('error', { 
+        message: `Достигнут лимит: максимум ${MAX_ROOMS_PER_IP} комнаты с одного IP. Удалите старые комнаты или попробуйте позже.` 
+      })
       return
     }
 
@@ -140,6 +381,9 @@ io.on('connection', (socket) => {
     
     gameRooms.set(roomId, room)
     
+    // SECURITY: Добавляем комнату к счетчику IP
+    addRoomToIP(clientIP, roomId)
+    
     socket.join(roomId)
     socket.emit('room-created', { roomId, gameData: room.getGameData(socket.id) })
     
@@ -147,6 +391,9 @@ io.on('connection', (socket) => {
       hostName: nameValidation.name,
       hostId: socket.id,
       isPrivate: isPrivate,
+      clientIP: clientIP,
+      ipRoomsCount: roomsPerIP.get(clientIP)?.count || 0,
+      deletedOldRooms: deletedCount,
       formattedName: nameValidation.name !== data.playerName ? `"${data.playerName}" -> "${nameValidation.name}"` : 'no formatting'
     })
   })
@@ -845,46 +1092,78 @@ io.on('connection', (socket) => {
   })
 
   socket.on('send-message', async (data) => {
+    // SECURITY: Проверяем rate limit перед обработкой
+    if (!checkMessageRateLimit(socket.id)) {
+      socket.emit('error', { 
+        message: `Слишком много сообщений! Максимум ${MAX_MESSAGES_PER_MINUTE} сообщений в минуту.` 
+      })
+      return
+    }
+
     const room = gameRooms.get(data.roomId)
     if (!room) return
 
     const player = room.players.get(socket.id)
     if (!player) return
 
-    // Санитизируем сообщение
-    const sanitizedMessage = sanitizeMessage(data.message)
-    if (!sanitizedMessage) {
+    // ИСПРАВЛЕНИЕ: Проверяем команды ДО санитизации, но храним оригинал для команд
+    const originalMessage = data.message.trim()
+    const commandProcessor = new ChatCommandProcessor(room)
+    const isCommand = commandProcessor.isCommand(originalMessage)
+    
+    // Для команд используем оригинальное сообщение (но с базовой проверкой безопасности)
+    // Для обычных сообщений - полную санитизацию
+    let messageToProcess
+    if (isCommand) {
+      // Для команд: только базовая проверка безопасности, сохраняем /
+      messageToProcess = originalMessage
+        .replace(/[<>"'&]/g, '')
+        .replace(/javascript:/gi, '')
+        .replace(/vbscript:/gi, '')
+        .substring(0, 1000)
+    } else {
+      // Для обычных сообщений: полная санитизация
+      messageToProcess = sanitizeMessage(originalMessage)
+    }
+    
+    if (!messageToProcess) {
       socket.emit('error', { message: 'Сообщение не может быть пустым' })
       return
     }
 
+    // SECURITY: Дополнительная проверка длины сообщения
+    if (messageToProcess.length > 500) {
+      socket.emit('error', { message: 'Сообщение слишком длинное (максимум 500 символов)' })
+      return
+    }
+
     const messageType = room.isHost(socket.id) ? 'host' : 'player'
-    const commandProcessor = new ChatCommandProcessor(room)
 
     // ОТЛАДКА: логируем каждое сообщение
-    console.log(`📨 Message from ${player.name}: "${sanitizedMessage}"`)
-    console.log(`🔍 Is command: ${commandProcessor.isCommand(sanitizedMessage)}`)
+    console.log(`📨 Message from ${player.name}: "${messageToProcess}" (isCommand: ${isCommand})`)
 
     // Проверяем, является ли сообщение командой
-    if (commandProcessor.isCommand(sanitizedMessage)) {
+    if (isCommand) {
       try {
-        console.log(`🔍 Processing command: ${sanitizedMessage} from ${player.name}`)
+        console.log(`🔍 Processing command: ${messageToProcess} from ${player.name}`)
         
         // ОТЛАДКА: парсим команду для логирования
-        const parsed = commandProcessor.parseCommand(sanitizedMessage)
+        const parsed = commandProcessor.parseCommand(messageToProcess)
         console.log(`📊 Parsed command:`, {
           command: parsed?.command,
           args: parsed?.args,
           argsLength: parsed?.args?.length
         })
         
-        const result = await commandProcessor.processCommand(socket.id, sanitizedMessage)
+        const result = await commandProcessor.processCommand(socket.id, messageToProcess)
         
         console.log(`📊 Command result:`, {
           hasError: !!result.error,
           hasWhisper: !!result.whisperMessage,
           hasHelp: !!result.helpMessage,
-          error: result.error
+          hasSuccess: !!result.success,
+          error: result.error,
+          fullResult: result
         })
         
         if (result.error) {
@@ -942,7 +1221,7 @@ io.on('connection', (socket) => {
       return
     }
 
-    room.addChatMessage(socket.id, sanitizedMessage, messageType)
+    room.addChatMessage(socket.id, messageToProcess, messageType)
     
     const lastMessage = room.chat[room.chat.length - 1]
     
@@ -959,6 +1238,17 @@ io.on('connection', (socket) => {
   })
 
   socket.on('voice-activity', (data) => {
+    // SECURITY: Server-side throttling для предотвращения DoS атак
+    const now = Date.now()
+    const lastEventTime = voiceActivityThrottle.get(socket.id) || 0
+    
+    if (now - lastEventTime < VOICE_ACTIVITY_THROTTLE_MS) {
+      // Слишком частые события - игнорируем
+      return
+    }
+    
+    voiceActivityThrottle.set(socket.id, now)
+
     const room = gameRooms.get(data.roomId)
     if (!room) return
 
@@ -1026,6 +1316,12 @@ io.on('connection', (socket) => {
       return
     }
 
+    // ИСПРАВЛЕНИЕ: Разрешаем неограниченные изменения голоса (убираем ограничение)
+    const existingVote = room.votes.get(socket.id)
+    if (existingVote !== undefined) {
+      console.log(`🔄 Player ${voter.name} changed vote from ${existingVote} to ${data.targetId}`)
+    }
+
     // data.targetId может быть null (воздержание) или ID игрока
     if (data.targetId !== null) {
       const target = room.players.get(data.targetId)
@@ -1035,22 +1331,36 @@ io.on('connection', (socket) => {
       }
     }
 
-    // Сохраняем голос
+    // ИСПРАВЛЕНИЕ: Atomic операция сохранения голоса
+    const previousVote = room.votes.get(socket.id)
     room.votes.set(socket.id, data.targetId)
 
-    // Отправляем обновленную информацию о голосовании всем игрокам
+    // ИСПРАВЛЕНИЕ: Для голосования используем немедленные обновления (критически важно для UX)
     room.players.forEach((player, playerId) => {
       if (player.connected) {
-        io.to(playerId).emit('game-updated', room.getGameData(playerId))
+        const gameData = room.getGameData(playerId)
+        io.to(playerId).emit('game-updated', gameData)
+        
+        // ОТЛАДКА: Логируем данные голосования для ведущего
+        if (room.isHost(playerId) && gameData.voting?.votes) {
+          console.log(`📊 Updated voting data for host:`, {
+            submitted: gameData.voting.submitted,
+            total: gameData.voting.total,
+            votesCount: gameData.voting.votes.length,
+            latestVote: `${voter.name} -> ${data.targetId ? room.players.get(data.targetId)?.name : 'ABSTAIN'}`
+          })
+        }
       }
     })
 
-    // logGameAction(data.roomId, 'vote', {
-    //   voter: voter.name,
-    //   target: data.targetId ? room.players.get(data.targetId)?.name : 'ABSTAIN',
-    //   votesSubmitted: room.votes.size,
-    //   totalVoters: room.getEligibleVoters().length
-    // })
+    logGameAction(data.roomId, 'vote', {
+      voter: voter.name,
+      target: data.targetId ? room.players.get(data.targetId)?.name : 'ABSTAIN',
+      previousVote: previousVote !== undefined ? (previousVote === null ? 'ABSTAIN' : room.players.get(previousVote)?.name) : 'none',
+      isVoteChange: previousVote !== undefined,
+      votesSubmitted: room.votes.size,
+      totalVoters: room.getEligibleVoters().length
+    })
   })
 
   // Завершение голосования
@@ -1378,6 +1688,10 @@ io.on('connection', (socket) => {
   socket.on('disconnect', (reason) => {
     console.log('❌ User disconnected:', socket.id, 'Reason:', reason)
     
+    // SECURITY: Очищаем throttling данные
+    voiceActivityThrottle.delete(socket.id)
+    clearMessageRateLimit(socket.id)
+    
     // Find player in rooms and mark as disconnected instead of removing
     for (const [roomId, room] of gameRooms) {
       const player = room.players.get(socket.id)
@@ -1396,12 +1710,8 @@ io.on('connection', (socket) => {
         if (connectedPlayersCount === 0) {
           console.log(`⏰ All players disconnected from room ${roomId}, keeping room for reconnects`)
         } else {
-          // Notify remaining players about disconnection with personalized data
-          room.players.forEach((remainingPlayer, playerId) => {
-            if (remainingPlayer.connected) {
-              io.to(playerId).emit('game-updated', room.getGameData(playerId))
-            }
-          })
+          // OPTIMIZATION: Используем batched update для уведомления об отключении
+          scheduleGameUpdate(roomId)
         }
 
         // logGameAction(roomId, 'player_disconnected', {

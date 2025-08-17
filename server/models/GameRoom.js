@@ -185,8 +185,8 @@ export class GameRoom {
       votedFor: this.votes.get(requestingSocketId) || null
     }
     
-    // Для ведущего добавляем подробную информацию о голосах
-    if (isHostRequesting && this.gameState === 'voting') {
+    // ИСПРАВЛЕНИЕ: Для ведущего добавляем подробную информацию о голосах всегда (не только во время voting)
+    if (isHostRequesting) {
       const votes = []
       this.votes.forEach((targetId, voterId) => {
         const voter = this.players.get(voterId)
@@ -202,6 +202,15 @@ export class GameRoom {
         }
       })
       votingData.votes = votes
+      
+      // ОТЛАДКА: Логируем данные голосования для ведущего
+      console.log(`🗳️ Voting data for host:`, {
+        gameState: this.gameState,
+        total: votingData.total,
+        submitted: votingData.submitted,
+        votesCount: votes.length,
+        votes: votes.map(v => `${v.voterName} -> ${v.targetName || 'ABSTAIN'}`)
+      })
     }
     
     return {

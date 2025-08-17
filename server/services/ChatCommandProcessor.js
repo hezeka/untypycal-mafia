@@ -41,11 +41,31 @@ export class ChatCommandProcessor {
     return null
   }
 
-  // Обрабатывает команду
+  // SECURITY: Enhanced command processing with validation
   async processCommand(senderId, message) {
+    // SECURITY: Basic input validation
+    if (!message || typeof message !== 'string') {
+      return { error: 'Неверный формат команды' }
+    }
+    
+    // SECURITY: Check message length
+    if (message.length > 1000) {
+      return { error: 'Команда слишком длинная' }
+    }
+    
     const parsed = this.parseCommand(message)
     if (!parsed) {
       return { error: 'Неверный формат команды' }
+    }
+    
+    // SECURITY: Validate command name
+    if (parsed.command.length > 50) {
+      return { error: 'Слишком длинное имя команды' }
+    }
+    
+    // SECURITY: Block potential injection in command names
+    if (/[<>'"&]/.test(parsed.command)) {
+      return { error: 'Недопустимые символы в команде' }
     }
 
     const command = this.findCommand(parsed.command)
@@ -58,6 +78,11 @@ export class ChatCommandProcessor {
     const sender = this.room.players.get(senderId)
     if (!sender) {
       return { error: 'Игрок не найден' }
+    }
+    
+    // SECURITY: Check if player is connected
+    if (!sender.connected) {
+      return { error: 'Отключенные игроки не могут использовать команды' }
     }
 
     switch (command) {
@@ -74,7 +99,7 @@ export class ChatCommandProcessor {
     }
   }
 
-  // Обрабатывает команду шепота
+  // SECURITY: Enhanced whisper command processing
   processWhisperCommand(sender, args) {
     if (args.length < 2) {
       return {
@@ -85,15 +110,36 @@ export class ChatCommandProcessor {
     const target = args[0].toLowerCase()
     const message = args.slice(1).join(' ').trim()
 
+    // SECURITY: Enhanced message validation
     if (!message) {
       return {
         error: 'Сообщение не может быть пустым'
       }
     }
 
-    if (message.length > 200) {
+    if (message.length > 300) {
       return {
-        error: 'Сообщение шепота слишком длинное (максимум 200 символов)'
+        error: 'Сообщение шепота слишком длинное (максимум 300 символов)'
+      }
+    }
+    
+    // SECURITY: Sanitize whisper message
+    const sanitizedMessage = message
+      .replace(/[<>'"&]/g, '')
+      .replace(/javascript:/gi, '')
+      .replace(/vbscript:/gi, '')
+      .replace(/[\x00-\x1F\x7F]/g, '')
+    
+    if (sanitizedMessage.length === 0) {
+      return {
+        error: 'Сообщение содержит только запрещенные символы'
+      }
+    }
+    
+    // SECURITY: Validate target name
+    if (target.length > 20) {
+      return {
+        error: 'Слишком длинное имя получателя'
       }
     }
 
@@ -105,9 +151,28 @@ export class ChatCommandProcessor {
       }
     }
 
+    // ИСПРАВЛЕНИЕ: Во время голосования разрешен только шепот ведущему
+    if (this.room.gameState === 'voting') {
+      if (target !== 'ведущий' && target !== 'host') {
+        return {
+          error: 'Во время голосования можно шептать только ведущему. Используйте: /ш ведущий <сообщение>'
+        }
+      }
+    }
+
     // ИСПРАВЛЕНИЕ: Добавляем проверку для "ведущий"
     if (target === 'ведущий' || target === 'host') {
-      return this.processHostWhisper(sender, message, messageType)
+      return this.processHostWhisper(sender, sanitizedMessage, messageType)
+    }
+
+    // НОВОЕ: Дневные ограничения - запрещаем групповые шепоты чтобы предотвратить выявление ролей
+    if (this.room.gameState === 'day' && messageType === 'player') {
+      // Проверяем, не является ли цель группой
+      if (this.isGroupName(target)) {
+        return {
+          error: 'Днем групповые шепоты запрещены. Используйте обычный чат или шепчите конкретным игрокам. Для связи с ведущим: /ш ведущий <сообщение>'
+        }
+      }
     }
 
     // НОВОЕ: Ночные ограничения для всех игроков
@@ -136,7 +201,7 @@ export class ChatCommandProcessor {
 
     // Сначала проверяем группы
     if (this.isGroupName(target)) {
-      return this.processGroupWhisper(sender, target, message, messageType)
+      return this.processGroupWhisper(sender, target, sanitizedMessage, messageType)
     }
 
     // Затем ищем конкретного игрока
@@ -154,7 +219,7 @@ export class ChatCommandProcessor {
       }
     }
 
-    return this.processPlayerWhisper(sender, targetPlayer, message, messageType)
+    return this.processPlayerWhisper(sender, targetPlayer, sanitizedMessage, messageType)
   }
 
   // НОВЫЙ МЕТОД: Обработка шепота ведущему
@@ -315,7 +380,15 @@ export class ChatCommandProcessor {
 
     helpText += '**Основные команды:**\n'
     helpText += '• `/ш <игрок> <текст>` - личное сообщение игроку\n'
-    helpText += '• `/ш <группа> <текст>` - сообщение группе игроков\n'
+    
+    // Показываем доступность групповых шепотов в зависимости от фазы
+    if (this.room.gameState === 'day') {
+      helpText += '• `/ш <группа> <текст>` - ❌ **Днем групповые шепоты запрещены**\n'
+    } else if (this.room.gameState === 'voting') {
+      helpText += '• `/ш <группа> <текст>` - ❌ **Во время голосования групповые шепоты запрещены**\n'
+    } else {
+      helpText += '• `/ш <группа> <текст>` - сообщение группе игроков\n'
+    }
     
     // ДОБАВЛЯЕМ: помощь про шепот ведущему
     if (!this.room.isHost(sender.id)) {
@@ -350,7 +423,9 @@ export class ChatCommandProcessor {
 
     helpText += '💡 **Советы:**\n'
     helpText += '• Используйте Tab для автодополнения команд\n'
-    helpText += '• Команды работают только в определенные фазы игры\n'
+    helpText += '• **Днем:** групповые шепоты запрещены (только личные)\n'
+    helpText += '• **Ночью:** ограничения по ролям\n'
+    helpText += '• **При голосовании:** только шепот ведущему\n'
     helpText += '• Ведущий видит все шепоты'
 
     // Отправляем справку только отправителю
@@ -470,10 +545,9 @@ export class ChatCommandProcessor {
       return true // Разрешаем шепот всем ночью (ограничение будет в processWhisperCommand)
     }
     
-    // Во время голосования разрешен только шепот ведущему
+    // Во время голосования шепот разрешен (проверка конкретной цели будет в processWhisperCommand)
     if (this.room.gameState === 'voting') {
-      const target = args[0]?.toLowerCase()
-      return target === 'ведущий' || target === 'host'
+      return true
     }
     
     return false
