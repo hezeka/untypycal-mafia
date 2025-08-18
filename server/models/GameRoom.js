@@ -500,19 +500,19 @@ export class GameRoom {
     let resultMessage = ""
     let eliminated = []
 
-    if (maxVotes >= majority && playersWithMaxVotes.length === 1) {
+    if (maxVotes > 0 && playersWithMaxVotes.length === 1) {
       const eliminatedPlayer = this.players.get(playersWithMaxVotes[0])
-      console.log(`${eliminatedPlayer.name} eliminated with ${maxVotes} votes`)
+      console.log(`${eliminatedPlayer.name} eliminated with ${maxVotes} votes (relative majority)`)
       eliminatedPlayer.alive = false
       eliminated = [eliminatedPlayer.id]
-      resultMessage = `${eliminatedPlayer.name} получил большинство голосов и был убит.`
-    } else if (maxVotes < majority) {
-      console.log('No one eliminated - majority not reached')
-      resultMessage = totalVoters === 0 ? 'Никто не голосовал.' : `Большинство не достигнуто. Никто не убит.`
+      resultMessage = `${eliminatedPlayer.name} получил больше всех голосов (${maxVotes}) и был убит.`
+    } else if (maxVotes === 0) {
+      console.log('No one eliminated - no votes cast')
+      resultMessage = totalVoters === 0 ? 'Никто не голосовал.' : `Никто не получил голосов. Никто не убит.`
     } else {
       const tiedPlayerNames = playersWithMaxVotes.map(id => this.players.get(id)?.name).join(', ')
       console.log(`Tie detected - ${playersWithMaxVotes.length} players with ${maxVotes} votes each`)
-      resultMessage = `Ничья между ${tiedPlayerNames}. Никто не убит.`
+      resultMessage = `Ничья между ${tiedPlayerNames} (по ${maxVotes} голос${maxVotes === 1 ? '' : maxVotes < 5 ? 'а' : 'ов'}). Никто не убит.`
     }
 
     // Добавляем результат в чат
