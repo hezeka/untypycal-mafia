@@ -19,6 +19,7 @@ export class GameRoom {
     this.chat = []
     this.votes = new Map() // Хранение голосов: voterId -> targetId (null = воздержался)
     this.roles = roles // Ссылка на объект ролей
+    this.votingRounds = 0 // Глобальный счётчик завершённых голосований
   }
 
   addPlayer(socketId, name, preferredColor = null) {
@@ -50,7 +51,8 @@ export class GameRoom {
       votes: 0,
       connected: true,
       muted: false,
-      color: playerColor
+      color: playerColor,
+      survivedDays: 0 // Счётчик пережитых дней (завершённых голосований)
     }
     
     // If this is the host, assign game_master role
@@ -173,7 +175,8 @@ export class GameRoom {
         artifact: player.artifact,
         votes: player.votes,
         connected: player.connected,
-        color: player.color
+        color: player.color,
+        survivedDays: player.survivedDays
       }
     })
     
@@ -217,7 +220,8 @@ export class GameRoom {
       ...baseData,
       players: safePlayers,
       voting: votingData,
-      roles: this.roles // Добавляем конфигурацию ролей с подсказками
+      roles: this.roles, // Добавляем конфигурацию ролей с подсказками
+      votingRounds: this.votingRounds // Добавляем глобальный счётчик голосований
     }
   }
 
@@ -492,6 +496,17 @@ export class GameRoom {
 
     // Добавляем результат в чат
     this.addChatMessage(null, `${votingMessage}\n\n${resultMessage}`, 'system')
+
+    // Увеличиваем глобальный счётчик завершённых голосований
+    this.votingRounds++
+
+    // Увеличиваем счётчик пережитых дней для всех живых игроков (кроме убитых в этом голосовании)
+    this.players.forEach(player => {
+      // Увеличиваем счётчик только для живых игроков, которые не были убиты в этом голосовании
+      if (player.role !== 'game_master' && player.alive && !eliminated.includes(player.id)) {
+        player.survivedDays++
+      }
+    })
 
     return {
       eliminated,

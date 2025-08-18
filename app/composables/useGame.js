@@ -381,6 +381,10 @@ export const useGame = () => {
       
       // Для всех остальных ошибок показываем alert
       alert(message)
+
+      if (message.includes('Неверный формат кода комнаты') || message.includes('Комната не найдена')) {
+        navigateTo('/')
+      }
     })
 
     // Новые обработчики для валидации имен

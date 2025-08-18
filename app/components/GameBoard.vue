@@ -7,6 +7,9 @@
         <div v-if="timer" class="timer-display">
           Осталось времени: {{ timerDisplay }}
         </div>
+        <div class="voting-rounds-display" v-if="gameData.votingRounds !== undefined">
+          Завершено голосований: {{ gameData.votingRounds }}
+        </div>
       </div>
       
       <div class="game-controls" v-if="isHost">
@@ -128,7 +131,7 @@
               <div class="player-avatar">
                 <div 
                   class="player-initial" 
-                  :style="{ backgroundColor: getColorHex(getPlayerColor(player)) }"
+                  :class="`color-${getPlayerColor(player)}`"
                 >
                   {{ player.name[0].toUpperCase() }}
                 </div>
@@ -142,6 +145,9 @@
                 <div class="player-name">{{ player.name }}</div>
                 <div v-if="player.showRole && player.role" class="revealed-role">
                   {{ getCurrentRoleConfig(player.role)?.name }}
+                </div>
+                <div class="survived-days" v-if="player.survivedDays !== undefined">
+                  Дней пережито: {{ player.survivedDays }}
                 </div>
                 <div v-if="player.artifact" class="artifact-indicator">
                   Артефакт
@@ -620,6 +626,13 @@ onUnmounted(() => {
   margin-top: 8px;
 }
 
+.voting-rounds-display {
+  font-size: 14px;
+  font-weight: 500;
+  color: #3498db;
+  margin-top: 4px;
+}
+
 .voting-info {
   margin-top: 12px;
   padding: 12px;
@@ -957,8 +970,21 @@ onUnmounted(() => {
           font-weight: bold;
           margin: 0 auto;
           transition: 0.2s;
-          background-image: linear-gradient(45deg, #bb4dffb6, transparent);
-          text-shadow: 0 2px 17px #ff00f7;
+          background-image: linear-gradient(45deg, #bb4dffca, transparent);
+          text-shadow: 0 2px 17px #ff00f793;
+          
+          &.color-red { background-color: #ff3520; }
+          &.color-orange { background-color: #ff8d00; }
+          &.color-yellow { background-color: #ffcc00; }
+          &.color-green { background-color: #0ab352; }
+          &.color-blue { background-color: #0069eb; }
+          &.color-purple { background-color: #7640df; }
+          &.color-pink { background-color: #ff6b9b; }
+          &.color-brown { background-color: #93472b; }
+          &.color-grey { background-color: #89959b; }
+          &.color-deep-orange { background-color: #ff5722; }
+          &.color-dark-green { background-color: #19c585; }
+          &.color-cyan { background-color: #00bcd4; }
         }
 
         .voice-indicator {
@@ -1008,6 +1034,13 @@ onUnmounted(() => {
           font-size: 12px;
           color: #667eea;
           font-weight: 500;
+        }
+        
+        .survived-days {
+          font-size: 10px;
+          color: #27ae60;
+          font-weight: 500;
+          margin-top: 2px;
         }
         
         .artifact-indicator {

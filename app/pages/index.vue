@@ -67,26 +67,52 @@
         <!-- Публичные игры -->
         <div class="public-games-section">
           <div class="card">
-            <div class="card-header">Публичные игры</div>
-            <div v-if="publicRooms.length > 0" class="public-rooms-grid">
+            <div class="card-header">
+              Публичные игры
+              <button 
+                @click="refreshPublicRooms" 
+                class="refresh-btn"
+                :disabled="isRefreshing"
+                title="Обновить список игр"
+              >
+                <span :class="{ 'rotating': isRefreshing }">🔄</span>
+              </button>
+            </div>
+            <div v-if="publicRooms.length > 0" class="public-rooms-list">
               <div 
                 v-for="room in publicRooms" 
                 :key="room.id"
                 class="public-room-card"
-                @click="joinPublicRoom(room.id)"
+                :class="{ 
+                  'can-join': canJoinPublicRoom(room),
+                  'disabled': !canJoinPublicRoom(room)
+                }"
+                @click="joinPublicRoom(room)"
               >
                 <div class="room-header">
                   <span class="room-id">{{ room.id }}</span>
-                  <span class="room-status" :class="`status-${room.gameState}`">
+                  <span class="room-phase" :class="`phase-${room.gameState}`">
                     {{ getGameStateText(room.gameState) }}
                   </span>
                 </div>
-                <div class="room-info">
-                  <div class="room-host">👑 {{ room.hostName }}</div>
-                  <div class="room-players">👥 {{ room.playerCount }}/{{ room.maxPlayers }}</div>
-                  <div class="room-roles" v-if="room.selectedRolesCount > 0">
-                    🎭 {{ room.selectedRolesCount }} ролей
+                
+                <div class="room-stats">
+                  <div class="stat-row">
+                    <span class="stat-label">Выжившие игроки:</span>
+                    <span class="stat-value">{{ room.alivePlayers }} / {{ room.playerCount }}</span>
                   </div>
+                  <div class="stat-row">
+                    <span class="stat-label">Прожито дней:</span>
+                    <span class="stat-value">{{ room.votingRounds }}</span>
+                  </div>
+                  <div class="stat-row">
+                    <span class="stat-label">Ведущий:</span>
+                    <span class="stat-value host-name">{{ room.hostName }}</span>
+                  </div>
+                </div>
+                
+                <div v-if="!canJoinPublicRoom(room)" class="room-disabled-reason">
+                  {{ getJoinDisabledReason(room) }}
                 </div>
               </div>
             </div>
@@ -97,7 +123,7 @@
             </div>
             
             <p v-if="publicRooms.length > 0" class="public-games-note">
-              💡 Нажмите на игру чтобы присоединиться
+              💡 Зелёные игры доступны для присоединения
             </p>
           </div>
         </div>
@@ -319,6 +345,7 @@ const showCreateModal = ref(false)
 const newUsername = ref('')
 const isPrivateRoom = ref(false)
 const publicRooms = ref([])
+const isRefreshing = ref(false)
 
 // Validation states
 const roomValidation = reactive({
@@ -455,13 +482,40 @@ const joinRoom = () => {
   navigateTo(`/game/${code}`)
 }
 
-const joinPublicRoom = (roomId) => {
+const joinPublicRoom = (room) => {
+  if (!canJoinPublicRoom(room)) {
+    return
+  }
+  
   if (!hasUsername.value) {
     showUsernameModal.value = true
     return
   }
   
-  navigateTo(`/game/${roomId}`)
+  navigateTo(`/game/${room.id}`)
+}
+
+const canJoinPublicRoom = (room) => {
+  // Можно присоединиться только если игра в стадии набора
+  return room.gameState === 'setup'
+}
+
+const getJoinDisabledReason = (room) => {
+  if (room.gameState !== 'setup') {
+    return 'Игра уже началась'
+  }
+  return 'Недоступно для присоединения'
+}
+
+const refreshPublicRooms = async () => {
+  isRefreshing.value = true
+  try {
+    await loadPublicRooms()
+  } finally {
+    setTimeout(() => {
+      isRefreshing.value = false
+    }, 300) // Небольшая задержка чтобы анимация была видна
+  }
 }
 
 const getGameStateText = (gameState) => {
@@ -674,6 +728,11 @@ onMounted(() => {
 }
 
 @keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+@keyframes rotate {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
 }
@@ -917,10 +976,40 @@ onMounted(() => {
 .public-games-section {
   margin: 40px 0;
   
-  .public-rooms-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-    gap: 16px;
+  .card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    
+    .refresh-btn {
+      background: none;
+      border: none;
+      color: rgba(255, 255, 255, 0.7);
+      cursor: pointer;
+      padding: 4px 8px;
+      border-radius: 4px;
+      transition: all 0.3s ease;
+      
+      &:hover:not(:disabled) {
+        background: rgba(255, 255, 255, 0.1);
+        color: white;
+      }
+      
+      &:disabled {
+        cursor: not-allowed;
+        opacity: 0.5;
+      }
+      
+      .rotating {
+        animation: rotate 1s linear infinite;
+      }
+    }
+  }
+  
+  .public-rooms-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
     margin: 20px 0;
   }
   
@@ -929,21 +1018,33 @@ onMounted(() => {
     border: 1px solid rgba(255, 255, 255, 0.1);
     border-radius: 12px;
     padding: 16px;
-    cursor: pointer;
     transition: all 0.3s ease;
     
-    &:hover {
-      background: rgba(255, 255, 255, 0.08);
-      border-color: #667eea;
-      transform: translateY(-2px);
-      box-shadow: 0 4px 12px rgba(102, 126, 234, 0.2);
+    &.can-join {
+      cursor: pointer;
+      border-color: rgba(46, 204, 113, 0.3);
+      background: rgba(46, 204, 113, 0.05);
+      
+      &:hover {
+        background: rgba(46, 204, 113, 0.1);
+        border-color: #2ecc71;
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(46, 204, 113, 0.2);
+      }
+    }
+    
+    &.disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+      background: rgba(149, 165, 166, 0.05);
+      border-color: rgba(149, 165, 166, 0.2);
     }
     
     .room-header {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      margin-bottom: 12px;
+      margin-bottom: 16px;
       
       .room-id {
         font-weight: 600;
@@ -953,57 +1054,74 @@ onMounted(() => {
         letter-spacing: 1px;
       }
       
-      .room-status {
-        padding: 4px 8px;
+      .room-phase {
+        padding: 4px 12px;
         border-radius: 16px;
         font-size: 12px;
         font-weight: 500;
         
-        &.status-setup {
+        &.phase-setup {
           background: rgba(46, 204, 113, 0.2);
           color: #2ecc71;
         }
         
-        &.status-day {
+        &.phase-day {
           background: rgba(243, 156, 18, 0.2);
           color: #f39c12;
         }
         
-        &.status-night {
+        &.phase-night {
           background: rgba(155, 89, 182, 0.2);
           color: #9b59b6;
         }
         
-        &.status-voting {
+        &.phase-voting {
           background: rgba(231, 76, 60, 0.2);
           color: #e74c3c;
         }
         
-        &.status-ended {
+        &.phase-ended {
           background: rgba(149, 165, 166, 0.2);
           color: #95a5a6;
         }
       }
     }
     
-    .room-info {
+    .room-stats {
       display: flex;
       flex-direction: column;
-      gap: 6px;
-      font-size: 14px;
+      gap: 8px;
       
-      .room-host {
-        color: rgba(255, 255, 255, 0.9);
-        font-weight: 500;
+      .stat-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        font-size: 14px;
+        
+        .stat-label {
+          color: rgba(255, 255, 255, 0.7);
+        }
+        
+        .stat-value {
+          color: rgba(255, 255, 255, 0.9);
+          font-weight: 500;
+          
+          &.host-name {
+            color: #f39c12;
+          }
+        }
       }
-      
-      .room-players {
-        color: rgba(255, 255, 255, 0.7);
-      }
-      
-      .room-roles {
-        color: rgba(255, 255, 255, 0.7);
-      }
+    }
+    
+    .room-disabled-reason {
+      margin-top: 12px;
+      padding: 8px 12px;
+      background: rgba(231, 76, 60, 0.1);
+      border: 1px solid rgba(231, 76, 60, 0.3);
+      border-radius: 6px;
+      color: #e74c3c;
+      font-size: 12px;
+      text-align: center;
     }
   }
   

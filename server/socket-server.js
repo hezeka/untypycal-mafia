@@ -188,17 +188,24 @@ export function listPublicRooms() {
 
     const hostPlayer = room.players.get(room.hostId)
     const hostName = hostPlayer ? hostPlayer.name : 'Unknown'
-    const playerCount = room.players.size
+    
+    // Подсчёт игроков (исключая ведущего)
+    const allPlayers = Array.from(room.players.values())
+    const nonHostPlayers = allPlayers.filter(p => p.role !== 'game_master')
+    const alivePlayers = nonHostPlayers.filter(p => p.alive)
+    
     const selectedRolesCount = Array.isArray(room.selectedRoles) ? room.selectedRoles.length : 0
-    const maxPlayers = selectedRolesCount > 0 ? selectedRolesCount + 1 : 10
+    const maxPlayers = selectedRolesCount > 0 ? selectedRolesCount : 10
 
     rooms.push({
       id: room.id,
       hostName,
-      playerCount,
+      playerCount: nonHostPlayers.length, // Общее количество игроков (не считая ведущего)
+      alivePlayers: alivePlayers.length,   // Количество выживших игроков
       maxPlayers,
       gameState: room.gameState,
-      selectedRolesCount
+      selectedRolesCount,
+      votingRounds: room.votingRounds || 0  // Количество завершённых голосований
     })
   }
   
@@ -939,7 +946,7 @@ io.on('connection', (socket) => {
     room.currentPhase = 'discussion'
     
     // Автоматически запускаем таймер для дневной фазы знакомства
-    const dayTimer = 5 * 60 // 5 минут для знакомства
+    const dayTimer = 3 * 60 // 5 минут для знакомства
     const roomId = data.roomId.toUpperCase()
     
     room.startTimer(dayTimer, 
@@ -1034,9 +1041,9 @@ io.on('connection', (socket) => {
     
     // Автоматически запускаем таймер для определенных фаз
     const phaseTimers = {
-      'day': 10 * 60, // 10 минут для дневной фазы
-      'voting': 3 * 60, // 3 минуты для голосования  
-      'night': 5 * 60 // 5 минут для ночи
+      'day': 5 * 60, // 5 минут для дневной фазы
+      'voting': 30, // 30 секунд для голосования  
+      'night': 1 * 60 // 1 минута для ночи
     }
     
     if (phaseTimers[data.gameState]) {

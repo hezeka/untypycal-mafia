@@ -157,7 +157,7 @@
           <!-- Players and Chat -->
           <div class="game-sidebar">
             <!-- Players List -->
-            <div class="card mb-2">
+            <div class="card mb-2" style="z-index: 1;">
               <div class="card-header">
                 Игроки
                 <span class="player-count-badge">{{ nonHostPlayers.length }}</span>
@@ -228,18 +228,16 @@
                           {{ player.muted ? '🔊' : '🔇' }}
                         </button> -->
                       </div>
-                    </div>
-                  </div>
                   
-                  <!-- Color picker button for current player on setup stage -->
-                  <div v-if="player.id === currentPlayerId && gameState === 'setup'" class="player-color-picker">
-                    <button 
-                      class="color-button"
-                      :style="{ backgroundColor: getColorHex(currentPlayerColor) }"
-                      @click="showColorPalette = true"
-                      title="Выбрать цвет"
-                    >
-                    </button>
+                      <!-- Color picker for current player on setup stage -->
+                      <div v-if="player.id === currentPlayerId && gameState === 'setup'" class="player-color-picker">
+                        <ColorPalette 
+                          :selected-color="currentPlayerColor"
+                          :taken-colors="takenColors"
+                          @color-selected="selectColor"
+                        />
+                      </div>
+                    </div>
                   </div>
                   
                   <!-- Show role if it's the current player or if game started -->
@@ -369,23 +367,6 @@
       <GameBoard v-else />
     </div>
     
-    <!-- Color Palette Modal -->
-    <div v-if="showColorPalette" class="modal-overlay" @click="showColorPalette = false">
-      <div class="modal-content" @click.stop>
-        <div class="modal-header">
-          <h3>Выберите цвет</h3>
-          <button @click="showColorPalette = false" class="close-button">×</button>
-        </div>
-        <div class="modal-body">
-          <ColorPalette 
-            :selected-color="currentPlayerColor"
-            :taken-colors="takenColors"
-            @color-selected="selectColor"
-            :key="currentPlayerColor"
-          />
-        </div>
-      </div>
-    </div>
   </div>
 </template>
 
@@ -440,8 +421,6 @@ const nameValidation = reactive({
   formattedName: null
 })
 
-// Color palette modal
-const showColorPalette = ref(false)
 const localPlayerColor = ref(null) // Локальное состояние для немедленного отображения
 
 // Computed properties
@@ -842,8 +821,7 @@ const selectColor = (color) => {
   // Также сохраняем цвет локально для немедленного отображения
   localStorage.setItem('playerColor', color)
   
-  console.log('✅ Color selection completed, modal closing')
-  showColorPalette.value = false
+  console.log('✅ Color selection completed')
 }
 
 // Methods
@@ -1282,6 +1260,8 @@ definePageMeta({
       padding-right: 8px;
       position: relative;
       padding-left: 16px;
+      min-height: 50px;
+      justify-content: center;
       
       &:last-child {
         border-bottom: none;
@@ -1425,10 +1405,10 @@ definePageMeta({
       }
       
       .player-color-picker {
-        position: absolute;
-        right: 8px;
-        top: 50%;
-        transform: translateY(-50%);
+        // position: absolute;
+        // right: 8px;
+        // top: 50%;
+        // transform: translateY(-50%);
         
         .color-button {
           width: 24px;
@@ -1446,17 +1426,17 @@ definePageMeta({
       }
       
       // Color classes for player items
-      &.color-red { border-left: 3px solid #e74c3c; }
-      &.color-orange { border-left: 3px solid #e67e22; }
-      &.color-yellow { border-left: 3px solid #f1c40f; }
-      &.color-green { border-left: 3px solid #2ecc71; }
-      &.color-blue { border-left: 3px solid #3498db; }
-      &.color-purple { border-left: 3px solid #9b59b6; }
-      &.color-pink { border-left: 3px solid #e91e63; }
-      &.color-brown { border-left: 3px solid #795548; }
-      &.color-grey { border-left: 3px solid #607d8b; }
+      &.color-red { border-left: 3px solid #ff3520; }
+      &.color-orange { border-left: 3px solid #ff8d00; }
+      &.color-yellow { border-left: 3px solid #ffcc00; }
+      &.color-green { border-left: 3px solid #0ab352; }
+      &.color-blue { border-left: 3px solid #0069eb; }
+      &.color-purple { border-left: 3px solid #7640df; }
+      &.color-pink { border-left: 3px solid #ff6b9b; }
+      &.color-brown { border-left: 3px solid #93472b; }
+      &.color-grey { border-left: 3px solid #89959b; }
       &.color-deep-orange { border-left: 3px solid #ff5722; }
-      &.color-dark-green { border-left: 3px solid #4caf50; }
+      &.color-dark-green { border-left: 3px solid #19c585; }
       &.color-cyan { border-left: 3px solid #00bcd4; }
     }
   }
@@ -1727,59 +1707,4 @@ definePageMeta({
   }
 }
 
-/* Color palette modal */
-.modal-overlay {
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  background: rgba(0, 0, 0, 0.8);
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  z-index: 1000;
-}
-
-.modal-content {
-  background: linear-gradient(135deg, #2c3e50 0%, #34495e 100%);
-  border-radius: 12px;
-  padding: 0;
-  max-width: 400px;
-  width: 90%;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-}
-
-.modal-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 20px 24px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-  
-  h3 {
-    margin: 0;
-    color: #fff;
-    font-size: 18px;
-  }
-  
-  .close-button {
-    background: none;
-    border: none;
-    color: #fff;
-    font-size: 24px;
-    cursor: pointer;
-    opacity: 0.7;
-    transition: opacity 0.2s;
-    
-    &:hover {
-      opacity: 1;
-    }
-  }
-}
-
-.modal-body {
-  padding: 24px;
-}
 </style>
