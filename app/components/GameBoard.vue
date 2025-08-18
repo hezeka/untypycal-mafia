@@ -74,7 +74,7 @@
           <div class="card-header">Ваша роль</div>
           <div v-if="playerRole" class="role-display">
             <div class="role-card-mini" :class="getCurrentRoleConfig(playerRole)?.color">
-              <img :src="`/roles/${playerRole}.png`" :alt="getCurrentRoleConfig(playerRole)?.name" />
+              <img :src="`/roles/compressed/${playerRole}.svg`" :alt="getCurrentRoleConfig(playerRole)?.name" />
               <div class="role-info">
                 <h3>{{ getCurrentRoleConfig(playerRole)?.name }}</h3>
                 <p>{{ getCurrentRoleConfig(playerRole)?.description }}</p>

@@ -1,7 +1,7 @@
 <template>
   <div 
     class="role-card" 
-    :class="[role.color, { selected: selected, readonly: readonly }]"
+    :class="[role.color, { selected: selected, readonly: readonly, 'not-implemented': !role.implemented }]"
     @click="!readonly && $emit('toggle', roleId)"
   >
     <div class="role-image">

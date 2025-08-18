@@ -1,10 +1,11 @@
-export const roles = {
+const rolesConfig = {
   villager: {
     name: 'Мирный житель',
     description: 'Обычный житель без особых способностей. Цель - найти и убить оборотней.',
     color: 'blue',
     night: false,
     team: 'village',
+    implemented: true,
     phaseHints: {
       day: 'Обсуждайте с другими жителями, кто может быть оборотнем.',
       night: 'Сейчас вы спите. Жители с ночными способностями выполняют свои действия.'
@@ -16,6 +17,7 @@ export const roles = {
     color: 'blue',
     night: true,
     team: 'village',
+    implemented: true,
     phaseHints: {
       day: 'Обсуждайте с другими жителями, кто может быть оборотнем.',
       night: 'Жители спят, вы можете поставить щит на любого игрока, чтобы защитить его от убийства оборотнями.'
@@ -27,6 +29,7 @@ export const roles = {
     color: 'blue',
     night: true,
     team: 'village',
+    implemented: false,
     phaseHints: {
       day: 'Используйте информацию о центральной карте для поиска оборотней.',
       night: 'Посмотрите одну из центральных карт, чтобы узнать, какая роль не участвует в игре.'
@@ -38,6 +41,7 @@ export const roles = {
     color: 'blue',
     night: true,
     team: 'village',
+    implemented: true,
     phaseHints: {
       day: 'Действуйте согласно последней роли, которую увидели ночью.',
       night: 'Посмотрите карты игроков. Осторожно: если найдёте оборотня или неудачника - станете им!'
@@ -49,6 +53,7 @@ export const roles = {
     color: 'blue',
     night: true,
     team: 'village',
+    implemented: false,
     phaseHints: {
       day: 'Ваша команда могла измениться после обмена картами.',
       night: 'Посмотрите центральную карту и ОБЯЗАТЕЛЬНО поменяйте её с картой любого игрока.'
@@ -60,6 +65,7 @@ export const roles = {
     color: 'blue',
     night: true,
     team: 'village',
+    implemented: false,
     phaseHints: {
       day: 'Учитывайте, что все роли игроков сдвинулись из-за ваших действий.',
       night: 'Сдвиньте все карты игроков (кроме своей) на одну позицию влево или вправо.'
@@ -71,6 +77,7 @@ export const roles = {
     color: 'blue',
     night: true,
     team: 'village',
+    implemented: true,
     phaseHints: {
       day: 'Используйте информацию о карте, которую открыли ночью.',
       night: 'Откройте карту игрока. Оборотни и неудачники автоматически переворачиваются обратно.'
@@ -82,6 +89,7 @@ export const roles = {
     color: 'blue',
     night: true,
     team: 'village',
+    implemented: false,
     phaseHints: {
       day: 'Помните, кому вы дали артефакт - это может помочь в поиске оборотней.',
       night: 'Выберите игрока, которому хотите дать случайный артефакт.'
@@ -92,7 +100,8 @@ export const roles = {
     description: 'Игрок, на которого указывает телохранитель при голосовании, не может быть убит.',
     color: 'blue',
     night: false,
-    team: 'village'
+    team: 'village',
+    implemented: true
   },
   seer: {
     name: 'Провидец',
@@ -100,6 +109,7 @@ export const roles = {
     color: 'blue',
     night: true,
     team: 'village',
+    implemented: false,
     phaseHints: {
       day: 'Используйте полученную ночью информацию для поиска оборотней.',
       night: 'Выберите одного игрока чтобы узнать его роль, или посмотрите две центральные карты.'
@@ -111,6 +121,7 @@ export const roles = {
     color: 'blue',
     night: true,
     team: 'village',
+    implemented: true,
     phaseHints: {
       day: 'Действуйте согласно роли, которую получили ночью.',
       night: 'Выберите игрока, с которым хотите поменяться ролями, и узнайте свою новую роль.'
@@ -122,6 +133,7 @@ export const roles = {
     color: 'blue',
     night: true,
     team: 'village',
+    implemented: true,
     phaseHints: {
       day: 'Используйте информацию о том, чьи роли вы поменяли, для поиска оборотней.',
       night: 'Выберите двух игроков, которые поменяются ролями между собой.'
@@ -133,6 +145,7 @@ export const roles = {
     color: 'blue',
     night: true,
     team: 'village',
+    implemented: false,
     phaseHints: {
       day: 'Вы не знаете свою новую роль. Действуйте осторожно.',
       night: 'Поменяйте свою карту с одной из центральных карт. Вы НЕ узнаете свою новую роль!'
@@ -144,6 +157,7 @@ export const roles = {
     color: 'blue',
     night: true,
     team: 'village',
+    implemented: true,
     phaseHints: {
       day: 'Вы знаете свою финальную роль после всех ночных действий.',
       night: 'Ждите конца ночи, чтобы посмотреть на свою карту и узнать финальную роль.'
@@ -154,7 +168,8 @@ export const roles = {
     description: 'Если его убивают голосованием, тот на кого он указывает - тоже умирает.',
     color: 'blue',
     night: false,
-    team: 'village'
+    team: 'village',
+    implemented: true
   },
   werewolf: {
     name: 'Оборотень',
@@ -162,6 +177,7 @@ export const roles = {
     color: 'red',
     night: true,
     team: 'werewolf',
+    implemented: true,
     phaseHints: {
       day: 'Притворяйтесь обычным жителем. Не выдавайте других оборотней.',
       night: 'Узнайте других оборотней и обсудите с ними стратегию.'
@@ -173,6 +189,7 @@ export const roles = {
     color: 'red',
     night: true,
     team: 'werewolf',
+    implemented: true,
     phaseHints: {
       day: 'Притворяйтесь обычным жителем. Не выдавайте других оборотней.',
       night: 'Узнайте других оборотней и обсудите с ними стратегию.'
@@ -184,6 +201,7 @@ export const roles = {
     color: 'red',
     night: true,
     team: 'werewolf',
+    implemented: true,
     phaseHints: {
       day: 'Притворяйтесь обычным жителем. Не выдавайте других оборотней.',
       night: 'Узнайте других оборотней и обсудите с ними стратегию.'
@@ -195,6 +213,7 @@ export const roles = {
     color: 'red',
     night: true,
     team: 'werewolf',
+    implemented: false,
     phaseHints: {
       day: 'Притворяйтесь обычным жителем. Помните о своих ночных действиях.',
       night: 'Сначала узнайте других оборотней, затем поменяйте центральную карту оборотня с картой игрока.'
@@ -206,6 +225,7 @@ export const roles = {
     color: 'red',
     night: true,
     team: 'werewolf',
+    implemented: true,
     phaseHints: {
       day: 'Используйте полученную информацию о ролях для собственной выгоды.',
       night: 'Сначала узнайте других оборотней, затем посмотрите карту одного игрока на выбор.'
@@ -216,14 +236,16 @@ export const roles = {
     description: 'Не просыпается с оборотнями, только показывает большой палец. Другие оборотни его знают.',
     color: 'red',
     night: false,
-    team: 'werewolf'
+    team: 'werewolf',
+    implemented: true
   },
   minion: {
     name: 'Миньон',
     description: 'Видит всех оборотней. Побеждает с оборотнями, даже если его убили.',
     color: 'red',
-    night: true,
+    night: false,
     team: 'werewolf',
+    implemented: true,
     phaseHints: {
       day: 'Защищайте оборотней, не выдавая себя. Можете пожертвовать собой.',
       night: 'Узнайте всех оборотней, но они вас не знают.'
@@ -231,10 +253,11 @@ export const roles = {
   },
   tanner: {
     name: 'Неудачник',
-    description: 'Побеждает только если его убили. Если он умирает - оборотни не могут победить.',
+    description: 'Побеждает только если его убили. Если он умирает - всё остальные проигрывают.',
     color: 'brown',
     night: false,
     team: 'tanner',
+    implemented: true,
     phaseHints: {
       day: 'Ведите себя подозрительно, чтобы на вас подумали. Ваша цель - быть убитым.',
       night: 'Сейчас вы спите. Жители с ночными способностями выполняют свои действия.'
@@ -246,6 +269,7 @@ export const roles = {
     color: 'purple',
     night: true,
     team: 'special',
+    implemented: true,
     phaseHints: {
       day: 'Действуйте согласно роли, которую скопировали. Ваша команда могла измениться!',
       night: 'Посмотрите карту игрока и скопируйте его способность. Если у него есть ночное действие - сделайте его!'
@@ -256,9 +280,42 @@ export const roles = {
     description: 'Управляет ходом игры, объявляет фазы и наблюдает за игроками.',
     color: 'gold',
     night: false,
-    team: 'neutral'
+    team: 'neutral',
+    implemented: true
   }
 }
+
+// Порядок команд для сортировки
+const teamOrder = {
+  'village': 1,
+  'werewolf': 2, 
+  'tanner': 3,
+  'special': 4,
+  'neutral': 5
+}
+
+// Автоматическая сортировка: implemented -> team -> изначальный порядок
+const sortedRoleEntries = Object.entries(rolesConfig)
+  .map(([key, role], index) => [key, role, index]) // Добавляем изначальный индекс
+  .sort(([, roleA, indexA], [, roleB, indexB]) => {
+    // 1. Сначала по реализованности
+    if (roleA.implemented && !roleB.implemented) return -1
+    if (!roleA.implemented && roleB.implemented) return 1
+    
+    // 2. Потом по команде
+    const teamOrderA = teamOrder[roleA.team] || 999
+    const teamOrderB = teamOrder[roleB.team] || 999
+    if (teamOrderA !== teamOrderB) return teamOrderA - teamOrderB
+    
+    // 3. В конце по изначальному порядку
+    return indexA - indexB
+  })
+
+// Создаем отсортированный объект ролей
+export const roles = sortedRoleEntries.reduce((acc, [key, value]) => {
+  acc[key] = value
+  return acc
+}, {})
 
 // Валидация ролей для проверки на сервере
 export const validateRole = (roleId) => {

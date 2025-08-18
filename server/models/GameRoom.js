@@ -30,17 +30,6 @@ export class GameRoom {
       'grey', 'deep-orange', 'dark-green', 'cyan' // Серый, Темно-оранжевый, Темно-зеленый, Голубой
     ]
     
-    // Получаем занятые цвета
-    const usedColors = Array.from(this.players.values()).map(p => p.color)
-    
-    // Определяем цвет игрока
-    let playerColor = preferredColor
-    if (!playerColor || usedColors.includes(playerColor)) {
-      // Если предпочитаемый цвет не указан или занят, выбираем случайный свободный
-      const freeColors = availableColors.filter(color => !usedColors.includes(color))
-      playerColor = freeColors.length > 0 ? freeColors[Math.floor(Math.random() * freeColors.length)] : 'purple'
-    }
-    
     const player = {
       id: socketId,
       name: name,
@@ -51,13 +40,28 @@ export class GameRoom {
       votes: 0,
       connected: true,
       muted: false,
-      color: playerColor,
+      color: null, // Изначально цвет не назначен
       survivedDays: 0 // Счётчик пережитых дней (завершённых голосований)
     }
     
-    // If this is the host, assign game_master role
+    // If this is the host, assign game_master role and no color
     if (socketId === this.hostId) {
       player.role = 'game_master'
+      player.color = null // Ведущий не имеет цвета
+    } else {
+      // Получаем занятые цвета (исключая ведущего)
+      const usedColors = Array.from(this.players.values())
+        .filter(p => p.role !== 'game_master' && p.color)
+        .map(p => p.color)
+      
+      // Определяем цвет игрока
+      let playerColor = preferredColor
+      if (!playerColor || usedColors.includes(playerColor)) {
+        // Если предпочитаемый цвет не указан или занят, выбираем случайный свободный
+        const freeColors = availableColors.filter(color => !usedColors.includes(color))
+        playerColor = freeColors.length > 0 ? freeColors[Math.floor(Math.random() * freeColors.length)] : 'purple'
+      }
+      player.color = playerColor
     }
     
     this.players.set(socketId, player)
@@ -634,6 +638,19 @@ export class GameRoom {
   // Метод для смены цвета игрока
   changePlayerColor(socketId, newColor) {
     console.log('🎨 GameRoom: changePlayerColor called:', { socketId, newColor })
+    
+    const player = this.players.get(socketId)
+    if (!player) {
+      console.log('❌ GameRoom: Player not found:', socketId)
+      return { success: false, error: 'Игрок не найден' }
+    }
+    
+    // Ведущий не может менять цвет
+    if (player.role === 'game_master') {
+      console.log('❌ GameRoom: Game master cannot change color')
+      return { success: false, error: 'Ведущий не может менять цвет' }
+    }
+    
     const availableColors = [
       'red', 'orange', 'yellow', 'green',
       'blue', 'purple', 'pink', 'brown',
@@ -645,9 +662,9 @@ export class GameRoom {
       return { success: false, error: 'Недопустимый цвет' }
     }
     
-    // Проверяем, что цвет не занят другим игроком
+    // Проверяем, что цвет не занят другим игроком (исключая ведущего)
     const usedColors = Array.from(this.players.values())
-      .filter(p => p.id !== socketId)
+      .filter(p => p.id !== socketId && p.role !== 'game_master' && p.color)
       .map(p => p.color)
     
     console.log('🔍 GameRoom: Used colors by other players:', usedColors)
@@ -655,12 +672,6 @@ export class GameRoom {
     if (usedColors.includes(newColor)) {
       console.log('❌ GameRoom: Color already taken:', newColor)
       return { success: false, error: 'Этот цвет уже занят' }
-    }
-    
-    const player = this.players.get(socketId)
-    if (!player) {
-      console.log('❌ GameRoom: Player not found:', socketId)
-      return { success: false, error: 'Игрок не найден' }
     }
     
     const oldColor = player.color
@@ -678,7 +689,7 @@ export class GameRoom {
     ]
     
     const usedColors = Array.from(this.players.values())
-      .filter(p => p.id !== excludeSocketId)
+      .filter(p => p.id !== excludeSocketId && p.role !== 'game_master' && p.color)
       .map(p => p.color)
     
     return availableColors.filter(color => !usedColors.includes(color))

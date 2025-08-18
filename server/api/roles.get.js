@@ -9,7 +9,10 @@ export default defineEventHandler((event) => {
     'Access-Control-Allow-Origin': '*'
   })
   
-  console.log('📊 Returning', Object.keys(roles).length, 'roles')
+  // Исключаем роль ведущего из доступных ролей
+  const { game_master, ...availableRoles } = roles
   
-  return roles
+  console.log('📊 Returning', Object.keys(availableRoles).length, 'roles (excluding game_master)')
+  
+  return availableRoles
 })

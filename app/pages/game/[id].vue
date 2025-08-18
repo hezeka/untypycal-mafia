@@ -475,9 +475,14 @@ const canJoin = computed(() => {
          !nameValidation.checking
 })
 
-// Используем роли с сервера
+// Используем роли с сервера, исключаем ведущего
 const availableRoles = computed(() => {
-  return gameData.roles || {}
+  const allRoles = gameData.roles || {}
+  
+  // Исключаем роль ведущего
+  const { game_master, ...roles } = allRoles
+  
+  return roles
 })
 
 const isSpeaking = (playerId) => {

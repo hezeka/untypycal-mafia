@@ -320,7 +320,7 @@
 </template>
 
 <script setup>
-import { ref, computed, reactive, watch, onMounted, nextTick } from 'vue'
+import { ref, computed, reactive, watch, onMounted, onUnmounted, nextTick } from 'vue'
 
 const { 
   createRoom: createGameRoom,
@@ -565,6 +565,9 @@ watch(() => showUsernameModal.value, (isOpen) => {
   }
 })
 
+// Store interval ID for cleanup
+let publicRoomsInterval = null
+
 // Initialize socket listeners on mount
 onMounted(() => {
   initSocketListeners()
@@ -578,8 +581,16 @@ onMounted(() => {
     }, 500)
   }
   
-  // Refresh public rooms every 30 seconds
-  setInterval(loadPublicRooms, 30000)
+  // Refresh public rooms every 30 seconds (reduced frequency)
+  publicRoomsInterval = setInterval(loadPublicRooms, 60000) // Increased to 60 seconds
+})
+
+// Clean up interval on unmount
+onUnmounted(() => {
+  if (publicRoomsInterval) {
+    clearInterval(publicRoomsInterval)
+    publicRoomsInterval = null
+  }
 })
 </script>
 
