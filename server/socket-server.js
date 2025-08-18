@@ -116,13 +116,6 @@ const messageRateLimit = new Map() // socketId -> { count: number, resetTime: nu
 const MAX_MESSAGES_PER_MINUTE = 20 // Максимум 20 сообщений в минуту
 const RATE_LIMIT_WINDOW = 60 * 1000 // 1 минута
 
-// OPTIMIZATION: Batching и throttling для game-updated событий
-const gameUpdateQueue = new Map() // roomId -> { timeout: NodeJS.Timeout, pendingUpdate: boolean }
-const GAME_UPDATE_THROTTLE = 100 // Максимум 1 обновление в 100ms
-
-// OPTIMIZATION: Cache для дорогих getGameData() вычислений
-const gameDataCache = new Map() // roomId -> { timestamp: number, data: Map<playerId, gameData> }
-const GAME_DATA_CACHE_TTL = 50 // Кэш действителен 50ms
 
 // Функции для управления лимитами IP
 function getClientIP(socket) {
@@ -175,83 +168,6 @@ function clearMessageRateLimit(socketId) {
   messageRateLimit.delete(socketId)
 }
 
-// OPTIMIZATION: Функции для batched game updates с кэшированием
-function scheduleGameUpdate(roomId) {
-  const existingQueue = gameUpdateQueue.get(roomId)
-  
-  // Если уже есть запланированное обновление, не планируем новое
-  if (existingQueue && existingQueue.pendingUpdate) {
-    return
-  }
-  
-  // Планируем обновление через throttle период
-  const timeout = setTimeout(() => {
-    const room = gameRooms.get(roomId)
-    if (room) {
-      // Инвалидируем кэш перед обновлением
-      gameDataCache.delete(roomId)
-      
-      // Отправляем персонализированные данные всем игрокам
-      room.players.forEach((player, playerId) => {
-        if (player.connected) {
-          const gameData = getCachedGameData(roomId, playerId)
-          if (gameData) {
-            io.to(playerId).emit('game-updated', gameData)
-          }
-        }
-      })
-    }
-    
-    // Очищаем очередь
-    gameUpdateQueue.delete(roomId)
-  }, GAME_UPDATE_THROTTLE)
-  
-  gameUpdateQueue.set(roomId, { 
-    timeout: timeout, 
-    pendingUpdate: true 
-  })
-}
-
-// OPTIMIZATION: Кэшированный getGameData для снижения нагрузки
-function getCachedGameData(roomId, playerId) {
-  const room = gameRooms.get(roomId)
-  if (!room) return null
-  
-  const now = Date.now()
-  const cached = gameDataCache.get(roomId)
-  
-  // Проверяем валидность кэша
-  if (cached && (now - cached.timestamp) < GAME_DATA_CACHE_TTL) {
-    const cachedData = cached.data.get(playerId)
-    if (cachedData) {
-      return cachedData
-    }
-  }
-  
-  // Вычисляем данные заново и кэшируем
-  const gameData = room.getGameData(playerId)
-  
-  // Обновляем кэш
-  if (!cached || (now - cached.timestamp) >= GAME_DATA_CACHE_TTL) {
-    gameDataCache.set(roomId, {
-      timestamp: now,
-      data: new Map()
-    })
-  }
-  
-  gameDataCache.get(roomId).data.set(playerId, gameData)
-  return gameData
-}
-
-function clearGameUpdateQueue(roomId) {
-  const existingQueue = gameUpdateQueue.get(roomId)
-  if (existingQueue) {
-    clearTimeout(existingQueue.timeout)
-    gameUpdateQueue.delete(roomId)
-  }
-  // OPTIMIZATION: Очищаем кэш данных игры
-  gameDataCache.delete(roomId)
-}
 
 // HTTP API endpoint для получения публичных комнат
 app.get('/api/public-rooms', (req, res) => {
@@ -329,7 +245,6 @@ setInterval(() => {
         })
         
         room.stopTimer()
-        clearGameUpdateQueue(roomId) // OPTIMIZATION: Очищаем очередь обновлений
         gameRooms.delete(roomId)
         
         // SECURITY: Удаляем комнату из IP счетчика
@@ -352,7 +267,6 @@ setInterval(() => {
     const connectedPlayers = Array.from(room.players.values()).filter(p => p.connected)
     if (connectedPlayers.length === 0) {
       room.stopTimer() // Останавливаем таймер перед удалением комнаты
-      clearGameUpdateQueue(roomId) // OPTIMIZATION: Очищаем очередь обновлений
       gameRooms.delete(roomId)
       
       // SECURITY: Удаляем комнату из IP счетчика
@@ -389,18 +303,8 @@ setInterval(() => {
     }
   })
   
-  // OPTIMIZATION: Очищаем устаревшие кэши данных игры
-  let cleanedCacheCount = 0
-  gameDataCache.forEach((cacheData, roomId) => {
-    // Очищаем кэши старше 5 минут
-    if (now - cacheData.timestamp > 5 * 60 * 1000) {
-      gameDataCache.delete(roomId)
-      cleanedCacheCount++
-    }
-  })
-  
-  if (cleanedVoiceCount > 0 || cleanedMessageCount > 0 || cleanedCacheCount > 0) {
-    console.log(`🧹 Cleaned ${cleanedVoiceCount} voice throttle, ${cleanedMessageCount} message rate limit, and ${cleanedCacheCount} game data cache entries`)
+  if (cleanedVoiceCount > 0 || cleanedMessageCount > 0) {
+    console.log(`🧹 Cleaned ${cleanedVoiceCount} voice throttle and ${cleanedMessageCount} message rate limit entries`)
   }
 }, 5 * 60 * 1000)
 
@@ -442,7 +346,6 @@ io.on('connection', (socket) => {
         })
         
         room.stopTimer()
-        clearGameUpdateQueue(roomId) // OPTIMIZATION: Очищаем очередь обновлений
         gameRooms.delete(roomId)
         
         // Удаляем из IP счетчика
@@ -764,8 +667,12 @@ io.on('connection', (socket) => {
     if (!room.selectedRoles.includes(data.roleId)) {
       room.selectedRoles.push(data.roleId)
       
-      // OPTIMIZATION: Use batched update instead of immediate emit
-      scheduleGameUpdate(data.roomId.toUpperCase())
+      // Send personalized updates to all players
+      room.players.forEach((player, playerId) => {
+        if (player.connected) {
+          io.to(playerId).emit('game-updated', room.getGameData(playerId))
+        }
+      })
 
       // logGameAction(data.roomId, 'role_selected', { 
       //   roleId: data.roleId,
@@ -785,8 +692,12 @@ io.on('connection', (socket) => {
     if (index > -1) {
       room.selectedRoles.splice(index, 1)
       
-      // OPTIMIZATION: Use batched update instead of immediate emit
-      scheduleGameUpdate(data.roomId.toUpperCase())
+      // Send personalized updates to all players
+      room.players.forEach((player, playerId) => {
+        if (player.connected) {
+          io.to(playerId).emit('game-updated', room.getGameData(playerId))
+        }
+      })
 
       // logGameAction(data.roomId, 'role_removed', { 
       //   roleId: data.roleId,
@@ -825,8 +736,12 @@ io.on('connection', (socket) => {
     // Add system message
     room.addChatMessage(null, `🚪 Игрок ${playerToKick.name} был удален из комнаты`, 'system')
     
-    // OPTIMIZATION: Use batched update instead of immediate emit
-    scheduleGameUpdate(data.roomId.toUpperCase())
+    // Update all remaining players
+    room.players.forEach((player, playerId) => {
+      if (player.connected) {
+        io.to(playerId).emit('game-updated', room.getGameData(playerId))
+      }
+    })
 
     console.log(`Player ${playerToKick.name} kicked from room ${data.roomId}`)
   })
@@ -855,8 +770,12 @@ io.on('connection', (socket) => {
     // Add system message
     room.addChatMessage(null, `${data.muted ? '🔇' : '🔊'} Игрок ${player.name} ${data.muted ? 'замучен' : 'размучен'}`, 'system')
     
-    // OPTIMIZATION: Use batched update instead of immediate emit
-    scheduleGameUpdate(data.roomId.toUpperCase())
+    // Update all remaining players
+    room.players.forEach((player, playerId) => {
+      if (player.connected) {
+        io.to(playerId).emit('game-updated', room.getGameData(playerId))
+      }
+    })
 
     console.log(`Player ${player.name} ${data.muted ? 'muted' : 'unmuted'} in room ${data.roomId}`)
   })
@@ -887,8 +806,12 @@ io.on('connection', (socket) => {
     // Add system message
     room.addChatMessage(null, `🧹 Удалены отключившиеся: ${kickedNames.join(', ')}`, 'system')
     
-    // OPTIMIZATION: Use batched update instead of immediate emit
-    scheduleGameUpdate(data.roomId.toUpperCase())
+    // Update all remaining players
+    room.players.forEach((player, playerId) => {
+      if (player.connected) {
+        io.to(playerId).emit('game-updated', room.getGameData(playerId))
+      }
+    })
 
     console.log(`Kicked ${disconnectedPlayers.length} disconnected players from room ${data.roomId}`)
   })
@@ -920,8 +843,12 @@ io.on('connection', (socket) => {
       room.addChatMessage(null, `${data.muted ? '🔇' : '🔊'} Все игроки ${data.muted ? 'замучены' : 'размучены'}`, 'system')
     }
     
-    // OPTIMIZATION: Use batched update instead of immediate emit
-    scheduleGameUpdate(data.roomId.toUpperCase())
+    // Update all remaining players
+    room.players.forEach((player, playerId) => {
+      if (player.connected) {
+        io.to(playerId).emit('game-updated', room.getGameData(playerId))
+      }
+    })
 
     console.log(`${data.muted ? 'Muted' : 'Unmuted'} all players in room ${data.roomId}`)
   })
@@ -1101,9 +1028,12 @@ io.on('connection', (socket) => {
       currentPhase: room.currentPhase
     })
 
-    // OPTIMIZATION: Use batched update instead of immediate emit
-    const roomId = data.roomId.toUpperCase()
-    scheduleGameUpdate(roomId)
+    // Отправляем обновленные данные всем игрокам
+    room.players.forEach((player, playerId) => {
+      if (player.connected) {
+        io.to(playerId).emit('game-updated', room.getGameData(playerId))
+      }
+    })
 
     // logGameAction(data.roomId, 'phase_changed', {
     //   oldState,
@@ -1357,21 +1287,23 @@ io.on('connection', (socket) => {
     const previousVote = room.votes.get(socket.id)
     room.votes.set(socket.id, data.targetId)
 
-    // OPTIMIZATION: Use faster batched updates even for voting (still responsive with 100ms throttle)
-    scheduleGameUpdate(data.roomId)
-    
-    // ОТЛАДКА: Логируем данные голосования для ведущего
-    if (room.isHost(socket.id)) {
-      const hostGameData = room.getGameData(socket.id)
-      if (hostGameData.voting?.votes) {
-        console.log(`📊 Updated voting data for host:`, {
-          submitted: hostGameData.voting.submitted,
-          total: hostGameData.voting.total,
-          votesCount: hostGameData.voting.votes.length,
-          latestVote: `${voter.name} -> ${data.targetId ? room.players.get(data.targetId)?.name : 'ABSTAIN'}`
-        })
+    // ИСПРАВЛЕНИЕ: Для голосования используем немедленные обновления (критически важно для UX)
+    room.players.forEach((player, playerId) => {
+      if (player.connected) {
+        const gameData = room.getGameData(playerId)
+        io.to(playerId).emit('game-updated', gameData)
+        
+        // ОТЛАДКА: Логируем данные голосования для ведущего
+        if (room.isHost(playerId) && gameData.voting?.votes) {
+          console.log(`📊 Updated voting data for host:`, {
+            submitted: gameData.voting.submitted,
+            total: gameData.voting.total,
+            votesCount: gameData.voting.votes.length,
+            latestVote: `${voter.name} -> ${data.targetId ? room.players.get(data.targetId)?.name : 'ABSTAIN'}`
+          })
+        }
       }
-    }
+    })
 
     logGameAction(data.roomId, 'vote', {
       voter: voter.name,
@@ -1482,8 +1414,12 @@ io.on('connection', (socket) => {
         break
     }
 
-    // OPTIMIZATION: Use batched update instead of immediate emit
-    scheduleGameUpdate(data.roomId.toUpperCase())
+    // Update all remaining players
+    room.players.forEach((player, playerId) => {
+      if (player.connected) {
+        io.to(playerId).emit('game-updated', room.getGameData(playerId))
+      }
+    })
   })
 
   socket.on('change-timer', (data) => {
@@ -1509,8 +1445,12 @@ io.on('connection', (socket) => {
           io.to(roomId).emit('timer-ended', { message: 'Время истекло!' })
           room.addChatMessage(null, '⏰ Время фазы истекло!', 'system')
           
-          // OPTIMIZATION: Use batched update for timer end notifications
-          scheduleGameUpdate(roomId)
+          // Отправляем обновленный чат всем игрокам
+          room.players.forEach((player, playerId) => {
+            if (player.connected) {
+              io.to(playerId).emit('game-updated', room.getGameData(playerId))
+            }
+          })
         }
       )
     } else {
@@ -1557,9 +1497,13 @@ io.on('connection', (socket) => {
     }
     console.log('✅ Server: Color changed successfully, player color now:', player.color)
 
-    // OPTIMIZATION: Use batched update instead of immediate emit
-    console.log('📤 Server: Scheduling batched game update for color change')
-    scheduleGameUpdate(data.roomId.toUpperCase())
+    // Отправляем обновленные данные всем игрокам
+    room.players.forEach((player, playerId) => {
+      if (player.connected) {
+        console.log('📤 Server: Sending game-updated to player:', playerId)
+        io.to(playerId).emit('game-updated', room.getGameData(playerId))
+      }
+    })
   })
 
   socket.on('next-phase', (data) => {
@@ -1646,8 +1590,12 @@ io.on('connection', (socket) => {
       currentPhase: room.currentPhase
     })
 
-    // OPTIMIZATION: Use batched update instead of immediate emit
-    scheduleGameUpdate(data.roomId.toUpperCase())
+    // Update all remaining players
+    room.players.forEach((player, playerId) => {
+      if (player.connected) {
+        io.to(playerId).emit('game-updated', room.getGameData(playerId))
+      }
+    })
 
     // logGameAction(data.roomId, 'next_phase', {
     //   newState: nextState,
@@ -1680,8 +1628,12 @@ io.on('connection', (socket) => {
         if (connectedPlayersCount === 0) {
           console.log(`⏰ All players disconnected from room ${roomId}, keeping room for reconnects`)
         } else {
-          // OPTIMIZATION: Используем batched update для уведомления об отключении
-          scheduleGameUpdate(roomId)
+          // Отправляем обновления остальным игрокам
+          room.players.forEach((player, playerId) => {
+            if (player.connected) {
+              io.to(playerId).emit('game-updated', room.getGameData(playerId))
+            }
+          })
         }
 
         // logGameAction(roomId, 'player_disconnected', {

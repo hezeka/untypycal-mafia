@@ -727,14 +727,14 @@ onUnmounted(() => {
   
   .admin-panel {
     position: absolute;
-    top: 30px;
+    bottom: 35px;
     left: 0;
     background: rgba(0, 0, 0, 0.9);
     border: 1px solid rgba(255, 255, 255, 0.2);
     border-radius: 8px;
     padding: 12px;
-    min-width: 200px;
     z-index: 10;
+    width: 100%;
     
     .role-select {
       width: 100%;
