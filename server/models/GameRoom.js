@@ -117,7 +117,16 @@ export class GameRoom {
         
         // Для групповых шепотов нужно проверить, входит ли игрок в группу
         if (message.type === 'group_whisper') {
-          return this.isPlayerInGroup(requestingSocketId, message.targetGroup)
+          const isInGroup = this.isPlayerInGroup(requestingSocketId, message.targetGroup)
+          console.log(`🔍 Group whisper filter check:`, {
+            messageId: message.id,
+            requestingPlayer: this.players.get(requestingSocketId)?.name,
+            requestingRole: this.players.get(requestingSocketId)?.role,
+            targetGroup: message.targetGroup,
+            isInGroup,
+            messageContent: message.content?.substring(0, 50) + '...'
+          })
+          return isInGroup
         }
         
         return false
@@ -380,7 +389,19 @@ export class GameRoom {
     }
     
     const groupMembers = this.getGroupMembers(groupName)
-    return groupMembers.some(member => member.id === playerId)
+    const isInGroup = groupMembers.some(member => member.id === playerId)
+    
+    console.log(`👥 isPlayerInGroup check:`, {
+      playerId,
+      playerName: player.name,
+      playerRole: player.role,
+      groupName,
+      groupMembersCount: groupMembers.length,
+      groupMembers: groupMembers.map(m => ({ name: m.name, role: m.role })),
+      isInGroup
+    })
+    
+    return isInGroup
   }
 
   getGroupDisplayName(groupName) {
