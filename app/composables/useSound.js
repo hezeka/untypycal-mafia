@@ -1,37 +1,258 @@
-// Простая система звуков
-const soundsEnabled = ref(true)
+/**
+ * Composable для звуковых эффектов - простая реализация
+ */
 
-// Список звуков (файлы должны быть в /public/sounds/)
+import { ref, onMounted } from 'vue'
+
+// Глобальное состояние звуков (singleton)
+const soundEnabled = ref(true)
+const volume = ref(0.7)
+const audioCache = new Map()
+
+// Конфигурация звуков
 const SOUNDS = {
-  message: 'message.mp3',
-  whisper: 'whisper.mp3',
-  gameStart: 'day.mp3',
-  phaseChange: 'phase-change.mp3',
-  voting: 'voting.mp3',
-  notification: 'notification.mp3',
-  day: 'day.mp3',
-  night: 'night.mp3'
-}
-
-// Проигрывание звука
-const playSound = (soundType, volume = 0.3) => {
-  if (!soundsEnabled.value || !process.client) return
+  // Фазы игры
+  'game-start': '/sounds/game-start.mp3',
+  'game-end': '/sounds/game-end.mp3',
+  'phase-change': '/sounds/phase-change.mp3',
+  'night': '/sounds/night.mp3',
+  'day': '/sounds/day.mp3',
+  'voting': '/sounds/voting.mp3',
   
-  try {
-    const audio = new Audio(`/sounds/${SOUNDS[soundType]}`)
-    audio.volume = Math.min(Math.max(volume, 0), 1) // Ограничиваем громкость 0-1
-    audio.play().catch(() => {
-      // Игнорируем ошибки (файл не найден, нет разрешения на воспроизведение)
-    })
-  } catch (error) {
-    // Игнорируем ошибки
-  }
+  // Чат и уведомления
+  'message': '/sounds/message.mp3',
+  'whisper': '/sounds/whisper.mp3',
+  'notification': '/sounds/notification.mp3',
+  
+  // Действия
+  'click': '/sounds/click.mp3',
+  'error': '/sounds/error.mp3',
+  'success': '/sounds/success.mp3'
 }
 
-export const useSounds = () => {
+export const useSound = () => {
+  /**
+   * Предзагрузка звука
+   */
+  const preloadSound = (soundId) => {
+    if (audioCache.has(soundId)) return
+    
+    const soundPath = SOUNDS[soundId]
+    if (!soundPath) {
+      console.warn(`Sound not found: ${soundId}`)
+      return
+    }
+    
+    try {
+      const audio = new Audio(soundPath)
+      audio.preload = 'auto'
+      audio.volume = volume.value
+      audioCache.set(soundId, audio)
+    } catch (error) {
+      console.error(`Failed to preload sound ${soundId}:`, error)
+    }
+  }
+  
+  /**
+   * Воспроизведение звука
+   */
+  const playSound = (soundId, customVolume = null) => {
+    if (!soundEnabled.value) return
+    
+    try {
+      let audio = audioCache.get(soundId)
+      
+      // Если звук не предзагружен - загружаем
+      if (!audio) {
+        const soundPath = SOUNDS[soundId]
+        if (!soundPath) {
+          console.warn(`Sound not found: ${soundId}`)
+          return
+        }
+        
+        audio = new Audio(soundPath)
+        audioCache.set(soundId, audio)
+      }
+      
+      // Останавливаем предыдущее воспроизведение
+      audio.currentTime = 0
+      
+      // Устанавливаем громкость
+      audio.volume = customVolume !== null ? customVolume : volume.value
+      
+      // Воспроизводим
+      const playPromise = audio.play()
+      
+      if (playPromise !== undefined) {
+        playPromise.catch(error => {
+          // Автовоспроизведение заблокировано браузером
+          if (error.name === 'NotAllowedError') {
+            console.log('Audio autoplay blocked by browser')
+          } else {
+            console.error(`Error playing sound ${soundId}:`, error)
+          }
+        })
+      }
+      
+    } catch (error) {
+      console.error(`Failed to play sound ${soundId}:`, error)
+    }
+  }
+  
+  /**
+   * Остановка всех звуков
+   */
+  const stopAllSounds = () => {
+    audioCache.forEach(audio => {
+      try {
+        audio.pause()
+        audio.currentTime = 0
+      } catch (error) {
+        // Игнорируем ошибки остановки
+      }
+    })
+  }
+  
+  /**
+   * Включение/выключение звуков
+   */
+  const toggleSound = () => {
+    soundEnabled.value = !soundEnabled.value
+    
+    if (!soundEnabled.value) {
+      stopAllSounds()
+    }
+    
+    // Сохраняем в localStorage
+    try {
+      localStorage.setItem('mafia-sound-enabled', soundEnabled.value.toString())
+    } catch (error) {
+      // Игнорируем ошибки localStorage
+    }
+  }
+  
+  /**
+   * Изменение громкости
+   */
+  const setVolume = (newVolume) => {
+    volume.value = Math.max(0, Math.min(1, newVolume))
+    
+    // Обновляем громкость всех загруженных звуков
+    audioCache.forEach(audio => {
+      audio.volume = volume.value
+    })
+    
+    // Сохраняем в localStorage
+    try {
+      localStorage.setItem('mafia-sound-volume', volume.value.toString())
+    } catch (error) {
+      // Игнорируем ошибки localStorage
+    }
+  }
+  
+  /**
+   * Предзагрузка всех звуков
+   */
+  const preloadAllSounds = () => {
+    Object.keys(SOUNDS).forEach(soundId => {
+      preloadSound(soundId)
+    })
+  }
+  
+  /**
+   * Проверка поддержки аудио
+   */
+  const isAudioSupported = () => {
+    return typeof Audio !== 'undefined'
+  }
+  
+  /**
+   * Получение информации о звуке
+   */
+  const getSoundInfo = (soundId) => {
+    const audio = audioCache.get(soundId)
+    
+    if (!audio) return null
+    
+    return {
+      duration: audio.duration || 0,
+      currentTime: audio.currentTime || 0,
+      paused: audio.paused,
+      volume: audio.volume,
+      readyState: audio.readyState
+    }
+  }
+  
+  /**
+   * Очистка кэша звуков
+   */
+  const clearCache = () => {
+    stopAllSounds()
+    audioCache.clear()
+  }
+  
+  /**
+   * Восстановление настроек из localStorage
+   */
+  const restoreSettings = () => {
+    try {
+      const savedEnabled = localStorage.getItem('mafia-sound-enabled')
+      if (savedEnabled !== null) {
+        soundEnabled.value = savedEnabled === 'true'
+      }
+      
+      const savedVolume = localStorage.getItem('mafia-sound-volume')
+      if (savedVolume !== null) {
+        const vol = parseFloat(savedVolume)
+        if (!isNaN(vol)) {
+          volume.value = Math.max(0, Math.min(1, vol))
+        }
+      }
+    } catch (error) {
+      console.warn('Failed to restore sound settings:', error)
+    }
+  }
+  
+  /**
+   * Инициализация при монтировании
+   */
+  onMounted(() => {
+    if (!isAudioSupported()) {
+      console.warn('Audio not supported in this browser')
+      soundEnabled.value = false
+      return
+    }
+    
+    restoreSettings()
+    
+    // Предзагружаем критически важные звуки
+    const criticalSounds = ['notification', 'message', 'phase-change']
+    criticalSounds.forEach(soundId => {
+      preloadSound(soundId)
+    })
+  })
+  
   return {
-    soundsEnabled: readonly(soundsEnabled),
-    toggleSounds: () => soundsEnabled.value = !soundsEnabled.value,
-    playSound
+    // Состояние
+    soundEnabled,
+    volume,
+    
+    // Основные методы
+    playSound,
+    stopAllSounds,
+    toggleSound,
+    setVolume,
+    
+    // Управление кэшем
+    preloadSound,
+    preloadAllSounds,
+    clearCache,
+    
+    // Утилиты
+    isAudioSupported,
+    getSoundInfo,
+    
+    // Константы
+    availableSounds: Object.keys(SOUNDS)
   }
 }

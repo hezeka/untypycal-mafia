@@ -1,22 +1,23 @@
 {
-  "name": "mafia-werewolf-game",
-  "version": "1.0.0",
+  "name": "untypical-mafia-rebuilt",
+  "version": "2.0.0",
   "type": "module",
   "private": true,
-  "description": "Online Werewolf (Mafia) game platform with advanced chat commands",
+  "description": "Rebuilt version of Untypical Mafia - social deduction game based on ONUW",
   "scripts": {
-    "dev": "concurrently \"node server/socket-server.js\" \"nuxt dev\"",
-    "dev:socket": "node server/socket-server.js",
-    "dev:nuxt": "nuxt dev",
-    "build": "nuxt build",
-    "start": "concurrently \"NODE_ENV=production node server/socket-server.js\" \"nuxt start\"",
-    "start:socket": "NODE_ENV=production node server/socket-server.js",
-    "start:nuxt": "nuxt start",
-    "preview": "nuxt preview",
+    "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
+    "dev:server": "node server/socket-server.js",
+    "dev:client": "nuxt dev --srcDir app",
+    "build": "nuxt build --srcDir app",
+    "start": "concurrently \"NODE_ENV=production node server/socket-server.js\" \"nuxt start --srcDir app\"",
+    "start:server": "NODE_ENV=production node server/socket-server.js",
+    "start:client": "nuxt start --srcDir app",
+    "preview": "nuxt preview --srcDir app",
     "clean": "rm -rf .nuxt .output node_modules/.cache",
-    "lint": "echo 'No linting configured'",
-    "test": "echo 'No tests configured'",
-    "postinstall": "nuxt prepare"
+    "lint": "eslint . --ext .js,.vue,.ts",
+    "test": "vitest",
+    "test:unit": "vitest --run",
+    "postinstall": "nuxt prepare --srcDir app"
   },
   "dependencies": {
     "@nuxtjs/google-fonts": "^3.2.0",
@@ -32,8 +33,11 @@
     "vue-router": "^4.5.1"
   },
   "devDependencies": {
+    "@nuxt/eslint-config": "^1.9.0",
     "concurrently": "^9.2.0",
-    "nodemon": "^3.1.10"
+    "eslint": "^9.33.0",
+    "nodemon": "^3.1.10",
+    "vitest": "^1.0.4"
   },
   "engines": {
     "node": ">=18.0.0",
@@ -41,7 +45,9 @@
   },
   "keywords": [
     "werewolf",
-    "mafia", 
+    "mafia",
+    "onuw",
+    "social-deduction",
     "game",
     "online",
     "multiplayer",
@@ -49,6 +55,6 @@
     "nuxt",
     "socket.io"
   ],
-  "author": "Your Name",
+  "author": "Untypical Mafia Team",
   "license": "MIT"
 }
