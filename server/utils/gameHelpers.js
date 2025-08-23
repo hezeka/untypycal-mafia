@@ -1,20 +1,18 @@
 /**
- * Игровые утилиты и хелперы
+ * Утилиты для игры
  */
 
-import { VALIDATION } from './constants.js'
+import { LIMITS } from './constants.js'
 
 /**
- * Генерация уникального ID комнаты
+ * Генерация ID комнаты
  */
 export const generateRoomId = () => {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
   let result = ''
-  
-  for (let i = 0; i < 6; i++) {
+  for (let i = 0; i < LIMITS.ROOM_CODE_LENGTH; i++) {
     result += chars.charAt(Math.floor(Math.random() * chars.length))
   }
-  
   return result
 }
 
@@ -28,23 +26,18 @@ export const validateUsername = (username) => {
   
   const trimmed = username.trim()
   
-  if (trimmed.length < VALIDATION.USERNAME.MIN_LENGTH) {
-    return { valid: false, error: `Имя должно содержать минимум ${VALIDATION.USERNAME.MIN_LENGTH} символа` }
+  if (trimmed.length < LIMITS.MIN_USERNAME_LENGTH) {
+    return { valid: false, error: `Имя должно быть не менее ${LIMITS.MIN_USERNAME_LENGTH} символов` }
   }
   
-  if (trimmed.length > VALIDATION.USERNAME.MAX_LENGTH) {
-    return { valid: false, error: `Имя должно содержать максимум ${VALIDATION.USERNAME.MAX_LENGTH} символов` }
+  if (trimmed.length > LIMITS.MAX_USERNAME_LENGTH) {
+    return { valid: false, error: `Имя должно быть не более ${LIMITS.MAX_USERNAME_LENGTH} символов` }
   }
   
-  if (!VALIDATION.USERNAME.PATTERN.test(trimmed)) {
+  // Проверяем на недопустимые символы
+  const validPattern = /^[a-zA-Zа-яА-Я0-9\s_-]+$/
+  if (!validPattern.test(trimmed)) {
     return { valid: false, error: 'Имя содержит недопустимые символы' }
-  }
-  
-  const lowerName = trimmed.toLowerCase()
-  for (const forbidden of VALIDATION.USERNAME.FORBIDDEN_WORDS) {
-    if (lowerName.includes(forbidden.toLowerCase())) {
-      return { valid: false, error: 'Имя содержит запрещенные слова' }
-    }
   }
   
   return { valid: true, username: trimmed }
@@ -58,14 +51,15 @@ export const validateRoomCode = (code) => {
     return { valid: false, error: 'Код комнаты обязателен' }
   }
   
-  const upperCode = code.trim().toUpperCase()
+  const upperCode = code.toUpperCase().trim()
   
-  if (upperCode.length !== VALIDATION.ROOM_CODE.LENGTH) {
-    return { valid: false, error: `Код должен содержать ${VALIDATION.ROOM_CODE.LENGTH} символов` }
+  if (upperCode.length !== LIMITS.ROOM_CODE_LENGTH) {
+    return { valid: false, error: `Код комнаты должен быть ${LIMITS.ROOM_CODE_LENGTH} символов` }
   }
   
-  if (!VALIDATION.ROOM_CODE.PATTERN.test(upperCode)) {
-    return { valid: false, error: 'Код должен содержать только буквы и цифры' }
+  const validPattern = /^[A-Z0-9]+$/
+  if (!validPattern.test(upperCode)) {
+    return { valid: false, error: 'Код комнаты содержит недопустимые символы' }
   }
   
   return { valid: true, code: upperCode }
@@ -81,22 +75,22 @@ export const validateMessage = (message) => {
   
   const trimmed = message.trim()
   
-  if (trimmed.length < VALIDATION.MESSAGE.MIN_LENGTH) {
-    return { valid: false, error: 'Сообщение слишком короткое' }
+  if (trimmed.length === 0) {
+    return { valid: false, error: 'Сообщение не может быть пустым' }
   }
   
-  if (trimmed.length > VALIDATION.MESSAGE.MAX_LENGTH) {
-    return { valid: false, error: 'Сообщение слишком длинное' }
+  if (trimmed.length > 500) {
+    return { valid: false, error: 'Сообщение слишком длинное (максимум 500 символов)' }
   }
   
-  return { valid: true, message: trimmed }
+  return { valid: true, text: trimmed }
 }
 
 /**
- * Санитизация HTML для безопасного отображения
+ * Очистка HTML из пользовательского ввода
  */
 export const sanitizeHtml = (text) => {
-  if (!text) return ''
+  if (!text || typeof text !== 'string') return ''
   
   return text
     .replace(/&/g, '&amp;')
@@ -108,249 +102,96 @@ export const sanitizeHtml = (text) => {
 }
 
 /**
- * Перемешивание массива (Fisher-Yates)
+ * Throttle функция для ограничения частоты вызовов
  */
-export const shuffleArray = (array) => {
-  const shuffled = [...array]
+export const throttle = (func, delay) => {
+  let timeoutId
+  let lastExecTime = 0
   
-  for (let i = shuffled.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]]
-  }
-  
-  return shuffled
-}
-
-/**
- * Получение случайного элемента из массива
- */
-export const getRandomElement = (array) => {
-  if (!array || array.length === 0) return null
-  return array[Math.floor(Math.random() * array.length)]
-}
-
-/**
- * Получение случайных элементов из массива
- */
-export const getRandomElements = (array, count) => {
-  if (!array || array.length === 0) return []
-  
-  const shuffled = shuffleArray(array)
-  return shuffled.slice(0, Math.min(count, shuffled.length))
-}
-
-/**
- * Задержка выполнения
- */
-export const sleep = (ms) => {
-  return new Promise(resolve => setTimeout(resolve, ms))
-}
-
-/**
- * Создание throttle функции
- */
-export const throttle = (func, limit) => {
-  let inThrottle
-  
-  return function(...args) {
-    if (!inThrottle) {
+  return function (...args) {
+    const currentTime = Date.now()
+    
+    if (currentTime - lastExecTime > delay) {
       func.apply(this, args)
-      inThrottle = true
-      setTimeout(() => inThrottle = false, limit)
+      lastExecTime = currentTime
+    } else {
+      clearTimeout(timeoutId)
+      timeoutId = setTimeout(() => {
+        func.apply(this, args)
+        lastExecTime = Date.now()
+      }, delay - (currentTime - lastExecTime))
     }
   }
 }
 
 /**
- * Создание debounce функции
+ * Debounce функция для задержки выполнения
  */
 export const debounce = (func, delay) => {
   let timeoutId
   
-  return function(...args) {
+  return function (...args) {
     clearTimeout(timeoutId)
     timeoutId = setTimeout(() => func.apply(this, args), delay)
   }
 }
 
 /**
- * Безопасное JSON парсинг
+ * Перемешивание массива (алгоритм Фишера-Йетса)
  */
-export const safeJsonParse = (str, defaultValue = null) => {
-  try {
-    return JSON.parse(str)
-  } catch (error) {
-    console.warn('Invalid JSON:', str)
-    return defaultValue
+export const shuffleArray = (array) => {
+  const result = [...array]
+  for (let i = result.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [result[i], result[j]] = [result[j], result[i]]
   }
+  return result
 }
 
 /**
- * Безопасное JSON stringify
+ * Генерация случайного числа в диапазоне
  */
-export const safeJsonStringify = (obj, defaultValue = '{}') => {
-  try {
-    return JSON.stringify(obj)
-  } catch (error) {
-    console.warn('JSON stringify error:', error)
-    return defaultValue
-  }
+export const randomInt = (min, max) => {
+  return Math.floor(Math.random() * (max - min + 1)) + min
 }
 
 /**
- * Проверка является ли объект пустым
+ * Форматирование времени в MM:SS
  */
-export const isEmpty = (obj) => {
-  if (obj == null) return true
-  if (Array.isArray(obj) || typeof obj === 'string') return obj.length === 0
-  if (obj instanceof Map || obj instanceof Set) return obj.size === 0
-  return Object.keys(obj).length === 0
-}
-
-/**
- * Глубокое клонирование объекта
- */
-export const deepClone = (obj) => {
-  if (obj === null || typeof obj !== 'object') return obj
-  if (obj instanceof Date) return new Date(obj.getTime())
-  if (obj instanceof Array) return obj.map(item => deepClone(item))
-  if (obj instanceof Set) return new Set([...obj].map(item => deepClone(item)))
-  if (obj instanceof Map) return new Map([...obj].map(([key, val]) => [key, deepClone(val)]))
-  
-  const cloned = {}
-  for (const key in obj) {
-    if (obj.hasOwnProperty(key)) {
-      cloned[key] = deepClone(obj[key])
-    }
-  }
-  
-  return cloned
-}
-
-/**
- * Форматирование времени
- */
-export const formatTime = (timestamp) => {
-  const date = new Date(timestamp)
-  return date.toLocaleTimeString('ru-RU', {
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit'
-  })
-}
-
-/**
- * Форматирование длительности
- */
-export const formatDuration = (seconds) => {
+export const formatTime = (seconds) => {
   const mins = Math.floor(seconds / 60)
   const secs = seconds % 60
-  
-  if (mins > 0) {
-    return `${mins}:${secs.toString().padStart(2, '0')}`
-  }
-  
-  return `${secs}с`
+  return `${mins}:${secs.toString().padStart(2, '0')}`
 }
 
 /**
- * Создание простого логгера
+ * Проверка валидного ID игрока
  */
-export const createLogger = (prefix) => {
-  return {
-    info: (...args) => console.log(`ℹ️ [${prefix}]`, ...args),
-    warn: (...args) => console.warn(`⚠️ [${prefix}]`, ...args),
-    error: (...args) => console.error(`❌ [${prefix}]`, ...args),
-    debug: (...args) => {
-      if (process.env.NODE_ENV === 'development') {
-        console.log(`🐛 [${prefix}]`, ...args)
-      }
-    }
-  }
+export const isValidPlayerId = (id) => {
+  return typeof id === 'string' && id.length > 0
 }
 
 /**
- * Валидация игрового действия
+ * Извлечение IP адреса из сокета
  */
-export const validateGameAction = (action, player, gameState) => {
-  if (!action || typeof action !== 'object') {
-    return { valid: false, error: 'Неверный формат действия' }
-  }
-  
-  if (!action.type) {
-    return { valid: false, error: 'Тип действия обязателен' }
-  }
-  
-  if (!player) {
-    return { valid: false, error: 'Игрок не найден' }
-  }
-  
-  if (!player.alive && action.type !== 'chat' && action.type !== 'whisper') {
-    return { valid: false, error: 'Мертвые игроки не могут выполнять действия' }
-  }
-  
-  return { valid: true }
+export const getClientIP = (socket) => {
+  return socket.handshake.address || 
+         socket.conn.remoteAddress || 
+         socket.request.connection.remoteAddress ||
+         '0.0.0.0'
 }
 
 /**
- * Получение информации об ошибке
+ * Логирование с временной меткой
  */
-export const getErrorInfo = (error) => {
-  return {
-    message: error.message || 'Неизвестная ошибка',
-    stack: process.env.NODE_ENV === 'development' ? error.stack : undefined,
-    timestamp: Date.now()
-  }
-}
-
-/**
- * Создание ответа с ошибкой
- */
-export const createErrorResponse = (code, message, details = null) => {
-  return {
-    error: true,
-    code,
-    message,
-    details,
-    timestamp: Date.now()
-  }
-}
-
-/**
- * Создание успешного ответа
- */
-export const createSuccessResponse = (data = null, message = null) => {
-  return {
-    success: true,
-    data,
-    message,
-    timestamp: Date.now()
-  }
-}
-
-/**
- * Проверка rate limiting
- */
-export const checkRateLimit = (requests, timeWindow, maxRequests) => {
-  const now = Date.now()
-  const windowStart = now - timeWindow
+export const logWithTime = (message, level = 'info') => {
+  const timestamp = new Date().toISOString()
+  const prefix = {
+    info: 'ℹ️',
+    warn: '⚠️',
+    error: '❌',
+    debug: '🐛'
+  }[level] || 'ℹ️'
   
-  // Удаляем старые запросы
-  const recentRequests = requests.filter(timestamp => timestamp > windowStart)
-  
-  // Проверяем лимит
-  if (recentRequests.length >= maxRequests) {
-    return {
-      allowed: false,
-      retryAfter: Math.ceil((recentRequests[0] + timeWindow - now) / 1000)
-    }
-  }
-  
-  // Добавляем текущий запрос
-  recentRequests.push(now)
-  
-  return {
-    allowed: true,
-    remaining: maxRequests - recentRequests.length
-  }
+  console.log(`${prefix} [${timestamp}] ${message}`)
 }

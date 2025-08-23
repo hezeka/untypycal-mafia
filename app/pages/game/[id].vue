@@ -4,12 +4,12 @@
     <!-- Заголовок игры -->
     <header class="game-header">
       <div class="header-left">
-        <h1 class="game-title">
-          НЕТИПИЧКА
-        </h1>
+        <h1 class="game-title">НЕТИПИЧКА</h1>
         <div class="room-info">
-          <span class="room-code">{{ gameState.room.id }}</span>
-          <span class="phase-indicator">{{ currentPhase }}</span>
+          <span class="room-code" @click="copyRoomCode">{{ gameState.room.id }}</span>
+          <span class="phase-indicator" :class="`phase-${gameState.room.phase}`">
+            {{ phaseInfo.name }}
+          </span>
         </div>
       </div>
       
@@ -18,12 +18,12 @@
           {{ formatTime(gameState.timer.remaining) }}
         </div>
         
-        <div class="connection-status" :class="{ 'connected': isConnected }">
+        <div class="connection-status" :class="{ 'connected': gameState.connected }">
           <span class="status-dot"></span>
         </div>
         
-        <button @click="showGameMenu = true" class="menu-btn">
-          Меню
+        <button @click="leaveGame" class="leave-btn">
+          Покинуть
         </button>
       </div>
     </header>
@@ -32,89 +32,277 @@
     <main class="game-main">
       
       <!-- Фаза настройки -->
-      <GameSetup 
-        v-if="gameState.room.phase === 'setup'"
-        @start-game="startGame"
-      />
+      <GameSetup v-if="gameState.room.phase === 'setup'" />
       
-      <!-- Фаза знакомства -->
-      <IntroductionPhase 
-        v-else-if="gameState.room.phase === 'introduction'"
-      />
-      
-      <!-- Ночная фаза -->
-      <NightPhase 
-        v-else-if="gameState.room.phase === 'night'"
-      />
-      
-      <!-- Дневная фаза -->
-      <DayPhase 
-        v-else-if="gameState.room.phase === 'day'"
-      />
-      
-      <!-- Фаза голосования -->
-      <VotingPhase 
-        v-else-if="gameState.room.phase === 'voting'"
-        @vote="handleVote"
-      />
-      
-      <!-- Завершение игры -->
-      <GameEndPhase 
-        v-else-if="gameState.room.phase === 'ended'"
-      />
-      
+      <!-- Игровые фазы -->
+      <div v-else class="game-area">
+        
+        <!-- Информация о фазе и подсказки -->
+        <div class="phase-info">
+          <div class="phase-description">
+            {{ phaseInfo.description }}
+          </div>
+          <div v-if="currentPlayer.role" class="role-hint">
+            {{ getRoleHint() }}
+          </div>
+        </div>
+        
+        <!-- Центральные карты -->
+        <div v-if="gameState.room.centerCards > 0" class="center-cards">
+          <h4>Центральные карты</h4>
+          <div class="center-grid">
+            <div v-for="n in gameState.room.centerCards" :key="n" class="center-card">
+              <img src="/roles/card-back.png" alt="Центральная карта" />
+            </div>
+          </div>
+        </div>
+        
+        <!-- Сетка игроков -->
+        <div class="players-area">
+          <div class="players-grid" :class="getPlayersGridClass()">
+            <div 
+              v-for="player in gameState.room.players" 
+              :key="player.id"
+              class="player-card"
+              :class="getPlayerCardClass(player)"
+            >
+              <!-- Аватар / роль -->
+              <div class="player-avatar">
+                <img 
+                  v-if="player.role && shouldShowRole(player)"
+                  :src="`/roles/compressed/${player.role}.webp`"
+                  :alt="getRoleName(player.role)"
+                  class="role-image"
+                />
+                <div v-else class="default-avatar">
+                  {{ player.name[0]?.toUpperCase() }}
+                </div>
+                <div v-if="isWerewolfRole(player.role)" class="werewolf-claws">
+                  <img src="/icons/claws.png" alt="Оборотень" />
+                </div>
+              </div>
+              
+              <!-- Информация об игроке -->
+              <div class="player-info">
+                <div class="player-name">{{ player.name }}</div>
+                <div v-if="player.role && shouldShowRole(player)" class="player-role">
+                  {{ getRoleName(player.role) }}
+                </div>
+                <div class="player-status">
+                  <span v-if="!player.alive" class="status-dead">Мертв</span>
+                  <span v-if="!player.connected" class="status-offline">Оффлайн</span>
+                  <span v-if="player.isHost" class="status-host">Ведущий</span>
+                </div>
+              </div>
+              
+              <!-- Кнопки управления -->
+              <div class="player-actions">
+                <template v-if="player.isMe">
+                  <button @click="showRoleInfo = true" class="action-btn role-btn">
+                    О вашей роли
+                  </button>
+                </template>
+                <template v-else>
+                  <button @click="whisperTo(player)" class="action-btn whisper-btn">
+                    ЛС
+                  </button>
+                  
+                  <!-- Кнопки ведущего -->
+                  <template v-if="canAdminControl">
+                    <button @click="adminAction('protect', player.id)" class="action-btn admin-btn">
+                      Защитить
+                    </button>
+                    <button 
+                      @click="adminAction(player.alive ? 'kill' : 'revive', player.id)" 
+                      class="action-btn admin-btn"
+                    >
+                      {{ player.alive ? 'Убить' : 'Воскресить' }}
+                    </button>
+                    <button @click="adminAction('kick', player.id)" class="action-btn admin-btn danger">
+                      Выгнать
+                    </button>
+                  </template>
+                  
+                  <!-- Кнопки оборотня -->
+                  <template v-if="isWerewolf && gameState.room.phase === 'night'">
+                    <button 
+                      v-if="canKillPlayer(player)"
+                      @click="nightAction('vote_kill', player.id)" 
+                      class="action-btn werewolf-btn"
+                    >
+                      ☠️
+                    </button>
+                    <button 
+                      v-if="canLookAtPlayer(player)"
+                      @click="nightAction('look_player', player.id)" 
+                      class="action-btn werewolf-btn"
+                    >
+                      👁️
+                    </button>
+                  </template>
+                  
+                  <!-- Кнопка голосования -->
+                  <template v-if="gameState.room.phase === 'voting' && canVoteFor(player)">
+                    <button 
+                      @click="votePlayer(player.id)" 
+                      class="action-btn vote-btn"
+                      :class="{ 'voted': gameState.voting.myVote === player.id }"
+                    >
+                      {{ gameState.voting.myVote === player.id ? '✓' : 'Голос' }}
+                    </button>
+                  </template>
+                </template>
+              </div>
+            </div>
+          </div>
+        </div>
+        
+        <!-- Ночные действия -->
+        <NightActions v-if="gameState.room.phase === 'night'" />
+        
+        <!-- Результаты игры -->
+        <GameResults v-if="gameState.room.phase === 'ended'" />
+        
+      </div>
     </main>
 
-    <!-- Боковая панель -->
+    <!-- Боковая панель чата -->
     <aside class="game-sidebar">
-      
-      <!-- Список игроков -->
-      <PlayersList />
-      
-      <!-- Чат -->
       <GameChat />
-      
     </aside>
 
-    <!-- Модалы (TODO: добавить при необходимости) -->
+    <!-- Модалы -->
+    <RoleInfoModal 
+      v-if="showRoleInfo && currentPlayer.role"
+      :role="currentPlayer.role"
+      @close="showRoleInfo = false"
+    />
     
   </div>
 </template>
 
 <script setup>
-import { computed, onMounted, onUnmounted } from 'vue'
+import { computed, ref, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useGame } from '~/composables/useGame'
-import { useSocket } from '~/composables/useSocket'
+import { getAllRoles } from '../../../shared/rolesRegistry.js'
 
 const route = useRoute()
 const router = useRouter()
 const { 
   gameState, 
-  startGame, 
-  votePlayer, 
+  currentPlayer,
   formatTime, 
-  initSocketListeners 
+  getPhaseInfo,
+  initSocketListeners,
+  votePlayer,
+  adminAction,
+  executeNightAction,
+  cleanup
 } = useGame()
-const { isConnected } = useSocket()
+
+const showRoleInfo = ref(false)
+const roles = getAllRoles()
 
 // Computed
-const currentPhase = computed(() => {
-  const phases = {
-    setup: 'Настройка',
-    introduction: 'Знакомство',
-    night: 'Ночь',
-    day: 'День',
-    voting: 'Голосование',
-    ended: 'Завершено'
-  }
-  
-  return phases[gameState.room.phase] || 'Неизвестно'
+const phaseInfo = computed(() => getPhaseInfo())
+
+const canAdminControl = computed(() => {
+  return currentPlayer.value.role === 'game_master' || currentPlayer.value.isHost
+})
+
+const isWerewolf = computed(() => {
+  const role = currentPlayer.value.role
+  return role && (role.includes('werewolf') || role === 'mystic_wolf') && role !== 'minion'
 })
 
 // Методы
-const handleVote = (targetId) => {
-  votePlayer(targetId)
+const copyRoomCode = async () => {
+  try {
+    await navigator.clipboard.writeText(window.location.href)
+    // TODO: Показать уведомление
+  } catch (err) {
+    console.error('Failed to copy:', err)
+  }
+}
+
+const leaveGame = () => {
+  if (confirm('Вы уверены, что хотите покинуть игру?')) {
+    router.push('/')
+  }
+}
+
+const shouldShowRole = (player) => {
+  // Свою роль видишь всегда
+  if (player.isMe) return true
+  
+  // game_master видит все роли
+  if (currentPlayer.value.role === 'game_master') return true
+  
+  // Оборотни видят других оборотней (кроме фазы setup)
+  if (isWerewolf.value && isWerewolfRole(player.role) && gameState.room.phase !== 'setup') {
+    return true
+  }
+  
+  return false
+}
+
+const isWerewolfRole = (role) => {
+  if (!role) return false
+  const roleInfo = roles[role]
+  return roleInfo?.team === 'werewolf' && role !== 'minion'
+}
+
+const getRoleName = (roleId) => {
+  return roles[roleId]?.name || roleId
+}
+
+const getRoleHint = () => {
+  const role = roles[currentPlayer.value.role]
+  if (!role?.phaseHints) return ''
+  
+  const phase = gameState.room.phase
+  return role.phaseHints[phase] || role.phaseHints.day || ''
+}
+
+const getPlayersGridClass = () => {
+  const count = gameState.room.players.length
+  if (count <= 4) return 'grid-2x2'
+  if (count <= 6) return 'grid-3x2'
+  return 'grid-3x3'
+}
+
+const getPlayerCardClass = (player) => {
+  const classes = []
+  
+  if (player.isMe) classes.push('is-me')
+  if (!player.alive) classes.push('is-dead')
+  if (!player.connected) classes.push('is-offline')
+  if (player.role === 'game_master') classes.push('is-gamemaster')
+  if (isWerewolfRole(player.role)) classes.push('is-werewolf')
+  
+  return classes
+}
+
+const canVoteFor = (player) => {
+  return player.alive && !player.isMe && player.role !== 'game_master'
+}
+
+const canKillPlayer = (player) => {
+  return player.alive && !isWerewolfRole(player.role) && player.role !== 'game_master'
+}
+
+const canLookAtPlayer = (player) => {
+  return player.alive && !player.isMe && player.role !== 'game_master'
+}
+
+const whisperTo = (player) => {
+  // TODO: Открыть модал личных сообщений или добавить в инпут чата
+  console.log('Whisper to:', player.name)
+}
+
+const nightAction = (type, targetId) => {
+  executeNightAction({ type, targetId })
 }
 
 // Инициализация
@@ -126,175 +314,8 @@ onMounted(() => {
     router.push('/')
   }
 })
+
+onUnmounted(() => {
+  cleanup()
+})
 </script>
-
-<style scoped>
-.game-page {
-  height: 100vh;
-  display: grid;
-  grid-template-columns: 1fr 400px;
-  grid-template-rows: auto 1fr;
-  grid-template-areas: 
-    "header header"
-    "main sidebar";
-  background: linear-gradient(135deg, #0a0a0a 0%, #1a1a1a 100%);
-  color: #ffffff;
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-}
-
-/* Заголовок */
-.game-header {
-  grid-area: header;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 16px 24px;
-  background: rgba(255, 255, 255, 0.05);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-  backdrop-filter: blur(10px);
-}
-
-.header-left {
-  display: flex;
-  align-items: center;
-  gap: 24px;
-}
-
-.game-title {
-  font-size: 1.5rem;
-  font-weight: 700;
-  margin: 0;
-  background: linear-gradient(45deg, #ff6b6b, #ffa500);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-}
-
-.room-info {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-}
-
-.room-code {
-  font-family: 'Monaco', 'Consolas', monospace;
-  font-size: 1.1rem;
-  font-weight: 600;
-  background: rgba(255, 255, 255, 0.1);
-  padding: 4px 12px;
-  border-radius: 6px;
-  letter-spacing: 2px;
-}
-
-.phase-indicator {
-  font-size: 0.9rem;
-  color: #ff6b6b;
-  font-weight: 500;
-  text-transform: uppercase;
-  letter-spacing: 1px;
-}
-
-.header-right {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-}
-
-.timer {
-  font-family: 'Monaco', 'Consolas', monospace;
-  font-size: 1.1rem;
-  font-weight: 600;
-  color: #ffa500;
-  background: rgba(255, 165, 0, 0.1);
-  padding: 6px 12px;
-  border-radius: 6px;
-  border: 1px solid rgba(255, 165, 0, 0.3);
-}
-
-.connection-status {
-  display: flex;
-  align-items: center;
-  padding: 6px;
-}
-
-.status-dot {
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  background: #ff4444;
-  transition: background 0.3s ease;
-}
-
-.connection-status.connected .status-dot {
-  background: #44ff44;
-}
-
-.menu-btn {
-  background: rgba(255, 255, 255, 0.1);
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  color: #fff;
-  padding: 8px 16px;
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 0.9rem;
-  transition: all 0.3s ease;
-}
-
-.menu-btn:hover {
-  background: rgba(255, 255, 255, 0.2);
-}
-
-/* Основная область */
-.game-main {
-  grid-area: main;
-  padding: 24px;
-  overflow-y: auto;
-}
-
-/* Боковая панель */
-.game-sidebar {
-  grid-area: sidebar;
-  background: rgba(255, 255, 255, 0.03);
-  border-left: 1px solid rgba(255, 255, 255, 0.1);
-  display: flex;
-  flex-direction: column;
-}
-
-/* Адаптивность */
-@media (max-width: 1024px) {
-  .game-page {
-    grid-template-columns: 1fr;
-    grid-template-areas: 
-      "header"
-      "main"
-      "sidebar";
-  }
-  
-  .game-sidebar {
-    border-left: none;
-    border-top: 1px solid rgba(255, 255, 255, 0.1);
-  }
-}
-
-@media (max-width: 768px) {
-  .game-header {
-    flex-direction: column;
-    gap: 12px;
-    padding: 16px;
-  }
-  
-  .header-left,
-  .header-right {
-    width: 100%;
-    justify-content: space-between;
-  }
-  
-  .room-info {
-    gap: 12px;
-  }
-  
-  .game-main {
-    padding: 16px;
-  }
-}
-</style>

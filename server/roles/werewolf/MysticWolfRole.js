@@ -1,87 +1,111 @@
 /**
- * Мистический волк - может посмотреть карту игрока ИЛИ участвовать в голосовании
+ * Роль: Мистический волк
  */
 
 import { BaseRole } from '../BaseRole.js'
-import { RoleAbilities } from '../abilities/RoleAbilities.js'
-import { ROLE_TEAMS } from '../../utils/constants.js'
 
 export class MysticWolfRole extends BaseRole {
   constructor() {
     super('mystic_wolf', {
       name: 'Мистический волк',
-      description: 'Узнает других оборотней, затем может посмотреть карту игрока ИЛИ проголосовать за жертву.',
-      team: ROLE_TEAMS.WEREWOLF,
+      description: 'Ночью сначала находит оборотней, затем выбирает - голосовать ИЛИ посмотреть карту.',
+      team: 'werewolf',
       color: 'red',
       hasNightAction: true,
       nightOrder: 11,
       implemented: true,
       phaseHints: {
-        night: 'Сначала найдите оборотней, затем ВЫБЕРИТЕ: посмотреть карту ИЛИ проголосовать',
-        day: 'Используйте полученную информацию для обмана жителей'
+        night: 'Найдите оборотней, затем выберите: голосовать или смотреть карту',
+        day: 'Используйте полученную информацию'
       }
     })
   }
   
-  async executeNightAction(game, player, action) {
-    // Сначала всегда находим оборотней
-    const werewolvesResult = RoleAbilities.findWerewolves(game, player)
+  async executeNightAction(gameEngine, player, action) {
+    const { type, targetId } = action
+    const room = gameEngine.room
     
-    // Если нет действия - предлагаем выбор
-    if (!action) {
-      return RoleAbilities.createChoice(game, player.id, [
-        { id: 'look', name: 'Посмотреть карту игрока', type: 'look_player' },
-        { id: 'vote', name: 'Участвовать в голосовании оборотней', type: 'werewolf_vote' }
-      ])
-    }
-    
-    this.logAction(player, 'found werewolves', werewolvesResult.werewolves.length.toString())
-    
-    // Выполняем выбранное действие
-    if (action.type === 'look_player' && action.targetId) {
-      const lookResult = RoleAbilities.lookAtPlayer(game, player, action.targetId)
-      this.notifyPlayer(game, player.id, 
-        `Вы видите: ${lookResult.targetName} - ${lookResult.roleName}`)
+    // Первое действие - показать оборотней
+    if (type === 'reveal_werewolves') {
+      const werewolves = Array.from(room.players.values())
+        .filter(p => p.alive && room.isWerewolf(p.role) && p.id !== player.id)
+        .map(p => ({ id: p.id, name: p.name, role: p.role }))
       
       return {
-        werewolves: werewolvesResult,
-        looked: lookResult
+        success: true,
+        message: werewolves.length > 0 ? 'Вы нашли других оборотней' : 'Других оборотней нет',
+        data: {
+          werewolves,
+          canChooseAction: true
+        }
       }
     }
     
-    if (action.type === 'werewolf_vote') {
-      // Мистический волк участвует в голосовании оборотней
+    // Выбор: голосовать или смотреть
+    if (type === 'choose_vote') {
+      // Участвует в голосовании оборотней
+      if (!gameEngine.werewolfVotes) {
+        gameEngine.werewolfVotes = new Map()
+      }
+      
+      if (!targetId) {
+        return { error: 'Выберите цель для убийства' }
+      }
+      
+      const target = room.getPlayer(targetId)
+      if (!target || !target.alive || target.role === 'game_master' || room.isWerewolf(target.role)) {
+        return { error: 'Недопустимая цель' }
+      }
+      
+      gameEngine.werewolfVotes.set(player.id, targetId)
+      
       return {
-        werewolves: werewolvesResult,
-        participatesInVote: true
+        success: true,
+        message: `Вы проголосовали за убийство ${target.name}`,
+        data: {
+          choice: 'vote',
+          target: target.name
+        }
       }
     }
     
-    // Пропуск действия
-    return RoleAbilities.skipAction(game, player.id, 'Мистический волк пропустил выбор')
-  }
-  
-  getActionChoices(game, player) {
-    return [
-      {
-        id: 'look_player',
-        name: 'Посмотреть карту игрока',
-        description: 'Узнать роль одного игрока',
-        targets: RoleAbilities.getValidTargets(game, player.id)
-      },
-      {
-        id: 'werewolf_vote', 
-        name: 'Голосовать за жертву',
-        description: 'Участвовать в голосовании оборотней за жертву',
-        targets: RoleAbilities.getValidTargets(game, player.id).filter(t => {
-          const role = game.room.getRole(game.room.getPlayer(t.id)?.role)
-          return role && role.team !== ROLE_TEAMS.WEREWOLF
-        })
+    if (type === 'choose_look') {
+      if (!targetId) {
+        return { error: 'Выберите игрока для просмотра' }
       }
-    ]
+      
+      const target = room.getPlayer(targetId)
+      if (!target || target.id === player.id || target.role === 'game_master') {
+        return { error: 'Недопустимая цель' }
+      }
+      
+      return {
+        success: true,
+        message: `Роль игрока ${target.name}:`,
+        data: {
+          choice: 'look',
+          targetName: target.name,
+          targetRole: target.role,
+          roleInfo: room.getRoleInfo(target.role)
+        }
+      }
+    }
+    
+    return { error: 'Сначала найдите оборотней' }
   }
   
-  canSkipAction() {
-    return true
+  getAvailableTargets(gameEngine, player) {
+    // Для голосования - все кроме оборотней
+    const room = gameEngine.room
+    const voteTargets = Array.from(room.players.values())
+      .filter(p => p.alive && p.id !== player.id && p.role !== 'game_master' && !room.isWerewolf(p.role))
+      .map(p => ({ id: p.id, name: p.name, type: 'vote' }))
+    
+    // Для просмотра - все кроме себя
+    const lookTargets = Array.from(room.players.values())
+      .filter(p => p.alive && p.id !== player.id && p.role !== 'game_master')
+      .map(p => ({ id: p.id, name: p.name, type: 'look' }))
+    
+    return { voteTargets, lookTargets }
   }
 }

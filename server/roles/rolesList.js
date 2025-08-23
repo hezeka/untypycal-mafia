@@ -1,5 +1,5 @@
 /**
- * Серверный реестр ролей - использует централизованную систему
+ * Серверный реестр ролей с экземплярами
  */
 
 import { ROLES_REGISTRY, getRole as getRegistryRole } from '../../shared/rolesRegistry.js'
@@ -10,10 +10,10 @@ import { SeerRole } from './village/SeerRole.js'
 import { RobberRole } from './village/RobberRole.js'
 import { TroublemakerRole } from './village/TroublemakerRole.js'
 import { DrunkRole } from './village/DrunkRole.js'
+import { BodyguardRole } from './village/BodyguardRole.js'
 import { WerewolfRole } from './werewolf/WerewolfRole.js'
 import { MysticWolfRole } from './werewolf/MysticWolfRole.js'
 import { TannerRole } from './tanner/TannerRole.js'
-import { DoppelgangerRole } from './special/DoppelgangerRole.js'
 
 // Создаем экземпляры ролей
 const ROLE_INSTANCES = {
@@ -22,10 +22,10 @@ const ROLE_INSTANCES = {
   robber: new RobberRole(),
   troublemaker: new TroublemakerRole(),
   drunk: new DrunkRole(),
+  bodyguard: new BodyguardRole(),
   werewolf: new WerewolfRole(),
   mystic_wolf: new MysticWolfRole(),
   tanner: new TannerRole(),
-  doppelganger: new DoppelgangerRole(),
   werewolf_2: new WerewolfRole(),
   werewolf_3: new WerewolfRole()
 }
@@ -62,7 +62,9 @@ export const validateRole = (roleId) => {
  * Получение ночных ролей в порядке выполнения
  */
 export const getNightRoles = (playerRoles) => {
-  return playerRoles
+  const uniqueRoles = [...new Set(playerRoles)] // Убираем дубликаты
+  
+  return uniqueRoles
     .map(roleId => ({
       id: roleId,
       instance: getRole(roleId),

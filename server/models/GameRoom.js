@@ -1,11 +1,11 @@
 /**
- * Модель игровой комнаты - простая структура данных
+ * Модель игровой комнаты с интеграцией GameEngine
  */
 
 import { GameEngine } from '../engine/GameEngine.js'
-import { getRole } from '../roles/rolesList.js'
+import { getRoleInfo, validateRole } from '../roles/rolesList.js'
 import { generateRoomId, sanitizeHtml } from '../utils/gameHelpers.js'
-import { GAME_PHASES, MESSAGE_TYPES, LIMITS } from '../utils/constants.js'
+import { GAME_PHASES, MESSAGE_TYPES, LIMITS, ROLE_TEAMS } from '../utils/constants.js'
 
 export class GameRoom {
   constructor(hostId, isPrivate = false, hostAsObserver = false) {
@@ -18,10 +18,12 @@ export class GameRoom {
     // Игроки
     this.players = new Map()
     this.selectedRoles = []
+    this.centerCards = []
     
     // Игровое состояние
     this.gameState = GAME_PHASES.SETUP
     this.gameEngine = null
+    this.gameResult = null
     
     // Чат
     this.chat = []
@@ -40,340 +42,212 @@ export class GameRoom {
     this.sockets = new Map()
   }
   
-  /**
-   * Добавление игрока в комнату
-   */
   addPlayer(socketId, name) {
     const playerId = socketId
     
-    // Проверяем лимиты
     if (this.players.size >= LIMITS.MAX_PLAYERS_PER_ROOM) {
       throw new Error('Комната переполнена')
     }
     
-    // Проверяем уникальность имени
     const existingPlayer = Array.from(this.players.values())
       .find(p => p.name.toLowerCase() === name.toLowerCase())
     
-    if (existingPlayer) {
-      throw new Error('Игрок с таким именем уже существует')
+    if (existingPlayer && existingPlayer.connected) {
+      throw new Error('Игрок с таким именем уже в игре')
+    }
+    
+    // Если игрок был отключен, восстанавливаем его слот
+    if (existingPlayer && !existingPlayer.connected) {
+      existingPlayer.id = playerId
+      existingPlayer.connected = true
+      this.players.set(playerId, existingPlayer)
+      return existingPlayer
     }
     
     const isHost = playerId === this.hostId
-    
-    const assignedRole = isHost && this.hostAsObserver ? 'game_master' : null
-    
     const player = {
       id: playerId,
-      name: name,
-      role: assignedRole,
+      name: sanitizeHtml(name),
+      role: isHost && this.hostAsObserver ? 'game_master' : null,
       alive: true,
-      protected: false,
-      votes: 0,
       connected: true,
-      muted: false,
-      isHost: isHost,
+      isHost,
       joinedAt: Date.now()
     }
     
     this.players.set(playerId, player)
-    
-    console.log(`👤 Player ${name} joined room ${this.id}, role: ${assignedRole}, hostAsObserver: ${this.hostAsObserver}, isHost: ${isHost}`)
-    
     return player
   }
   
-  /**
-   * Удаление игрока из комнаты
-   */
   removePlayer(playerId) {
     const player = this.players.get(playerId)
-    if (!player) return false
-    
-    this.players.delete(playerId)
-    this.sockets.delete(playerId)
-    
-    // Убираем голос если есть
-    this.votes.delete(playerId)
-    
-    console.log(`👤 Player ${player.name} left room ${this.id}`)
-    
-    // Если ушел хост и есть другие игроки - передаем права
-    if (playerId === this.hostId && this.players.size > 0) {
-      const newHost = Array.from(this.players.values())[0]
-      this.hostId = newHost.id
-      newHost.isHost = true
-      
-      console.log(`👑 New host: ${newHost.name} in room ${this.id}`)
+    if (player) {
+      player.connected = false
+      // Не удаляем игрока полностью - он может переподключиться
+    }
+  }
+  
+  getPlayer(playerId) {
+    return this.players.get(playerId)
+  }
+  
+  addRole(roleId) {
+    if (!validateRole(roleId)) {
+      throw new Error('Неизвестная роль')
     }
     
-    return true
-  }
-  
-  /**
-   * Получение игрока
-   */
-  getPlayer(playerId) {
-    return this.players.get(playerId) || null
-  }
-  
-  /**
-   * Получение роли
-   */
-  getRole(roleId) {
-    return getRole(roleId)
-  }
-  
-  /**
-   * Назначение роли игроку
-   */
-  assignRole(playerId, roleId) {
-    const player = this.players.get(playerId)
-    if (!player) return false
-    
-    player.role = roleId
-    
-    console.log(`🎭 Assigned role ${roleId} to ${player.name}`)
-    
-    return true
-  }
-  
-  /**
-   * Убийство игрока
-   */
-  killPlayer(playerId) {
-    const player = this.players.get(playerId)
-    if (!player) return false
-    
-    player.alive = false
-    
-    console.log(`💀 Player ${player.name} was killed`)
-    
-    // Убираем голос мертвого игрока
-    this.votes.delete(playerId)
-    
-    return true
-  }
-  
-  /**
-   * Воскрешение игрока (для отладки)
-   */
-  revivePlayer(playerId) {
-    const player = this.players.get(playerId)
-    if (!player) return false
-    
-    player.alive = true
-    
-    console.log(`✨ Player ${player.name} was revived`)
-    
-    return true
-  }
-  
-  /**
-   * Добавление роли к выбранным
-   */
-  addRole(roleId) {
-    if (!getRole(roleId)) {
-      throw new Error(`Неизвестная роль: ${roleId}`)
+    if (this.gameState !== GAME_PHASES.SETUP) {
+      throw new Error('Нельзя изменять роли после начала игры')
     }
     
     this.selectedRoles.push(roleId)
-    
-    console.log(`🎭 Added role ${roleId} to room ${this.id}`)
   }
   
-  /**
-   * Удаление роли из выбранных
-   */
   removeRole(roleId) {
+    if (this.gameState !== GAME_PHASES.SETUP) {
+      throw new Error('Нельзя изменять роли после начала игры')
+    }
+    
     const index = this.selectedRoles.indexOf(roleId)
     if (index > -1) {
       this.selectedRoles.splice(index, 1)
-      console.log(`🎭 Removed role ${roleId} from room ${this.id}`)
-      return true
     }
-    return false
   }
   
-  /**
-   * Начало игры
-   */
   startGame() {
-    // Считаем игроков без ролей (исключая ведущего, у которого уже есть game_master)
-    const playersNeedingRoles = Array.from(this.players.values())
-      .filter(p => p.alive && (p.role === null || p.role === undefined))
-    
-    const playerCount = playersNeedingRoles.length
+    const playerCount = Array.from(this.players.values())
+      .filter(p => p.role !== 'game_master').length
     
     if (playerCount < LIMITS.MIN_PLAYERS_TO_START) {
-      throw new Error(`Недостаточно игроков (минимум ${LIMITS.MIN_PLAYERS_TO_START})`)
+      throw new Error('Недостаточно игроков для начала игры')
     }
     
-    if (this.selectedRoles.length < playerCount + 3) {
-      throw new Error('Недостаточно ролей (нужно на 3 больше чем игроков)')
+    if (this.selectedRoles.length < playerCount) {
+      throw new Error('Выберите достаточно ролей')
     }
     
-    // Создаем игровой движок
     this.gameEngine = new GameEngine(this)
-    this.gameState = GAME_PHASES.INTRODUCTION
-    
-    // Запускаем игру
     this.gameEngine.startGame()
     
-    console.log(`🎮 Game started in room ${this.id}`)
+    this.addSystemMessage('Игра началась! Удачи!', MESSAGE_TYPES.GAME_EVENT)
   }
   
-  /**
-   * Добавление сообщения в чат
-   */
-  addMessage(message) {
-    // Валидация длины сообщения
-    if (message.content && message.content.length > LIMITS.MAX_MESSAGE_LENGTH) {
-      throw new Error('Сообщение слишком длинное')
-    }
+  addMessage(senderId, text, type = MESSAGE_TYPES.PUBLIC, recipientId = null) {
+    const sender = this.getPlayer(senderId)
+    if (!sender) return
     
-    // Санитизация контента
-    if (message.content) {
-      message.content = sanitizeHtml(message.content)
+    const message = {
+      id: Date.now(),
+      senderId,
+      senderName: sender.name,
+      senderRole: this.shouldShowRole(senderId) ? sender.role : null,
+      text: sanitizeHtml(text),
+      type,
+      recipientId,
+      timestamp: Date.now()
     }
-    
-    message.id = Date.now() + Math.random()
-    message.timestamp = Date.now()
     
     this.chat.push(message)
     
-    // Ограничиваем количество сообщений в памяти
-    if (this.chat.length > 1000) {
-      this.chat = this.chat.slice(-500)
-    }
-    
-    return message
+    // Отправляем сообщение нужным получателям
+    this.broadcastMessage(message)
   }
   
-  /**
-   * Добавление системного сообщения
-   */
-  addSystemMessage(content, type = MESSAGE_TYPES.SYSTEM) {
-    return this.addMessage({
+  addSystemMessage(text, type = MESSAGE_TYPES.SYSTEM) {
+    const message = {
+      id: Date.now(),
+      senderId: 'system',
+      senderName: 'Система',
+      text: sanitizeHtml(text),
       type,
-      content,
-      playerName: 'Система',
-      playerId: 'system'
-    })
-  }
-  
-  /**
-   * Отправка шепота
-   */
-  sendWhisper(fromId, toId, content) {
-    const fromPlayer = this.getPlayer(fromId) || { name: 'Система', id: 'system' }
-    const toPlayer = this.getPlayer(toId)
-    
-    if (!toPlayer && toId !== 'system') {
-      throw new Error('Получатель не найден')
+      timestamp: Date.now()
     }
     
-    const whisper = this.addMessage({
-      type: MESSAGE_TYPES.WHISPER,
-      content,
-      playerName: fromPlayer.name,
-      playerId: fromId,
-      targetId: toId,
-      targetName: toPlayer?.name || 'Система'
-    })
-    
-    return whisper
+    this.chat.push(message)
+    this.broadcast('new-message', { message })
   }
   
-  /**
-   * Обновление разрешений чата
-   */
-  updateChatPermissions(permissions) {
-    this.chatPermissions = { ...this.chatPermissions, ...permissions }
+  broadcastMessage(message) {
+    for (const [playerId, socket] of this.sockets) {
+      if (this.canPlayerSeeMessage(playerId, message)) {
+        socket.emit('new-message', { message })
+      }
+    }
   }
   
-  /**
-   * Начало голосования
-   */
-  startVoting() {
-    this.votingActive = true
-    this.votes.clear()
+  canPlayerSeeMessage(playerId, message) {
+    const player = this.getPlayer(playerId)
+    if (!player) return false
     
-    console.log(`🗳️ Voting started in room ${this.id}`)
+    // Системные сообщения видят все
+    if (message.type === MESSAGE_TYPES.SYSTEM || message.senderId === 'system') {
+      return true
+    }
+    
+    // Личные сообщения видят только участники
+    if (message.type === MESSAGE_TYPES.WHISPER) {
+      return message.senderId === playerId || message.recipientId === playerId
+    }
+    
+    // game_master видит все
+    if (player.role === 'game_master') {
+      return true
+    }
+    
+    // В ночную фазу только оборотни видят чат
+    if (this.gameState === GAME_PHASES.NIGHT && this.chatPermissions.werewolfChat) {
+      return this.isWerewolf(player.role) || message.senderId === playerId
+    }
+    
+    // В фазу голосования чат отключен (кроме шепота ведущему)
+    if (this.gameState === GAME_PHASES.VOTING) {
+      return message.type === MESSAGE_TYPES.WHISPER && message.recipientId && 
+             this.getPlayer(message.recipientId)?.role === 'game_master'
+    }
+    
+    return this.chatPermissions.canSeeAll
   }
   
-  /**
-   * Завершение голосования
-   */
-  endVoting() {
-    this.votingActive = false
+  shouldShowRole(playerId) {
+    const player = this.getPlayer(playerId)
+    if (!player) return false
     
-    const results = this.calculateVotingResults()
+    // game_master видит все роли
+    if (player.role === 'game_master') return true
     
-    console.log(`🗳️ Voting ended in room ${this.id}:`, results)
+    // Оборотни видят роли других оборотней
+    if (this.isWerewolf(player.role)) {
+      return this.gameState !== GAME_PHASES.SETUP
+    }
     
-    return results
+    return false
   }
   
-  /**
-   * Голосование игрока
-   */
+  isWerewolf(role) {
+    if (!role) return false
+    const roleInfo = getRoleInfo(role)
+    return roleInfo?.team === ROLE_TEAMS.WEREWOLF && role !== 'minion'
+  }
+  
   votePlayer(voterId, targetId) {
     if (!this.votingActive) {
       throw new Error('Голосование не активно')
     }
     
     const voter = this.getPlayer(voterId)
-    if (!voter || !voter.alive) {
-      throw new Error('Только живые игроки могут голосовать')
-    }
-    
-    // Ведущий не может голосовать
-    if (voter.role === 'game_master') {
-      throw new Error('Ведущий не может голосовать')
+    if (!voter || !voter.alive || voter.role === 'game_master') {
+      throw new Error('Вы не можете голосовать')
     }
     
     // null означает воздержание
-    if (targetId !== null) {
-      const target = this.getPlayer(targetId)
-      if (!target) {
-        throw new Error('Цель голосования не найдена')
-      }
-      
-      // Нельзя голосовать против ведущего
-      if (target.role === 'game_master') {
-        throw new Error('Нельзя голосовать против ведущего')
-      }
-    }
-    
     this.votes.set(voterId, targetId)
-    
-    console.log(`🗳️ ${voter.name} voted for ${targetId || 'abstain'}`)
-  }
-
-  /**
-   * Проверяет, завершено ли голосование
-   */
-  isVotingComplete() {
-    if (!this.votingActive) return false
-    
-    // Получаем игроков, которые могут голосовать (живые, не ведущие)
-    const votingPlayers = Array.from(this.players.values())
-      .filter(p => p.alive && p.role !== 'game_master')
-    
-    // Проверяем, проголосовали ли все
-    return votingPlayers.length > 0 && this.votes.size >= votingPlayers.length
   }
   
-  /**
-   * Подсчет результатов голосования
-   */
-  calculateVotingResults() {
+  countVotes() {
     const voteCounts = new Map()
     let abstainCount = 0
     
-    // Подсчитываем голоса
-    for (const [voterId, targetId] of this.votes) {
+    for (const [, targetId] of this.votes) {
       if (targetId === null) {
         abstainCount++
       } else {
@@ -381,14 +255,15 @@ export class GameRoom {
       }
     }
     
-    // Находим игрока с наибольшим количеством голосов
-    let maxVotes = 0
-    let eliminated = null
+    // Находим максимальное количество голосов
+    const maxVotes = Math.max(0, ...voteCounts.values())
+    const eliminated = []
     
-    for (const [playerId, voteCount] of voteCounts) {
-      if (voteCount > maxVotes) {
-        maxVotes = voteCount
-        eliminated = this.getPlayer(playerId)
+    if (maxVotes > 0) {
+      for (const [playerId, votes] of voteCounts) {
+        if (votes === maxVotes) {
+          eliminated.push(playerId)
+        }
       }
     }
     
@@ -400,9 +275,6 @@ export class GameRoom {
     }
   }
   
-  /**
-   * Добавление сокета
-   */
   addSocket(playerId, socket) {
     this.sockets.set(playerId, socket)
     
@@ -412,9 +284,6 @@ export class GameRoom {
     }
   }
   
-  /**
-   * Удаление сокета
-   */
   removeSocket(playerId) {
     this.sockets.delete(playerId)
     
@@ -424,13 +293,9 @@ export class GameRoom {
     }
   }
   
-  /**
-   * Отправка сообщения всем игрокам
-   */
   broadcast(event, data) {
     for (const [playerId, socket] of this.sockets) {
       try {
-        // Персонализируем данные для каждого игрока
         let personalizedData = data
         if (data && data.room && event === 'game-updated') {
           personalizedData = {
@@ -445,9 +310,6 @@ export class GameRoom {
     }
   }
   
-  /**
-   * Отправка сообщения конкретному игроку
-   */
   sendToPlayer(playerId, event, data) {
     const socket = this.sockets.get(playerId)
     if (socket) {
@@ -459,74 +321,57 @@ export class GameRoom {
     }
   }
   
-  /**
-   * Получение данных комнаты для клиента
-   */
+  getRoleInfo(roleId) {
+    return getRoleInfo(roleId)
+  }
+  
   getClientData(playerId = null) {
-    const isGameMaster = playerId && this.getPlayer(playerId)?.role === 'game_master'
+    const player = playerId ? this.getPlayer(playerId) : null
+    const isGameMaster = player?.role === 'game_master'
     
     return {
       id: this.id,
       isPrivate: this.isPrivate,
       hostId: this.hostId,
       hostAsObserver: this.hostAsObserver,
+      phase: this.gameState,
+      selectedRoles: this.selectedRoles,
+      centerCards: this.centerCards.length,
+      chatPermissions: this.chatPermissions,
+      votingActive: this.votingActive,
+      gameResult: this.gameResult,
       players: Array.from(this.players.values()).map(p => ({
         id: p.id,
         name: p.name,
-        role: isGameMaster ? p.role : (p.id === playerId ? p.role : null), // ведущий видит все роли, игроки только свою
+        role: this.shouldShowPlayerRole(p, player) ? p.role : null,
         alive: p.alive,
         connected: p.connected,
         isHost: p.isHost,
-        protected: p.protected
-      })),
-      selectedRoles: this.selectedRoles,
-      gameState: this.gameState,
-      chat: this.chat,
-      chatPermissions: this.chatPermissions,
-      votingActive: this.votingActive,
-      votes: Object.fromEntries(this.votes), // все видят все голоса для подсчета
-      createdAt: this.createdAt
+        isMe: p.id === playerId
+      }))
     }
   }
   
-  /**
-   * Проверка пуста ли комната
-   */
-  isEmpty() {
-    return this.players.size === 0
-  }
-  
-  /**
-   * Проверка есть ли активные подключения
-   */
-  hasActiveConnections() {
-    return Array.from(this.players.values()).some(p => p.connected)
-  }
-  
-  /**
-   * Очистка комнаты
-   */
-  destroy() {
-    // Закрываем все сокеты
-    for (const [playerId, socket] of this.sockets) {
-      try {
-        socket.disconnect()
-      } catch (error) {
-        console.error(`❌ Error disconnecting socket ${playerId}:`, error)
-      }
+  shouldShowPlayerRole(targetPlayer, viewerPlayer) {
+    if (!viewerPlayer) return false
+    
+    // Свою роль видишь всегда
+    if (targetPlayer.id === viewerPlayer.id) return true
+    
+    // game_master видит все роли
+    if (viewerPlayer.role === 'game_master') return true
+    
+    // Оборотни видят других оборотней
+    if (this.isWerewolf(viewerPlayer.role) && this.isWerewolf(targetPlayer.role)) {
+      return this.gameState !== GAME_PHASES.SETUP
     }
     
-    // Уничтожаем игровой движок
+    return false
+  }
+  
+  destroy() {
     if (this.gameEngine) {
       this.gameEngine.destroy()
     }
-    
-    // Очищаем данные
-    this.players.clear()
-    this.sockets.clear()
-    this.votes.clear()
-    this.chat = []
-    
-    console.log(`🧹 Room ${this.id} destroyed`)
   }
 }

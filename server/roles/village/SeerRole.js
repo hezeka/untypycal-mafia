@@ -1,74 +1,93 @@
 /**
- * Провидец - может посмотреть роль игрока ИЛИ две карты из центра
+ * Роль: Провидец
  */
 
 import { BaseRole } from '../BaseRole.js'
-import { RoleAbilities } from '../abilities/RoleAbilities.js'
-import { ROLE_TEAMS } from '../../utils/constants.js'
 
 export class SeerRole extends BaseRole {
   constructor() {
     super('seer', {
       name: 'Провидец',
-      description: 'Ночью может посмотреть роль одного игрока ИЛИ две карты из центра.',
-      team: ROLE_TEAMS.VILLAGE,
+      description: 'Ночью может посмотреть роль игрока или две центральные карты.',
+      team: 'village',
       color: 'blue',
       hasNightAction: true,
       nightOrder: 6,
       implemented: true,
       phaseHints: {
-        night: 'ВЫБЕРИТЕ: посмотреть роль игрока ИЛИ две карты из центра',
-        day: 'Поделитесь информацией чтобы помочь деревне'
+        night: 'Выберите игрока или центральные карты для просмотра',
+        day: 'Используйте полученную информацию для поиска оборотней'
       }
     })
   }
   
-  async executeNightAction(game, player, action) {
-    if (!action) {
-      return RoleAbilities.createChoice(game, player.id, [
-        { id: 'look_player', name: 'Посмотреть роль игрока', type: 'look_player' },
-        { id: 'look_center', name: 'Посмотреть две карты из центра', type: 'look_center' }
-      ])
+  async executeNightAction(gameEngine, player, action) {
+    const { type, targetId, centerCards } = action
+    const room = gameEngine.room
+    
+    if (type === 'look_player') {
+      if (!targetId) {
+        return { error: 'Выберите игрока для просмотра' }
+      }
+      
+      const target = room.getPlayer(targetId)
+      if (!target || target.id === player.id || target.role === 'game_master') {
+        return { error: 'Недопустимая цель' }
+      }
+      
+      return {
+        success: true,
+        message: `Роль игрока ${target.name}:`,
+        data: {
+          type: 'player',
+          targetName: target.name,
+          targetRole: target.role,
+          roleInfo: room.getRoleInfo(target.role)
+        }
+      }
     }
     
-    if (action.type === 'look_player' && action.targetId) {
-      const result = RoleAbilities.lookAtPlayer(game, player, action.targetId)
+    if (type === 'look_center') {
+      if (!Array.isArray(centerCards) || centerCards.length !== 2) {
+        return { error: 'Выберите две центральные карты' }
+      }
       
-      this.logAction(player, 'looked at player', result.targetName)
-      this.notifyPlayer(game, player.id, 
-        `Вы видите: ${result.targetName} - ${result.roleName}`)
+      const cards = centerCards.map(index => {
+        if (index < 0 || index >= room.centerCards.length) {
+          return null
+        }
+        return {
+          index,
+          role: room.centerCards[index],
+          roleInfo: room.getRoleInfo(room.centerCards[index])
+        }
+      }).filter(card => card !== null)
       
-      return { looked: result }
+      if (cards.length !== 2) {
+        return { error: 'Недопустимые карты' }
+      }
+      
+      return {
+        success: true,
+        message: 'Центральные карты:',
+        data: {
+          type: 'center',
+          cards
+        }
+      }
     }
     
-    if (action.type === 'look_center') {
-      const result = RoleAbilities.lookAtCenter(game, player, [0, 1])
-      
-      this.logAction(player, 'looked at center cards')
-      
-      const cardNames = result.cards.map(c => c.roleName).join(', ')
-      this.notifyPlayer(game, player.id, `В центре: ${cardNames}`)
-      
-      return { centerCards: result }
-    }
-    
-    return RoleAbilities.skipAction(game, player.id, 'Провидец пропустил выбор')
+    return { error: 'Выберите действие: посмотреть игрока или центральные карты' }
   }
   
-  getActionChoices(game, player) {
-    return [
-      {
-        id: 'look_player',
-        name: 'Посмотреть роль игрока',
-        description: 'Узнать роль одного игрока',
-        targets: RoleAbilities.getValidTargets(game, player.id)
-      },
-      {
-        id: 'look_center',
-        name: 'Посмотреть карты центра',
-        description: 'Узнать две карты из центра стола',
-        targets: [] // Не требует цели
-      }
-    ]
+  getAvailableActions(gameEngine, player) {
+    const room = gameEngine.room
+    
+    return {
+      canLookPlayer: true,
+      canLookCenter: room.centerCards.length >= 2,
+      players: this.getAvailableTargets(gameEngine, player),
+      centerCards: room.centerCards.length
+    }
   }
 }

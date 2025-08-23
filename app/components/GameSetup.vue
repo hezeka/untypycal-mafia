@@ -1,269 +1,158 @@
 <template>
   <div class="game-setup">
-    
-    <!-- Заголовок -->
     <div class="setup-header">
-      <h2 class="setup-title">Настройка игры</h2>
-      <p class="setup-subtitle">
-        Выберите роли и начните игру
-      </p>
+      <h2>Настройка игры</h2>
+      <p>Комната: <strong>{{ gameState.room.id }}</strong></p>
+      <p>Игроков: {{ playerCount }} / Ролей: {{ gameState.room.selectedRoles.length }}</p>
     </div>
 
-    <!-- Статистика ролей -->
-    <div class="roles-stats">
-      <div class="stat-item">
-        <span class="stat-label">Выбрано ролей:</span>
-        <span class="stat-value">{{ selectedRoles.length }}</span>
+    <div class="setup-content">
+      <!-- Список игроков -->
+      <div class="players-section">
+        <h3>Игроки ({{ playerCount }})</h3>
+        <div class="players-grid">
+          <div 
+            v-for="player in gameState.room.players" 
+            :key="player.id"
+            class="player-card"
+            :class="{ 'is-host': player.isHost, 'is-me': player.isMe }"
+          >
+            <div class="player-name">{{ player.name }}</div>
+            <div v-if="player.isHost" class="player-badge">Ведущий</div>
+            <div v-if="player.role === 'game_master'" class="player-badge observer">Наблюдатель</div>
+          </div>
+        </div>
       </div>
-      <div class="stat-item">
-        <span class="stat-label">Игроков:</span>
-        <span class="stat-value">{{ playerCount }}</span>
-      </div>
-      <div class="stat-item">
-        <span class="stat-label">Нужно минимум:</span>
-        <span class="stat-value">{{ playerCount + 3 }}</span>
-      </div>
-    </div>
 
-    <!-- Выбор ролей -->
-    <div class="roles-section">
-      <h3 class="section-title">Доступные роли</h3>
-      
-      <div class="roles-grid">
-        <div 
-          v-for="[roleId, role] in Object.entries(availableRoles)" 
-          :key="roleId"
-          class="role-card"
-          :class="{ 
-            'selected': isRoleSelected(roleId),
-            'disabled': !role.implemented,
-            [`team-${role.team}`]: true
-          }"
-          @click="toggleRole(roleId)"
-        >
-          <div class="role-header">
-            <h4 class="role-name">{{ role.name }}</h4>
-            <div class="role-team" :class="`team-${role.team}`">
-              {{ getTeamName(role.team) }}
+      <!-- Выбор ролей (только для хоста) -->
+      <div v-if="gameState.player.isHost" class="roles-section">
+        <h3>Роли</h3>
+        <div class="roles-grid">
+          <div 
+            v-for="(role, roleId) in availableRoles" 
+            :key="roleId"
+            class="role-card"
+            :class="{ 'selected': selectedRoleCount(roleId) > 0, 'not-implemented': !role.implemented }"
+            @click="toggleRole(roleId)"
+          >
+            <div class="role-image">
+              <img :src="`/roles/compressed/${roleId}.webp`" :alt="role.name" />
+            </div>
+            <div class="role-info">
+              <div class="role-name">{{ role.name }}</div>
+              <div class="role-description">{{ role.description }}</div>
+              <div v-if="selectedRoleCount(roleId) > 0" class="role-count">{{ selectedRoleCount(roleId) }}</div>
             </div>
           </div>
-          
-          <p class="role-description">
-            {{ role.description }}
-          </p>
-          
-          <div class="role-footer">
-            <div v-if="role.hasNightAction" class="role-badge night">
-              Ночное действие
-            </div>
-            <div v-if="!role.implemented" class="role-badge disabled">
-              В разработке
-            </div>
-            <div class="role-count">
-              {{ getRoleCount(roleId) }}
+        </div>
+        
+        <div class="role-balance">
+          <div class="balance-info">
+            <span class="balance-item">Деревня: {{ roleBalance.village }}</span>
+            <span class="balance-item">Оборотни: {{ roleBalance.werewolf }}</span>
+            <span class="balance-item">Особые: {{ roleBalance.special + roleBalance.tanner }}</span>
+          </div>
+          <div v-if="roleBalance.warnings.length > 0" class="balance-warnings">
+            <div v-for="warning in roleBalance.warnings" :key="warning" class="warning">
+              ⚠️ {{ warning }}
             </div>
           </div>
         </div>
       </div>
-    </div>
 
-    <!-- Выбранные роли -->
-    <div v-if="selectedRoles.length > 0" class="selected-roles">
-      <h3 class="section-title">Роли в игре</h3>
-      
-      <div class="selected-list">
-        <div 
-          v-for="roleId in selectedRoles" 
-          :key="roleId"
-          class="selected-role"
-          @click="removeRole(roleId)"
+      <!-- Центральные карты -->
+      <div v-if="gameState.room.centerCards > 0" class="center-section">
+        <h3>Центральные карты ({{ gameState.room.centerCards }})</h3>
+        <div class="center-cards">
+          <div 
+            v-for="n in gameState.room.centerCards" 
+            :key="n"
+            class="center-card"
+          >
+            <img src="/roles/card-back.png" alt="Центральная карта" />
+          </div>
+        </div>
+      </div>
+
+      <!-- Кнопка старта -->
+      <div class="start-section">
+        <button 
+          v-if="gameState.player.isHost"
+          @click="startGame"
+          :disabled="!canStartGame"
+          class="start-button"
+          :class="{ 'can-start': canStartGame }"
         >
-          <span class="selected-name">{{ availableRoles[roleId]?.name || 'Неизвестная роль' }}</span>
-          <span class="remove-btn">×</span>
+          {{ canStartGame ? 'Начать игру' : 'Настройте роли' }}
+        </button>
+        <div v-else class="waiting-message">
+          Ждем хоста для начала игры...
         </div>
       </div>
     </div>
-
-    <!-- Кнопка запуска -->
-    <div class="start-section">
-      <div v-if="!canStart" class="start-warning">
-        <div v-if="playerCount < 3" class="warning-item">
-          Нужно минимум 3 игрока
-        </div>
-        <div v-if="selectedRoles.length < playerCount + 3" class="warning-item">
-          Выберите {{ playerCount + 3 - selectedRoles.length }} дополнительных ролей
-        </div>
-        <div v-if="!hasBalancedTeams" class="warning-item">
-          Рекомендуется добавить оборотней для баланса
-        </div>
-      </div>
-      
-      <button 
-        @click="$emit('start-game')"
-        :disabled="!canStart"
-        class="start-btn"
-        :class="{ 'ready': canStart }"
-      >
-        {{ canStart ? 'Начать игру' : 'Настройте роли' }}
-      </button>
-    </div>
-
   </div>
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed } from 'vue'
 import { useGame } from '~/composables/useGame'
-import { getImplementedRoles, getTeamNames } from '../../shared/rolesRegistry.js'
+import { getAllRoles } from '../../shared/rolesRegistry.js'
 
-const emit = defineEmits(['start-game'])
+const { gameState, canStartGame, selectRole, startGame } = useGame()
 
-const { gameState, selectRole, removeRole } = useGame()
+// Доступные роли
+const availableRoles = computed(() => getAllRoles())
 
-// Роли загружаются из централизованного реестра
-const availableRoles = ref({})
-
-// Computed
-const selectedRoles = computed(() => gameState.room.selectedRoles)
-const playerCount = computed(() => 
-  gameState.room.players.filter(p => p.role !== 'game_master').length
-)
-
-const canStart = computed(() => {
-  return gameState.player.isHost && 
-         playerCount.value >= 3 && 
-         selectedRoles.value.length >= playerCount.value + 3
+// Подсчет игроков (исключая game_master)
+const playerCount = computed(() => {
+  return gameState.room.players.filter(p => p.role !== 'game_master').length
 })
 
-const hasBalancedTeams = computed(() => {
-  const werewolfCount = selectedRoles.value.filter(roleId => {
-    const role = availableRoles.value[roleId]
-    return role && role.team === 'werewolf'
-  }).length
+// Подсчет выбранных ролей
+const selectedRoleCount = (roleId) => {
+  return gameState.room.selectedRoles.filter(id => id === roleId).length
+}
+
+// Баланс ролей
+const roleBalance = computed(() => {
+  const roles = availableRoles.value
+  const selected = gameState.room.selectedRoles
   
-  return werewolfCount >= Math.max(1, Math.floor(selectedRoles.value.length / 4))
+  const counts = { village: 0, werewolf: 0, tanner: 0, special: 0 }
+  const warnings = []
+  
+  selected.forEach(roleId => {
+    const role = roles[roleId]
+    if (role) counts[role.team]++
+  })
+  
+  const total = selected.length
+  const players = playerCount.value
+  
+  if (total < players) warnings.push('Недостаточно ролей')
+  if (counts.werewolf === 0) warnings.push('Добавьте оборотней')
+  if (counts.werewolf > total / 2) warnings.push('Слишком много оборотней')
+  if (counts.village === 0 && counts.special === 0) warnings.push('Добавьте роли деревни')
+  
+  return { ...counts, warnings }
 })
 
-// Методы
-const isRoleSelected = (roleId) => {
-  return selectedRoles.value.includes(roleId)
-}
-
-const getRoleCount = (roleId) => {
-  return selectedRoles.value.filter(id => id === roleId).length
-}
-
-const getTeamName = (team) => {
-  const teamNames = getTeamNames()
-  return teamNames[team] || team
-}
-
+// Добавление/удаление ролей
 const toggleRole = (roleId) => {
   if (!gameState.player.isHost) return
   
   const role = availableRoles.value[roleId]
-  if (!role || !role.implemented) return
+  if (!role.implemented) return
   
-  if (isRoleSelected(roleId)) {
-    removeRole(roleId)
+  const currentCount = selectedRoleCount(roleId)
+  const maxCount = roleId.includes('werewolf') ? 3 : 1
+  
+  if (currentCount === 0) {
+    selectRole(roleId, 'add')
+  } else if (currentCount < maxCount) {
+    selectRole(roleId, 'add')
   } else {
-    selectRole(roleId)
+    selectRole(roleId, 'remove')
   }
 }
-
-// Загрузка ролей из централизованного реестра
-const loadAvailableRoles = () => {
-  availableRoles.value = getImplementedRoles()
-}
-
-onMounted(() => {
-  loadAvailableRoles()
-})
 </script>
-
-<style scoped>
-.game-setup {
-  max-width: 1000px;
-  margin: 0 auto;
-  padding: 20px;
-}
-
-/* Заголовок */
-.setup-header {
-  text-align: center;
-  margin-bottom: 32px;
-}
-
-.setup-title {
-  font-size: 2rem;
-  font-weight: 600;
-  margin: 0 0 8px 0;
-  color: #fff;
-}
-
-.setup-subtitle {
-  color: #ccc;
-  margin: 0;
-  font-size: 1.1rem;
-}
-
-/* Статистика */
-.roles-stats {
-  display: flex;
-  justify-content: center;
-  gap: 32px;
-  margin-bottom: 32px;
-  padding: 20px;
-  background: rgba(255, 255, 255, 0.05);
-  border-radius: 12px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-}
-
-.stat-item {
-  text-align: center;
-}
-
-.stat-label {
-  display: block;
-  color: #aaa;
-  font-size: 0.9rem;
-  margin-bottom: 4px;
-}
-
-.stat-value {
-  display: block;
-  color: #fff;
-  font-size: 1.5rem;
-  font-weight: 600;
-}
-
-/* Секции */
-.section-title {
-  font-size: 1.3rem;
-  font-weight: 600;
-  margin: 0 0 20px 0;
-  color: #fff;
-}
-
-.roles-section {
-  margin-bottom: 32px;
-}
-
-/* Сетка ролей */
-.roles-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-  gap: 16px;
-}
-
-.role-card {
-  background: rgba(255, 255, 255, 0.05);
-  border: 2px solid rgba(255, 255, 255, 0.1);
-  border-radius: 12px;
-  padding: 20px;
-  cursor: pointer;
-  transition: all 0.3s ease;
-  position: relative;
-}
-
-</style>

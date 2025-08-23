@@ -1,17 +1,9 @@
 /**
  * Основной composable для игровой логики
- * Простая реализация без over-engineering
  */
 
-import { ref, computed, reactive } from 'vue'
+import { ref, computed, reactive, onMounted, onUnmounted } from 'vue'
 import { useSocket } from './useSocket.js'
-
-// Простая заглушка для звуков
-const useSound = () => ({
-  playSound: (soundName) => {
-    console.log(`🔊 Playing sound: ${soundName}`)
-  }
-})
 
 // Глобальное состояние игры (singleton)
 const gameState = reactive({
@@ -19,15 +11,18 @@ const gameState = reactive({
   room: {
     id: null,
     isHost: false,
+    phase: 'setup',
     players: [],
     selectedRoles: [],
-    phase: 'setup',
+    centerCards: 0,
     chatPermissions: {
       canChat: true,
       canSeeAll: true,
       canWhisper: true,
       werewolfChat: false
-    }
+    },
+    votingActive: false,
+    gameResult: null
   },
   
   // Текущий игрок
@@ -36,16 +31,24 @@ const gameState = reactive({
     name: null,
     role: null,
     alive: true,
-    isHost: false
+    isHost: false,
+    isMe: true
   },
   
   // Чат
   chat: [],
   
+  // Ночные действия
+  nightAction: {
+    active: false,
+    role: null,
+    timeLimit: 0,
+    data: null
+  },
+  
   // Голосование
   voting: {
-    active: false,
-    votes: {},
+    myVote: null,
     canVote: false
   },
   
@@ -53,29 +56,26 @@ const gameState = reactive({
   timer: {
     active: false,
     duration: 0,
-    remaining: 0
+    remaining: 0,
+    interval: null
   },
   
   // Подключение
   connected: false,
-  reconnecting: false
+  error: null
 })
 
 export const useGame = () => {
-  const { socket, isConnected, emit, on } = useSocket()
-  const { playSound } = useSound()
-  
-  // Refs
+  const { socket, isConnected, emit, on, off } = useSocket()
   const loading = ref(false)
-  const error = ref(null)
   
   // Computed properties
   const currentPlayer = computed(() => {
-    return gameState.room.players.find(p => p.id === gameState.player.id) || gameState.player
+    return gameState.room.players.find(p => p.isMe) || gameState.player
   })
   
   const otherPlayers = computed(() => {
-    return gameState.room.players.filter(p => p.id !== gameState.player.id)
+    return gameState.room.players.filter(p => !p.isMe)
   })
   
   const alivePlayers = computed(() => {
@@ -83,403 +83,256 @@ export const useGame = () => {
   })
   
   const canStartGame = computed(() => {
-    const playerCount = gameState.room.players.filter(p => !p.isHost).length
+    const playerCount = gameState.room.players.filter(p => p.role !== 'game_master').length
     const roleCount = gameState.room.selectedRoles.length
-    
-    return gameState.player.isHost && 
-           playerCount >= 3 && 
-           roleCount >= playerCount + 3 &&
-           gameState.room.phase === 'setup'
+    return playerCount >= 3 && roleCount >= playerCount && gameState.player.isHost
   })
   
   const canChat = computed(() => {
-    return gameState.room.chatPermissions.canChat && currentPlayer.value.alive
+    if (gameState.room.phase === 'setup') return true
+    if (gameState.room.phase === 'voting') return false
+    if (gameState.room.phase === 'night' && !gameState.room.chatPermissions.werewolfChat) return false
+    return gameState.room.chatPermissions.canChat
   })
   
-  const canVote = computed(() => {
-    return gameState.voting.active && 
-           currentPlayer.value.alive && 
-           gameState.room.phase === 'voting'
+  const isWerewolf = computed(() => {
+    const role = currentPlayer.value.role
+    return role && (role.includes('werewolf') || role === 'mystic_wolf') && role !== 'minion'
   })
   
-  // Инициализация слушателей сокета
-  const initSocketListeners = () => {
-    console.log('🔌 Initializing game socket listeners')
-    
-    // Успешное создание комнаты
-    on('room-created', (data) => {
-      console.log('🏠 Room created:', data)
-      console.log('🏠 Created player data:', data.player)
-      
-      gameState.room = {
-        ...gameState.room,
-        ...data.room,
-        isHost: true
-      }
-      
-      gameState.player = {
-        ...gameState.player,
-        ...data.player,
-        isHost: true
-      }
-      
-      console.log('🏠 My player after creation:', gameState.player)
-      
-      playSound('notification')
-    })
-    
-    // Успешное присоединение к комнате
-    on('join-success', (data) => {
-      console.log('✅ Joined room:', data)
-      
-      gameState.room = {
-        ...gameState.room,
-        ...data.room
-      }
-      
-      gameState.player = {
-        ...gameState.player,
-        ...data.player
-      }
-      
-      playSound('notification')
-    })
-    
-    // Обновление игры
-    on('game-updated', (data) => {
-      console.log('🔄 Game updated:', data)
-      console.log('🔄 My player in updated data:', data.room?.players?.find(p => p.id === gameState.player.id))
-      
-      if (data.room) {
-        gameState.room = {
-          ...gameState.room,
-          ...data.room
-        }
-        
-        // Синхронизируем голоса из room.votes в voting.votes
-        if (data.room.votes) {
-          gameState.voting.votes = data.room.votes
-        }
-        
-        // Синхронизируем статус голосования
-        if (data.room.hasOwnProperty('votingActive')) {
-          gameState.voting.active = data.room.votingActive
-        }
-        
-        console.log('🔄 My player after update:', gameState.room.players.find(p => p.id === gameState.player.id))
-      }
-    })
-    
-    // Смена фазы
-    on('phase-changed', (data) => {
-      console.log('📅 Phase changed:', data)
-      
-      gameState.room.phase = data.phase
-      
-      if (data.duration) {
-        startTimer(data.duration)
-      }
-      
-      // Звуки для разных фаз
-      switch (data.phase) {
-        case 'introduction':
-          playSound('game-start')
-          break
-        case 'night':
-          playSound('night')
-          break
-        case 'day':
-          playSound('day')
-          break
-        case 'voting':
-          playSound('voting')
-          gameState.voting.active = true
-          break
-        case 'ended':
-          playSound('game-end')
-          break
-      }
-    })
-    
-    // Новое сообщение
-    on('new-message', (message) => {
-      console.log('💬 New message:', message)
-      
-      gameState.chat.push(message)
-      
-      // Ограничиваем количество сообщений
-      if (gameState.chat.length > 500) {
-        gameState.chat = gameState.chat.slice(-250)
-      }
-      
-      // Звук только для сообщений других игроков
-      if (message.playerId !== gameState.player.id) {
-        playSound(message.type === 'whisper' ? 'whisper' : 'message')
-      }
-    })
-    
-    // Шепот
-    on('new-whisper', (whisper) => {
-      console.log('🤫 New whisper:', whisper)
-      
-      gameState.chat.push(whisper)
-      playSound('whisper')
-    })
-    
-    // Завершение голосования
-    on('voting-ended', (data) => {
-      console.log('🗳️ Voting ended:', data)
-      
-      gameState.voting.active = false
-      
-      // Показываем результаты голосования
-      if (data.results && data.results.eliminated) {
-        // TODO: Показать модал с результатами голосования
-        console.log('Eliminated player:', data.results.eliminated)
-      }
-    })
-    
-    // Завершение игры
-    on('game-ended', (data) => {
-      console.log('🏁 Game ended:', data)
-      
-      gameState.room.phase = 'ended'
-      playSound('game-end')
-      
-      // Показываем результаты
-      // TODO: Реализовать модал с результатами
-    })
-    
-    // Обновление таймера
-    on('timer-updated', (data) => {
-      gameState.timer.remaining = data.remaining
-    })
-    
-    // Ошибки
-    on('error', (errorData) => {
-      console.error('❌ Socket error:', errorData)
-      error.value = errorData.message
-      
-      // Очищаем ошибку через 5 секунд
-      setTimeout(() => {
-        error.value = null
-      }, 5000)
-    })
-    
-    // Отключение от сервера
-    on('disconnect', () => {
-      console.warn('🔌 Disconnected from server')
-      gameState.connected = false
-      gameState.reconnecting = true
-    })
-    
-    // Переподключение
-    on('connect', () => {
-      console.log('🔌 Reconnected to server')
-      gameState.connected = true
-      gameState.reconnecting = false
-    })
-  }
-  
-  // Создание комнаты
+  // Методы для работы с сокетами
   const createRoom = (username, isPrivate = false, hostAsObserver = false) => {
-    console.log('функция выполняется')
-    if (!isConnected.value) {
-      console.log('❌ Not connected to server')
-      return
-    }
-
-    console.log('🏠 Creating room...')
-    
     loading.value = true
-    error.value = null
-    
-    const success = emit('create-room', {
-      username,
-      isPrivate,
-      hostAsObserver
-    })
-    
-    if (!success) {
-      console.log('❌ Failed to emit create-room')
-      loading.value = false
-      return
-    }
-    
-    setTimeout(() => {
-      loading.value = false
-    }, 3000)
+    emit('create-room', { username, isPrivate, hostAsObserver })
   }
   
-  // Присоединение к комнате
   const joinRoom = (roomCode, username) => {
-    if (!isConnected.value) return
-    
     loading.value = true
-    error.value = null
-    
-    emit('join-room', {
-      roomCode,
-      username
-    })
-    
-    setTimeout(() => {
-      loading.value = false
-    }, 3000)
+    emit('join-room', { roomCode, username })
   }
   
-  // Выбор роли
-  const selectRole = (roleId) => {
-    if (!isConnected.value || !gameState.player.isHost) return
-    
-    emit('select-role', { roleId })
-  }
-  
-  // Удаление роли
-  const removeRole = (roleId) => {
-    if (!isConnected.value || !gameState.player.isHost) return
-    
-    emit('remove-role', { roleId })
-  }
-  
-  // Начало игры
   const startGame = () => {
-    if (!isConnected.value || !gameState.player.isHost) return
-    
     emit('start-game')
   }
   
-  // Отправка сообщения
-  const sendMessage = (content, type = 'player') => {
-    if (!isConnected.value || !content.trim()) return
-    
-    emit('send-message', {
-      content: content.trim(),
-      type
-    })
+  const selectRole = (roleId, action = 'add') => {
+    emit('select-role', { roleId, action })
   }
   
-  // Голосование
+  const sendMessage = (text) => {
+    if (!canChat.value && !text.startsWith('/')) {
+      return false
+    }
+    emit('send-message', { text })
+    return true
+  }
+  
+  const executeNightAction = (action) => {
+    emit('night-action', action)
+  }
+  
   const votePlayer = (targetId) => {
-    if (!isConnected.value) return
-    
     emit('vote-player', { targetId })
-    
-    // Обновляем локальное состояние
-    gameState.voting.votes[gameState.player.id] = targetId
+    gameState.voting.myVote = targetId
   }
   
-  // Принудительная смена фазы (только хост)
-  const forceNextPhase = () => {
-    if (!isConnected.value || !gameState.player.isHost) return
-    
-    emit('change-phase')
+  const adminAction = (action, targetId) => {
+    emit('admin-action', { action, targetId })
   }
   
-  // Админ действия ведущего
-  const adminAction = (action, targetId, targetName) => {
-    if (!isConnected.value || gameState.player.role !== 'game_master') return
-    
-    emit('admin-action', {
-      action,
-      targetId, 
-      targetName
-    })
+  const reportVoiceActivity = (isActive) => {
+    emit('voice-activity', { isActive })
   }
   
-  // Запуск таймера
+  // Методы таймера
   const startTimer = (duration) => {
+    if (gameState.timer.interval) {
+      clearInterval(gameState.timer.interval)
+    }
+    
     gameState.timer.active = true
     gameState.timer.duration = duration
     gameState.timer.remaining = duration
     
-    const interval = setInterval(() => {
+    gameState.timer.interval = setInterval(() => {
       gameState.timer.remaining--
       
       if (gameState.timer.remaining <= 0) {
-        clearInterval(interval)
+        clearInterval(gameState.timer.interval)
         gameState.timer.active = false
       }
     }, 1000)
+  }
+  
+  const stopTimer = () => {
+    if (gameState.timer.interval) {
+      clearInterval(gameState.timer.interval)
+    }
+    gameState.timer.active = false
+    gameState.timer.remaining = 0
   }
   
   // Форматирование времени
   const formatTime = (seconds) => {
     const mins = Math.floor(seconds / 60)
     const secs = seconds % 60
-    
-    if (mins > 0) {
-      return `${mins}:${secs.toString().padStart(2, '0')}`
-    }
-    
-    return `${secs}с`
+    return `${mins}:${secs.toString().padStart(2, '0')}`
   }
   
-  // Получение роли по ID (используем централизованный реестр)
-  const getRole = (roleId) => {
-    const roles = {
-      villager: { name: 'Житель', color: 'blue', team: 'village' },
-      werewolf: { name: 'Оборотень', color: 'red', team: 'werewolf' },
-      seer: { name: 'Провидец', color: 'blue', team: 'village' },
-      robber: { name: 'Грабитель', color: 'blue', team: 'village' },
-      troublemaker: { name: 'Смутьян', color: 'blue', team: 'village' },
-      drunk: { name: 'Пьяница', color: 'blue', team: 'village' },
-      mystic_wolf: { name: 'Мистический волк', color: 'red', team: 'werewolf' },
-      tanner: { name: 'Неудачник', color: 'brown', team: 'tanner' },
-      doppelganger: { name: 'Доппельгангер', color: 'purple', team: 'special' },
-      game_master: { name: 'Ведущий', color: 'gold', team: 'neutral' }
-    }
-    
-    return roles[roleId] || { name: 'Неизвестная роль', color: 'gray', team: 'unknown' }
-  }
-  
-  // Очистка состояния (при выходе из комнаты)
-  const resetGame = () => {
-    gameState.room = {
-      id: null,
-      isHost: false,
-      players: [],
-      selectedRoles: [],
-      phase: 'setup',
-      chatPermissions: {
-        canChat: true,
-        canSeeAll: true,
-        canWhisper: true,
-        werewolfChat: false
+  // Получение информации о фазе
+  const getPhaseInfo = () => {
+    const phases = {
+      setup: {
+        name: 'Настройка',
+        description: 'Выберите роли и начните игру',
+        color: 'yellow'
+      },
+      introduction: {
+        name: 'Знакомство',
+        description: 'Представьтесь и обсудите стратегии',
+        color: 'blue'
+      },
+      night: {
+        name: 'Ночь',
+        description: 'Роли выполняют свои действия',
+        color: 'purple'
+      },
+      day: {
+        name: 'День',
+        description: 'Обсудите подозрения и найдите оборотней',
+        color: 'orange'
+      },
+      voting: {
+        name: 'Голосование',
+        description: 'Выберите кого исключить',
+        color: 'red'
+      },
+      ended: {
+        name: 'Завершено',
+        description: 'Игра окончена',
+        color: 'green'
       }
     }
     
-    gameState.player = {
-      id: null,
-      name: null,
-      role: null,
-      alive: true,
-      isHost: false
-    }
-    
-    gameState.chat = []
-    gameState.voting = {
-      active: false,
-      votes: {},
-      canVote: false
-    }
-    
-    gameState.timer = {
-      active: false,
-      duration: 0,
-      remaining: 0
-    }
-    
-    error.value = null
-    loading.value = false
+    return phases[gameState.room.phase] || phases.setup
   }
   
-  // Возвращаем публичный API
+  // Обработчики событий сокета
+  const initSocketListeners = () => {
+    if (!socket.value) return
+    
+    // Подключение к комнате
+    on('room-created', (data) => {
+      loading.value = false
+      gameState.room = data.room
+      gameState.player = data.player
+      gameState.connected = true
+    })
+    
+    on('join-success', (data) => {
+      loading.value = false
+      gameState.room = data.room
+      gameState.player = data.player
+      gameState.connected = true
+    })
+    
+    // Обновления игры
+    on('game-updated', (data) => {
+      if (data.room) {
+        Object.assign(gameState.room, data.room)
+      }
+    })
+    
+    // Смена фазы
+    on('phase-changed', (data) => {
+      gameState.room.phase = data.phase
+      gameState.voting.myVote = null
+      
+      if (data.timer) {
+        startTimer(data.timer)
+      } else {
+        stopTimer()
+      }
+      
+      // Воспроизводим звук смены фазы
+      playPhaseSound(data.phase)
+    })
+    
+    // Ночные действия
+    on('night-action-turn', (data) => {
+      gameState.nightAction.active = true
+      gameState.nightAction.role = data.role
+      gameState.nightAction.timeLimit = data.timeLimit
+      gameState.nightAction.data = null
+      
+      if (data.timeLimit) {
+        startTimer(data.timeLimit)
+      }
+    })
+    
+    on('night-action-result', (data) => {
+      gameState.nightAction.data = data
+      
+      if (data.success) {
+        // Действие выполнено успешно
+        gameState.nightAction.active = false
+      }
+    })
+    
+    // Чат
+    on('new-message', (data) => {
+      gameState.chat.push(data.message)
+      playMessageSound(data.message.type)
+    })
+    
+    // Голосование
+    on('vote-confirmed', (data) => {
+      gameState.voting.myVote = data.targetId
+    })
+    
+    on('voting-ended', (data) => {
+      gameState.room.votingActive = false
+      // Результаты голосования уже в чате
+    })
+    
+    // Ошибки
+    on('error', (data) => {
+      loading.value = false
+      gameState.error = data.message
+      console.error('Game error:', data)
+    })
+  }
+  
+  // Звуковые эффекты (заглушки)
+  const playPhaseSound = (phase) => {
+    console.log(`🔊 Playing ${phase} sound`)
+  }
+  
+  const playMessageSound = (type) => {
+    if (type === 'whisper') {
+      console.log('🔊 Playing whisper sound')
+    } else {
+      console.log('🔊 Playing message sound')
+    }
+  }
+  
+  // Очистка при размонтировании
+  const cleanup = () => {
+    stopTimer()
+  }
+  
+  onMounted(() => {
+    gameState.connected = isConnected.value
+  })
+  
+  onUnmounted(() => {
+    cleanup()
+  })
+  
   return {
     // Состояние
     gameState,
     loading,
-    error,
     
     // Computed
     currentPlayer,
@@ -487,24 +340,23 @@ export const useGame = () => {
     alivePlayers,
     canStartGame,
     canChat,
-    canVote,
+    isWerewolf,
     
     // Методы
-    initSocketListeners,
     createRoom,
     joinRoom,
-    selectRole,
-    removeRole,
     startGame,
+    selectRole,
     sendMessage,
+    executeNightAction,
     votePlayer,
-    forceNextPhase,
     adminAction,
-    formatTime,
-    getRole,
-    resetGame,
+    reportVoiceActivity,
     
     // Утилиты
-    isConnected
+    formatTime,
+    getPhaseInfo,
+    initSocketListeners,
+    cleanup
   }
 }

@@ -1,134 +1,128 @@
 /**
- * Оборотень - злая роль с групповым убийством
+ * Роль: Оборотень
  */
 
 import { BaseRole } from '../BaseRole.js'
-import { ROLE_TEAMS } from '../../utils/constants.js'
 
 export class WerewolfRole extends BaseRole {
   constructor() {
     super('werewolf', {
       name: 'Оборотень',
-      description: 'Ночью узнает других оборотней и голосует за жертву. Побеждает если остается в живых.',
-      team: ROLE_TEAMS.WEREWOLF,
+      description: 'Ночью узнает других оборотней и голосует за жертву.',
+      team: 'werewolf',
       color: 'red',
       hasNightAction: true,
       nightOrder: 3,
       implemented: true,
       phaseHints: {
-        introduction: 'Притворяйтесь жителем и сеяте подозрения в других',
-        night: 'Голосуйте за жертву вместе с другими оборотнями',
-        day: 'Запутывайте следствие и выдвигайте ложные версии',
-        voting: 'Голосуйте за жителей, защищайте других оборотней'
+        night: 'Найдите других оборотней и выберите жертву',
+        day: 'Притворяйтесь жителем и сейте подозрения в других'
       }
     })
   }
   
-  /**
-   * Ночное действие оборотня - групповое голосование за жертву
-   */
-  async executeNightAction(game, player) {
-    const werewolves = this.getAllWerewolves(game)
+  async executeNightAction(gameEngine, player, action) {
+    const { type, targetId } = action
+    const room = gameEngine.room
     
-    // Если оборотень один - может убить кого угодно
-    if (werewolves.length === 1) {
-      return await this.soloWerewolfKill(game, player)
-    }
-    
-    // Если оборотней несколько - групповое голосование
-    return await this.groupWerewolfKill(game, werewolves)
-  }
-  
-  /**
-   * Убийство одиночного оборотня
-   */
-  async soloWerewolfKill(game, player) {
-    // Автоматически выбираем случайного жителя
-    const villagers = game.getAlivePlayers().filter(p => {
-      const role = game.room.getRole(p.role)
-      return role && role.team !== ROLE_TEAMS.WEREWOLF && p.id !== player.id
-    })
-    
-    if (villagers.length === 0) {
-      return null // Некого убивать
-    }
-    
-    const victim = this.getRandomPlayer(game, [player])
-    
-    if (!victim) return null
-    
-    this.logAction(player, 'solo kill', victim.name)
-    
-    return {
-      kills: [victim]
-    }
-  }
-  
-  /**
-   * Групповое убийство оборотней
-   */
-  async groupWerewolfKill(game, werewolves) {
-    // В упрощенной версии - случайный выбор
-    // В полной версии здесь будет система голосования
-    
-    const nonWerewolves = game.getAlivePlayers().filter(p => {
-      const role = game.room.getRole(p.role)
-      return role && role.team !== ROLE_TEAMS.WEREWOLF
-    })
-    
-    if (nonWerewolves.length === 0) {
-      return null // Некого убивать
-    }
-    
-    const victim = nonWerewolves[Math.floor(Math.random() * nonWerewolves.length)]
-    
-    console.log(`🐺 Werewolves chose to kill: ${victim.name}`)
-    
-    return {
-      kills: [victim]
-    }
-  }
-  
-  /**
-   * Получение всех оборотней в игре
-   */
-  getAllWerewolves(game) {
-    return game.getAlivePlayers().filter(p => {
-      const role = game.room.getRole(p.role)
-      return role && role.team === ROLE_TEAMS.WEREWOLF
-    })
-  }
-  
-  /**
-   * Проверка может ли оборотень убить цель
-   */
-  canKillTarget(game, werewolf, target) {
-    if (!target || !target.alive) return false
-    if (target.id === werewolf.id) return false
-    
-    const targetRole = game.room.getRole(target.role)
-    if (targetRole && targetRole.team === ROLE_TEAMS.WEREWOLF) return false
-    
-    return true
-  }
-  
-  /**
-   * Оборотни могут общаться между собой ночью
-   */
-  canChatWith(game, player, target) {
-    const targetRole = game.room.getRole(target.role)
-    return targetRole && targetRole.team === ROLE_TEAMS.WEREWOLF
-  }
-  
-  /**
-   * Получение доступных целей (все кроме оборотней)
-   */
-  getAvailableTargets(game, player) {
-    return game.getAlivePlayers().filter(p => {
-      if (p.id === player.id) return false
+    if (type === 'vote_kill') {
+      if (!targetId) {
+        return { error: 'Выберите цель для убийства' }
+      }
       
-      const role = game.room.getRole(p.role)
-      return role && role.team !== ROLE_TEAMS.WEREWOLF
-    })
+      const target = room.getPlayer(targetId)
+      if (!target || !target.alive || target.role === 'game_master') {
+        return { error: 'Недопустимая цель' }
+      }
+      
+      // Добавляем голос за убийство
+      if (!gameEngine.werewolfVotes) {
+        gameEngine.werewolfVotes = new Map()
+      }
+      
+      gameEngine.werewolfVotes.set(player.id, targetId)
+      
+      // Проверяем, проголосовали ли все оборотни
+      const werewolves = this.getAllWerewolves(room)
+      const votedCount = Array.from(gameEngine.werewolfVotes.keys())
+        .filter(playerId => werewolves.includes(playerId)).length
+      
+      if (votedCount >= werewolves.length) {
+        this.processWerewolfVotes(gameEngine)
+      }
+      
+      return {
+        success: true,
+        message: `Вы проголосовали за убийство ${target.name}`,
+        data: {
+          voted: true,
+          target: target.name,
+          votesNeeded: werewolves.length - votedCount
+        }
+      }
+    }
+    
+    // Показать других оборотней (автоматически при начале хода)
+    if (type === 'reveal_werewolves') {
+      const werewolves = this.getAllWerewolves(room)
+        .map(id => room.getPlayer(id))
+        .filter(p => p && p.id !== player.id)
+        .map(p => ({ id: p.id, name: p.name, role: p.role }))
+      
+      return {
+        success: true,
+        message: werewolves.length > 0 ? 'Вы нашли других оборотней' : 'Вы единственный оборотень',
+        data: { werewolves }
+      }
+    }
+    
+    return { error: 'Неизвестное действие' }
+  }
+  
+  getAllWerewolves(room) {
+    return Array.from(room.players.values())
+      .filter(p => p.alive && room.isWerewolf(p.role))
+      .map(p => p.id)
+  }
+  
+  processWerewolfVotes(gameEngine) {
+    const votes = gameEngine.werewolfVotes
+    if (!votes || votes.size === 0) return
+    
+    // Подсчитываем голоса
+    const voteCount = new Map()
+    for (const [, targetId] of votes) {
+      voteCount.set(targetId, (voteCount.get(targetId) || 0) + 1)
+    }
+    
+    // Находим цель с наибольшим количеством голосов
+    let maxVotes = 0
+    let target = null
+    
+    for (const [targetId, count] of voteCount) {
+      if (count > maxVotes) {
+        maxVotes = count
+        target = targetId
+      }
+    }
+    
+    if (target) {
+      gameEngine.killPlayer(target)
+    }
+    
+    // Очищаем голоса
+    gameEngine.werewolfVotes.clear()
+  }
+  
+  getAvailableTargets(gameEngine, player) {
+    // Оборотни могут убивать всех, кроме других оборотней
+    const room = gameEngine.room
+    return Array.from(room.players.values())
+      .filter(p => p.alive && p.id !== player.id && p.role !== 'game_master' && !room.isWerewolf(p.role))
+      .map(p => ({
+        id: p.id,
+        name: p.name,
+        role: room.shouldShowPlayerRole(p, player) ? p.role : null
+      }))
   }
 }
