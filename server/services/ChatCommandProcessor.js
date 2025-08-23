@@ -30,7 +30,12 @@ export class ChatCommandProcessor {
       'ш': ['whisper', 'w'],
       'помощь': ['help', 'h', '?'],
       'кто': ['who', 'список', 'list'],
-      'время': ['time', 'timer']
+      'время': ['time', 'timer'],
+      'убить': ['kill', 'slay'],
+      'воскресить': ['revive', 'resurrect'],
+      'щит': ['shield', 'protect'],
+      'снятьщит': ['unshield', 'unprotect'],
+      'выгнать': ['kick', 'ban']
     }
 
     for (const [cmd, aliases] of Object.entries(commands)) {
@@ -94,6 +99,16 @@ export class ChatCommandProcessor {
         return this.processWhoCommand(sender)
       case 'время':
         return this.processTimeCommand(sender)
+      case 'убить':
+        return this.processKillCommand(sender, parsed.args)
+      case 'воскресить':
+        return this.processReviveCommand(sender, parsed.args)
+      case 'щит':
+        return this.processShieldCommand(sender, parsed.args)
+      case 'снятьщит':
+        return this.processUnshieldCommand(sender, parsed.args)
+      case 'выгнать':
+        return this.processKickCommand(sender, parsed.args)
       default:
         return { error: 'Команда не реализована' }
     }
@@ -426,7 +441,17 @@ export class ChatCommandProcessor {
     helpText += '• **Днем:** групповые шепоты запрещены (только личные)\n'
     helpText += '• **Ночью:** ограничения по ролям\n'
     helpText += '• **При голосовании:** только шепот ведущему\n'
-    helpText += '• Ведущий видит все шепоты'
+    helpText += '• Ведущий видит все шепоты\n'
+    
+    // Показываем админ команды для ведущего
+    if (this.isGameMaster(sender)) {
+      helpText += '\n🎮 **Команды ведущего:**\n'
+      helpText += '• `/убить <игрок>` - убить игрока\n'
+      helpText += '• `/воскресить <игрок>` - воскресить игрока\n'
+      helpText += '• `/щит <игрок>` - поставить защиту\n'
+      helpText += '• `/снятьщит <игрок>` - снять защиту\n'
+      helpText += '• `/выгнать <игрок>` - исключить из игры\n'
+    }
 
     // Отправляем справку только отправителю
     const helpMessage = {
@@ -581,5 +606,185 @@ export class ChatCommandProcessor {
     }
 
     return targets
+  }
+
+  // Проверяет, является ли отправитель ведущим
+  isGameMaster(sender) {
+    return sender.role === 'game_master'
+  }
+
+  // Находит игрока по имени
+  findPlayerByName(name) {
+    const players = Array.from(this.room.players.values())
+    return players.find(p => 
+      p.name.toLowerCase() === name.toLowerCase() && 
+      p.role !== 'game_master'
+    )
+  }
+
+  // Команда убить игрока (только для ведущего)
+  processKillCommand(sender, args) {
+    if (!this.isGameMaster(sender)) {
+      return { error: 'Только ведущий может использовать эту команду' }
+    }
+
+    if (args.length === 0) {
+      return { error: 'Укажите имя игрока. Используйте: /убить <игрок>' }
+    }
+
+    const targetName = args.join(' ')
+    const target = this.findPlayerByName(targetName)
+
+    if (!target) {
+      return { error: `Игрок "${targetName}" не найден` }
+    }
+
+    if (!target.alive) {
+      return { error: `${target.name} уже мертв` }
+    }
+
+    // Убиваем игрока
+    this.room.killPlayer(target.id)
+    
+    // Отправляем системное сообщение
+    this.room.addSystemMessage(`💀 Ведущий убил игрока ${target.name}`)
+
+    return { 
+      success: true, 
+      message: `Игрок ${target.name} убит`,
+      broadcast: true 
+    }
+  }
+
+  // Команда воскресить игрока (только для ведущего)
+  processReviveCommand(sender, args) {
+    if (!this.isGameMaster(sender)) {
+      return { error: 'Только ведущий может использовать эту команду' }
+    }
+
+    if (args.length === 0) {
+      return { error: 'Укажите имя игрока. Используйте: /воскресить <игрок>' }
+    }
+
+    const targetName = args.join(' ')
+    const target = this.findPlayerByName(targetName)
+
+    if (!target) {
+      return { error: `Игрок "${targetName}" не найден` }
+    }
+
+    if (target.alive) {
+      return { error: `${target.name} уже жив` }
+    }
+
+    // Воскрешаем игрока
+    this.room.revivePlayer(target.id)
+    
+    // Отправляем системное сообщение
+    this.room.addSystemMessage(`✨ Ведущий воскресил игрока ${target.name}`)
+
+    return { 
+      success: true, 
+      message: `Игрок ${target.name} воскрешен`,
+      broadcast: true 
+    }
+  }
+
+  // Команда поставить щит (только для ведущего)
+  processShieldCommand(sender, args) {
+    if (!this.isGameMaster(sender)) {
+      return { error: 'Только ведущий может использовать эту команду' }
+    }
+
+    if (args.length === 0) {
+      return { error: 'Укажите имя игрока. Используйте: /щит <игрок>' }
+    }
+
+    const targetName = args.join(' ')
+    const target = this.findPlayerByName(targetName)
+
+    if (!target) {
+      return { error: `Игрок "${targetName}" не найден` }
+    }
+
+    if (target.protected) {
+      return { error: `${target.name} уже защищен` }
+    }
+
+    // Ставим щит
+    target.protected = true
+    
+    // Отправляем системное сообщение
+    this.room.addSystemMessage(`🛡️ Ведущий поставил щит игроку ${target.name}`)
+
+    return { 
+      success: true, 
+      message: `Игрок ${target.name} защищен`,
+      broadcast: true 
+    }
+  }
+
+  // Команда снять щит (только для ведущего)
+  processUnshieldCommand(sender, args) {
+    if (!this.isGameMaster(sender)) {
+      return { error: 'Только ведущий может использовать эту команду' }
+    }
+
+    if (args.length === 0) {
+      return { error: 'Укажите имя игрока. Используйте: /снятьщит <игрок>' }
+    }
+
+    const targetName = args.join(' ')
+    const target = this.findPlayerByName(targetName)
+
+    if (!target) {
+      return { error: `Игрок "${targetName}" не найден` }
+    }
+
+    if (!target.protected) {
+      return { error: `${target.name} не защищен` }
+    }
+
+    // Снимаем щит
+    target.protected = false
+    
+    // Отправляем системное сообщение
+    this.room.addSystemMessage(`❌ Ведущий снял щит с игрока ${target.name}`)
+
+    return { 
+      success: true, 
+      message: `Щит снят с игрока ${target.name}`,
+      broadcast: true 
+    }
+  }
+
+  // Команда выгнать игрока (только для ведущего)
+  processKickCommand(sender, args) {
+    if (!this.isGameMaster(sender)) {
+      return { error: 'Только ведущий может использовать эту команду' }
+    }
+
+    if (args.length === 0) {
+      return { error: 'Укажите имя игрока. Используйте: /выгнать <игрок>' }
+    }
+
+    const targetName = args.join(' ')
+    const target = this.findPlayerByName(targetName)
+
+    if (!target) {
+      return { error: `Игрок "${targetName}" не найден` }
+    }
+
+    // Отправляем системное сообщение
+    this.room.addSystemMessage(`🚪 Ведущий исключил игрока ${target.name} из игры`)
+
+    // Удаляем игрока из комнаты
+    this.room.removePlayer(target.id)
+
+    return { 
+      success: true, 
+      message: `Игрок ${target.name} исключен из игры`,
+      broadcast: true 
+    }
   }
 }

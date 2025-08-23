@@ -70,6 +70,20 @@
                 </label>
               </div>
               
+              <div class="form-group">
+                <label class="checkbox-label">
+                  <input 
+                    v-model="createForm.hostAsObserver"
+                    type="checkbox"
+                    class="form-checkbox"
+                  />
+                  <span class="checkbox-text">Ведущий-наблюдатель</span>
+                </label>
+                <small class="form-help">
+                  Вам не будет назначена роль, но вы сможете видеть все действия и управлять игрой
+                </small>
+              </div>
+              
               <button 
                 @click="handleCreateRoom"
                 :disabled="!canCreateRoom || loading"
@@ -247,6 +261,7 @@ const showSettingsModal = ref(false)
 const createForm = ref({
   username: '',
   isPrivate: false,
+  hostAsObserver: false,
   error: null
 })
 
@@ -283,7 +298,7 @@ const handleCreateRoom = async () => {
   createForm.value.error = null
   
   try {
-    createRoom(createForm.value.username, createForm.value.isPrivate)
+    createRoom(createForm.value.username, createForm.value.isPrivate, createForm.value.hostAsObserver)
   } catch (err) {
     createForm.value.error = err.message
   }
@@ -502,6 +517,13 @@ watch(() => [joinForm.value.username, joinForm.value.roomCode], () => {
   color: #ff6b6b;
   font-size: 0.9rem;
   margin-top: 4px;
+}
+
+.form-help {
+  color: #999;
+  font-size: 0.8rem;
+  margin-top: 4px;
+  line-height: 1.3;
 }
 
 /* Кнопки */

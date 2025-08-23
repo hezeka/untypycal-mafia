@@ -17,7 +17,7 @@ export const PHASE_DURATIONS = {
   [GAME_PHASES.INTRODUCTION]: 180, // 3 минуты
   [GAME_PHASES.NIGHT]: 30,         // 30 секунд на каждое действие
   [GAME_PHASES.DAY]: 300,          // 5 минут
-  [GAME_PHASES.VOTING]: null       // Без таймера, до завершения голосования
+  [GAME_PHASES.VOTING]: 120        // 2 минуты на голосование
 }
 
 // Команды ролей

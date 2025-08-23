@@ -262,7 +262,7 @@ export class RoleAbilities {
    * Получить доступные цели для действия
    */
   static getValidTargets(game, actorId, excludeSelf = true, onlyAlive = true) {
-    let players = game.room.players.filter(p => p.role !== 'game_master')
+    let players = Array.from(game.room.players.values()).filter(p => p.role !== 'game_master')
     
     if (excludeSelf) {
       players = players.filter(p => p.id !== actorId)

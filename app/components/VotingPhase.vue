@@ -14,16 +14,20 @@
       <div class="voting-stats">
         <div class="stat-item">
           <span class="stat-label">Проголосовали:</span>
-          <span class="stat-value">{{ votedCount }}/{{ alivePlayers.length }}</span>
+          <span class="stat-value">{{ votedCount }}/{{ aliveVotingPlayers.length }}</span>
         </div>
-        <div class="stat-item">
+        <div v-if="!isGameMaster" class="stat-item">
           <span class="stat-label">Ваш голос:</span>
           <span class="stat-value">{{ currentVoteText }}</span>
+        </div>
+        <div v-if="isGameMaster" class="stat-item">
+          <span class="stat-label">Статус:</span>
+          <span class="stat-value">Наблюдатель</span>
         </div>
       </div>
       
       <!-- Список игроков для голосования -->
-      <div class="voting-players">
+      <div v-if="!isGameMaster" class="voting-players">
         <h3>Выберите игрока для исключения:</h3>
         
         <div class="players-grid">
@@ -87,7 +91,7 @@
       </div>
       
       <!-- Результаты голосования (для ведущего) -->
-      <div v-if="isHost && votedCount > 0" class="voting-results">
+      <div v-if="isGameMaster && votedCount > 0" class="voting-results">
         <h3>Текущие результаты:</h3>
         <div class="results-list">
           <div 
@@ -112,7 +116,7 @@
           ></div>
         </div>
         <div class="progress-text">
-          {{ votedCount }} из {{ alivePlayers.length }} игроков проголосовали
+          {{ votedCount }} из {{ aliveVotingPlayers.length }} игроков проголосовали
         </div>
       </div>
       
@@ -130,11 +134,18 @@ const emit = defineEmits(['vote'])
 const { gameState, currentPlayer, votePlayer } = useGame()
 
 // Computed
-const alivePlayers = computed(() => 
+const alivePlayers = computed(() => {
+  console.log('🗳️ All players:', gameState.room.players.map(p => `${p.name}(${p.role}, alive:${p.alive})`))
+  const filtered = gameState.room.players.filter(p => p.alive && p.role !== 'game_master')
+  console.log('🗳️ VotingPhase alivePlayers:', filtered.map(p => `${p.name}(${p.role})`))
+  return filtered
+})
+
+const aliveVotingPlayers = computed(() => 
   gameState.room.players.filter(p => p.alive && p.role !== 'game_master')
 )
 
-const isHost = computed(() => currentPlayer.value?.isHost)
+const isGameMaster = computed(() => currentPlayer.value?.role === 'game_master')
 
 const currentVote = computed(() => {
   const playerId = currentPlayer.value?.id
@@ -150,26 +161,39 @@ const currentVoteText = computed(() => {
 })
 
 const votedCount = computed(() => {
-  return Object.keys(gameState.voting.votes).length
+  // Считаем только голоса игроков, которые могут голосовать
+  const validVoters = Object.keys(gameState.voting.votes).filter(voterId => {
+    const voter = gameState.room.players.find(p => p.id === voterId)
+    return voter && voter.alive && voter.role !== 'game_master'
+  })
+  return validVoters.length
 })
 
 const votingProgress = computed(() => {
-  return alivePlayers.value.length > 0 
-    ? Math.round((votedCount.value / alivePlayers.value.length) * 100)
+  return aliveVotingPlayers.value.length > 0 
+    ? Math.round((votedCount.value / aliveVotingPlayers.value.length) * 100)
     : 0
 })
 
 const abstainCount = computed(() => {
-  return Object.values(gameState.voting.votes).filter(vote => vote === null).length
+  // Считаем только воздержания от игроков, которые могут голосовать
+  const validAbstains = Object.entries(gameState.voting.votes).filter(([voterId, targetId]) => {
+    const voter = gameState.room.players.find(p => p.id === voterId)
+    return voter && voter.alive && voter.role !== 'game_master' && targetId === null
+  })
+  return validAbstains.length
 })
 
 const sortedVotes = computed(() => {
   const voteCounts = new Map()
   
-  // Подсчитываем голоса
-  Object.values(gameState.voting.votes).forEach(targetId => {
-    const count = voteCounts.get(targetId) || 0
-    voteCounts.set(targetId, count + 1)
+  // Подсчитываем только голоса от игроков, которые могут голосовать
+  Object.entries(gameState.voting.votes).forEach(([voterId, targetId]) => {
+    const voter = gameState.room.players.find(p => p.id === voterId)
+    if (voter && voter.alive && voter.role !== 'game_master') {
+      const count = voteCounts.get(targetId) || 0
+      voteCounts.set(targetId, count + 1)
+    }
   })
   
   // Сортируем по количеству голосов (убывание)
@@ -179,15 +203,29 @@ const sortedVotes = computed(() => {
 
 // Methods
 const voteForPlayer = (playerId) => {
+  // Ведущий не может голосовать
+  if (isGameMaster.value) return
+  
   // Нельзя голосовать за себя (кроме воздержания)
   if (playerId === currentPlayer.value?.id) return
+  
+  // Нельзя голосовать за ведущего
+  if (playerId) {
+    const targetPlayer = gameState.room.players.find(p => p.id === playerId)
+    if (targetPlayer?.role === 'game_master') return
+  }
   
   votePlayer(playerId)
   emit('vote', playerId)
 }
 
 const getPlayerVotes = (playerId) => {
-  return Object.values(gameState.voting.votes).filter(vote => vote === playerId).length
+  // Считаем только голоса от игроков, которые могут голосовать
+  const validVotes = Object.entries(gameState.voting.votes).filter(([voterId, targetId]) => {
+    const voter = gameState.room.players.find(p => p.id === voterId)
+    return voter && voter.alive && voter.role !== 'game_master' && targetId === playerId
+  })
+  return validVotes.length
 }
 
 const getPlayerName = (playerId) => {

@@ -109,6 +109,7 @@ export const useGame = () => {
     // Успешное создание комнаты
     on('room-created', (data) => {
       console.log('🏠 Room created:', data)
+      console.log('🏠 Created player data:', data.player)
       
       gameState.room = {
         ...gameState.room,
@@ -121,6 +122,8 @@ export const useGame = () => {
         ...data.player,
         isHost: true
       }
+      
+      console.log('🏠 My player after creation:', gameState.player)
       
       playSound('notification')
     })
@@ -145,12 +148,25 @@ export const useGame = () => {
     // Обновление игры
     on('game-updated', (data) => {
       console.log('🔄 Game updated:', data)
+      console.log('🔄 My player in updated data:', data.room?.players?.find(p => p.id === gameState.player.id))
       
       if (data.room) {
         gameState.room = {
           ...gameState.room,
           ...data.room
         }
+        
+        // Синхронизируем голоса из room.votes в voting.votes
+        if (data.room.votes) {
+          gameState.voting.votes = data.room.votes
+        }
+        
+        // Синхронизируем статус голосования
+        if (data.room.hasOwnProperty('votingActive')) {
+          gameState.voting.active = data.room.votingActive
+        }
+        
+        console.log('🔄 My player after update:', gameState.room.players.find(p => p.id === gameState.player.id))
       }
     })
     
@@ -210,6 +226,19 @@ export const useGame = () => {
       playSound('whisper')
     })
     
+    // Завершение голосования
+    on('voting-ended', (data) => {
+      console.log('🗳️ Voting ended:', data)
+      
+      gameState.voting.active = false
+      
+      // Показываем результаты голосования
+      if (data.results && data.results.eliminated) {
+        // TODO: Показать модал с результатами голосования
+        console.log('Eliminated player:', data.results.eliminated)
+      }
+    })
+    
     // Завершение игры
     on('game-ended', (data) => {
       console.log('🏁 Game ended:', data)
@@ -253,7 +282,7 @@ export const useGame = () => {
   }
   
   // Создание комнаты
-  const createRoom = (username, isPrivate = false) => {
+  const createRoom = (username, isPrivate = false, hostAsObserver = false) => {
     console.log('функция выполняется')
     if (!isConnected.value) {
       console.log('❌ Not connected to server')
@@ -267,7 +296,8 @@ export const useGame = () => {
     
     const success = emit('create-room', {
       username,
-      isPrivate
+      isPrivate,
+      hostAsObserver
     })
     
     if (!success) {
@@ -346,6 +376,17 @@ export const useGame = () => {
     emit('change-phase')
   }
   
+  // Админ действия ведущего
+  const adminAction = (action, targetId, targetName) => {
+    if (!isConnected.value || gameState.player.role !== 'game_master') return
+    
+    emit('admin-action', {
+      action,
+      targetId, 
+      targetName
+    })
+  }
+  
   // Запуск таймера
   const startTimer = (duration) => {
     gameState.timer.active = true
@@ -385,7 +426,8 @@ export const useGame = () => {
       drunk: { name: 'Пьяница', color: 'blue', team: 'village' },
       mystic_wolf: { name: 'Мистический волк', color: 'red', team: 'werewolf' },
       tanner: { name: 'Неудачник', color: 'brown', team: 'tanner' },
-      doppelganger: { name: 'Доппельгангер', color: 'purple', team: 'special' }
+      doppelganger: { name: 'Доппельгангер', color: 'purple', team: 'special' },
+      game_master: { name: 'Ведущий', color: 'gold', team: 'neutral' }
     }
     
     return roles[roleId] || { name: 'Неизвестная роль', color: 'gray', team: 'unknown' }
@@ -457,6 +499,7 @@ export const useGame = () => {
     sendMessage,
     votePlayer,
     forceNextPhase,
+    adminAction,
     formatTime,
     getRole,
     resetGame,

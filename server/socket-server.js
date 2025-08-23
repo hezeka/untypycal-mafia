@@ -101,7 +101,7 @@ const handleCreateRoom = (socket, data) => {
   if (!validateRequest(socket, 'create-room')) return
   
   try {
-    const { username, isPrivate = false } = data
+    const { username, isPrivate = false, hostAsObserver = false } = data
     
     // Валидация имени
     const usernameValidation = validateUsername(username)
@@ -110,7 +110,7 @@ const handleCreateRoom = (socket, data) => {
     }
     
     // Создаем комнату
-    const room = new GameRoom(socket.id, isPrivate)
+    const room = new GameRoom(socket.id, isPrivate, hostAsObserver)
     rooms.set(room.id, room)
     
     // Добавляем создателя как хоста
@@ -175,9 +175,9 @@ const handleJoinRoom = (socket, data) => {
       player
     })
     
-    // Уведомляем всех в комнате
+    // Уведомляем всех в комнате (данные будут персонализированы в broadcast)
     room.broadcast(SOCKET_EVENTS.GAME_UPDATED, {
-      room: room.getClientData()
+      room: {} // Заглушка, персонализированные данные будут добавлены в broadcast
     })
     
   } catch (error) {
@@ -210,7 +210,7 @@ const handleStartGame = (socket, data) => {
     
     // Уведомляем всех
     room.broadcast(SOCKET_EVENTS.GAME_UPDATED, {
-      room: room.getClientData()
+      room: {}
     })
     
   } catch (error) {
@@ -247,7 +247,7 @@ const handleSelectRole = (socket, data) => {
     
     // Уведомляем всех
     room.broadcast(SOCKET_EVENTS.GAME_UPDATED, {
-      room: room.getClientData()
+      room: {}
     })
     
   } catch (error) {
@@ -284,7 +284,7 @@ const handleRemoveRole = (socket, data) => {
     
     // Уведомляем всех
     room.broadcast(SOCKET_EVENTS.GAME_UPDATED, {
-      room: room.getClientData()
+      room: {}
     })
     
   } catch (error) {
@@ -357,13 +357,138 @@ const handleVotePlayer = (socket, data) => {
     // Голосуем
     room.votePlayer(socket.id, targetId)
     
-    // Уведомляем всех
+    // Проверяем, завершено ли голосование
+    if (room.isVotingComplete()) {
+      console.log(`🗳️ Voting completed in room ${room.id}`)
+      
+      // Завершаем голосование и получаем результаты
+      const results = room.endVoting()
+      
+      // Уведомляем всех о завершении голосования
+      room.broadcast(SOCKET_EVENTS.VOTING_ENDED, {
+        results
+      })
+      
+      // Переходим к следующей фазе
+      if (room.gameEngine) {
+        room.gameEngine.nextPhase()
+      }
+    }
+    
+    // Уведомляем всех об обновлении
     room.broadcast(SOCKET_EVENTS.GAME_UPDATED, {
-      room: room.getClientData()
+      room: {}
     })
     
   } catch (error) {
     logger.error('Vote player error:', error)
+    sendError(socket, ERROR_CODES.VALIDATION_ERROR, error.message)
+  }
+}
+
+/**
+ * Обработка админ действий ведущего
+ */
+const handleAdminAction = (socket, data) => {
+  if (!validateRequest(socket, 'admin-action')) return
+  
+  try {
+    const { action, targetId, targetName } = data
+    
+    // Находим комнату игрока
+    const roomId = playerRooms.get(socket.id)
+    if (!roomId) {
+      return sendError(socket, ERROR_CODES.PLAYER_NOT_IN_ROOM, 'Вы не находитесь в комнате')
+    }
+    
+    const room = rooms.get(roomId)
+    if (!room) {
+      return sendError(socket, ERROR_CODES.ROOM_NOT_FOUND, 'Комната не найдена')
+    }
+    
+    // Проверяем, что игрок - ведущий
+    const player = room.getPlayer(socket.id)
+    if (!player || player.role !== 'game_master') {
+      return sendError(socket, ERROR_CODES.NOT_HOST, 'Только ведущий может выполнять эти действия')
+    }
+    
+    // Находим целевого игрока
+    const targetPlayer = room.getPlayer(targetId)
+    if (!targetPlayer) {
+      return sendError(socket, ERROR_CODES.PLAYER_NOT_FOUND, 'Игрок не найден')
+    }
+    
+    if (targetPlayer.role === 'game_master') {
+      return sendError(socket, ERROR_CODES.VALIDATION_ERROR, 'Нельзя воздействовать на ведущего')
+    }
+    
+    let message = ''
+    
+    switch (action) {
+      case 'kill':
+        if (!targetPlayer.alive) {
+          return sendError(socket, ERROR_CODES.VALIDATION_ERROR, `${targetPlayer.name} уже мертв`)
+        }
+        room.killPlayer(targetId)
+        message = `💀 Ведущий убил игрока ${targetPlayer.name}`
+        break
+        
+      case 'revive':
+        if (targetPlayer.alive) {
+          return sendError(socket, ERROR_CODES.VALIDATION_ERROR, `${targetPlayer.name} уже жив`)
+        }
+        room.revivePlayer(targetId)
+        message = `✨ Ведущий воскресил игрока ${targetPlayer.name}`
+        break
+        
+      case 'shield':
+        if (targetPlayer.protected) {
+          return sendError(socket, ERROR_CODES.VALIDATION_ERROR, `${targetPlayer.name} уже защищен`)
+        }
+        targetPlayer.protected = true
+        message = `🛡️ Ведущий поставил щит игроку ${targetPlayer.name}`
+        break
+        
+      case 'unshield':
+        if (!targetPlayer.protected) {
+          return sendError(socket, ERROR_CODES.VALIDATION_ERROR, `${targetPlayer.name} не защищен`)
+        }
+        targetPlayer.protected = false
+        message = `❌ Ведущий снял щит с игрока ${targetPlayer.name}`
+        break
+        
+      case 'kick':
+        message = `🚪 Ведущий исключил игрока ${targetPlayer.name} из игры`
+        room.removePlayer(targetId)
+        break
+        
+      case 'change-role':
+        const { newRole } = data
+        if (!newRole) {
+          return sendError(socket, ERROR_CODES.VALIDATION_ERROR, 'Не указана новая роль')
+        }
+        room.assignRole(targetId, newRole)
+        message = `🔄 Ведущий сменил роль игрока ${targetPlayer.name} на ${newRole}`
+        break
+        
+      default:
+        return sendError(socket, ERROR_CODES.VALIDATION_ERROR, 'Неизвестное действие')
+    }
+    
+    // Отправляем системное сообщение
+    if (message) {
+      room.addSystemMessage(message)
+    }
+    
+    // Уведомляем всех о изменениях
+    room.broadcast(SOCKET_EVENTS.GAME_UPDATED, {
+      room: {}
+    })
+    
+    logger.info(`Admin action: ${player.name} ${action} ${targetPlayer.name} in room ${room.id}`)
+    
+  } catch (error) {
+    logger.error('Admin action error:', error)
     sendError(socket, ERROR_CODES.VALIDATION_ERROR, error.message)
   }
 }
@@ -459,6 +584,7 @@ io.on('connection', (socket) => {
   socket.on(SOCKET_EVENTS.SEND_MESSAGE, (data) => handleSendMessage(socket, data))
   socket.on(SOCKET_EVENTS.VOTE_PLAYER, (data) => handleVotePlayer(socket, data))
   socket.on(SOCKET_EVENTS.CHANGE_PHASE, (data) => handleChangePhase(socket, data))
+  socket.on(SOCKET_EVENTS.ADMIN_ACTION, (data) => handleAdminAction(socket, data))
   socket.on('disconnect', () => handleDisconnect(socket))
   
   // Отправляем подтверждение подключения

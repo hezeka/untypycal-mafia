@@ -6,7 +6,7 @@
 import { PhaseManager } from './PhaseManager.js'
 import { WinConditions } from './WinConditions.js'
 import { EventBus } from '../utils/EventBus.js'
-import { GAME_PHASES, PHASE_DURATIONS } from '../utils/constants.js'
+import { GAME_PHASES, PHASE_DURATIONS, SOCKET_EVENTS } from '../utils/constants.js'
 
 export class GameEngine {
   constructor(room) {
@@ -304,16 +304,55 @@ export class GameEngine {
   startPhaseTimer(duration) {
     this.state.timer = setTimeout(() => {
       console.log(`⏰ Phase timer expired for ${this.state.phase}`)
-      this.nextPhase()
+      
+      // Особая обработка для голосования
+      if (this.state.phase === GAME_PHASES.VOTING) {
+        this.handleVotingTimeout()
+      } else {
+        this.nextPhase()
+      }
     }, duration * 1000)
+  }
+
+  /**
+   * Обработка истечения времени голосования
+   */
+  handleVotingTimeout() {
+    console.log('🗳️ Voting timeout - adding abstain votes for non-voters')
+    
+    // Получаем всех игроков которые могут голосовать
+    const votingPlayers = Array.from(this.room.players.values())
+      .filter(p => p.alive && p.role !== 'game_master')
+    
+    // Добавляем воздержание для тех кто не проголосовал
+    votingPlayers.forEach(player => {
+      if (!this.room.votes.has(player.id)) {
+        console.log(`🗳️ Adding abstain vote for ${player.name}`)
+        this.room.votes.set(player.id, null)
+      }
+    })
+    
+    // Завершаем голосование
+    const results = this.room.endVoting()
+    
+    // Уведомляем всех о завершении голосования
+    this.room.broadcast(SOCKET_EVENTS.VOTING_ENDED, {
+      results
+    })
+    
+    // Переходим к следующей фазе
+    this.nextPhase()
   }
   
   /**
    * Раздача ролей игрокам
    */
   distributeRoles() {
-    const players = this.getAlivePlayers()
+    const players = this.getPlayersForRoleDistribution()
     const selectedRoles = [...this.room.selectedRoles]
+    
+    console.log(`🎭 Distributing roles to ${players.length} players:`, players.map(p => p.name))
+    console.log(`🎭 Available roles:`, selectedRoles)
     
     // Перемешиваем роли
     for (let i = selectedRoles.length - 1; i > 0; i--) {
@@ -321,9 +360,12 @@ export class GameEngine {
       [selectedRoles[i], selectedRoles[j]] = [selectedRoles[j], selectedRoles[i]]
     }
     
+    console.log(`🎭 Shuffled roles:`, selectedRoles)
+    
     // Раздаем роли игрокам
     for (let i = 0; i < players.length; i++) {
       if (selectedRoles[i]) {
+        console.log(`🎭 Assigning ${selectedRoles[i]} to ${players[i].name}`)
         this.room.assignRole(players[i].id, selectedRoles[i])
       }
     }
@@ -332,6 +374,10 @@ export class GameEngine {
     this.state.centerCards = selectedRoles.slice(players.length)
     
     console.log(`🎭 Roles distributed. Center cards: ${this.state.centerCards.join(', ')}`)
+    
+    // Логируем финальное состояние всех игроков
+    const allPlayers = Array.from(this.room.players.values())
+    console.log(`🎭 Final player roles:`, allPlayers.map(p => `${p.name}: ${p.role || 'null'}`))
   }
   
   /**
@@ -375,17 +421,28 @@ export class GameEngine {
   }
   
   /**
-   * Получение живых игроков
+   * Получение живых игроков (исключая ведущего)
    */
   getAlivePlayers() {
-    return this.room.players.filter(p => p.alive && p.role !== 'game_master')
+    return Array.from(this.room.players.values()).filter(p => p.alive && p.role !== 'game_master')
+  }
+  
+  /**
+   * Получение игроков для распределения ролей (без ролей, живые, не ведущий)
+   */
+  getPlayersForRoleDistribution() {
+    return Array.from(this.room.players.values()).filter(p => 
+      p.alive && 
+      (p.role === null || p.role === undefined) && 
+      p.role !== 'game_master'
+    )
   }
   
   /**
    * Получение статистики игры
    */
   getFinalStats() {
-    const players = this.room.players
+    const players = Array.from(this.room.players.values())
     
     return {
       totalPlayers: players.length,

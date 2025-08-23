@@ -8,10 +8,11 @@ import { generateRoomId, sanitizeHtml } from '../utils/gameHelpers.js'
 import { GAME_PHASES, MESSAGE_TYPES, LIMITS } from '../utils/constants.js'
 
 export class GameRoom {
-  constructor(hostId, isPrivate = false) {
+  constructor(hostId, isPrivate = false, hostAsObserver = false) {
     this.id = generateRoomId()
     this.hostId = hostId
     this.isPrivate = isPrivate
+    this.hostAsObserver = hostAsObserver
     this.createdAt = Date.now()
     
     // Игроки
@@ -58,22 +59,26 @@ export class GameRoom {
       throw new Error('Игрок с таким именем уже существует')
     }
     
+    const isHost = playerId === this.hostId
+    
+    const assignedRole = isHost && this.hostAsObserver ? 'game_master' : null
+    
     const player = {
       id: playerId,
       name: name,
-      role: null,
+      role: assignedRole,
       alive: true,
       protected: false,
       votes: 0,
       connected: true,
       muted: false,
-      isHost: playerId === this.hostId,
+      isHost: isHost,
       joinedAt: Date.now()
     }
     
     this.players.set(playerId, player)
     
-    console.log(`👤 Player ${name} joined room ${this.id}`)
+    console.log(`👤 Player ${name} joined room ${this.id}, role: ${assignedRole}, hostAsObserver: ${this.hostAsObserver}, isHost: ${isHost}`)
     
     return player
   }
@@ -194,8 +199,11 @@ export class GameRoom {
    * Начало игры
    */
   startGame() {
-    const playerCount = Array.from(this.players.values())
-      .filter(p => p.role !== 'game_master').length
+    // Считаем игроков без ролей (исключая ведущего, у которого уже есть game_master)
+    const playersNeedingRoles = Array.from(this.players.values())
+      .filter(p => p.alive && (p.role === null || p.role === undefined))
+    
+    const playerCount = playersNeedingRoles.length
     
     if (playerCount < LIMITS.MIN_PLAYERS_TO_START) {
       throw new Error(`Недостаточно игроков (минимум ${LIMITS.MIN_PLAYERS_TO_START})`)
@@ -320,17 +328,41 @@ export class GameRoom {
       throw new Error('Только живые игроки могут голосовать')
     }
     
+    // Ведущий не может голосовать
+    if (voter.role === 'game_master') {
+      throw new Error('Ведущий не может голосовать')
+    }
+    
     // null означает воздержание
     if (targetId !== null) {
       const target = this.getPlayer(targetId)
       if (!target) {
         throw new Error('Цель голосования не найдена')
       }
+      
+      // Нельзя голосовать против ведущего
+      if (target.role === 'game_master') {
+        throw new Error('Нельзя голосовать против ведущего')
+      }
     }
     
     this.votes.set(voterId, targetId)
     
     console.log(`🗳️ ${voter.name} voted for ${targetId || 'abstain'}`)
+  }
+
+  /**
+   * Проверяет, завершено ли голосование
+   */
+  isVotingComplete() {
+    if (!this.votingActive) return false
+    
+    // Получаем игроков, которые могут голосовать (живые, не ведущие)
+    const votingPlayers = Array.from(this.players.values())
+      .filter(p => p.alive && p.role !== 'game_master')
+    
+    // Проверяем, проголосовали ли все
+    return votingPlayers.length > 0 && this.votes.size >= votingPlayers.length
   }
   
   /**
@@ -398,7 +430,15 @@ export class GameRoom {
   broadcast(event, data) {
     for (const [playerId, socket] of this.sockets) {
       try {
-        socket.emit(event, data)
+        // Персонализируем данные для каждого игрока
+        let personalizedData = data
+        if (data && data.room && event === 'game-updated') {
+          personalizedData = {
+            ...data,
+            room: this.getClientData(playerId)
+          }
+        }
+        socket.emit(event, personalizedData)
       } catch (error) {
         console.error(`❌ Failed to send ${event} to ${playerId}:`, error)
       }
@@ -423,14 +463,17 @@ export class GameRoom {
    * Получение данных комнаты для клиента
    */
   getClientData(playerId = null) {
+    const isGameMaster = playerId && this.getPlayer(playerId)?.role === 'game_master'
+    
     return {
       id: this.id,
       isPrivate: this.isPrivate,
       hostId: this.hostId,
+      hostAsObserver: this.hostAsObserver,
       players: Array.from(this.players.values()).map(p => ({
         id: p.id,
         name: p.name,
-        role: p.role,
+        role: isGameMaster ? p.role : (p.id === playerId ? p.role : null), // ведущий видит все роли, игроки только свою
         alive: p.alive,
         connected: p.connected,
         isHost: p.isHost,
@@ -441,7 +484,7 @@ export class GameRoom {
       chat: this.chat,
       chatPermissions: this.chatPermissions,
       votingActive: this.votingActive,
-      votes: Object.fromEntries(this.votes),
+      votes: Object.fromEntries(this.votes), // все видят все голоса для подсчета
       createdAt: this.createdAt
     }
   }

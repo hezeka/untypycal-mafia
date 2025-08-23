@@ -42,7 +42,7 @@ export class WinConditions {
    * Проверка победы Неудачника
    */
   checkTannerWin() {
-    const deadPlayers = this.game.room.players.filter(p => !p.alive && p.role !== 'game_master')
+    const deadPlayers = Array.from(this.game.room.players.values()).filter(p => !p.alive && p.role !== 'game_master')
     
     const deadTanner = deadPlayers.find(p => {
       const role = this.game.room.getRole(p.role)
@@ -54,7 +54,7 @@ export class WinConditions {
         type: 'tanner',
         message: `${deadTanner.name} (Неудачник) побеждает! Все остальные проигрывают.`,
         winners: [deadTanner],
-        losers: this.game.room.players.filter(p => p.id !== deadTanner.id)
+        losers: Array.from(this.game.room.players.values()).filter(p => p.id !== deadTanner.id)
       }
     }
     
@@ -127,7 +127,7 @@ export class WinConditions {
    * Получение всех оборотней в игре
    */
   getAllWerewolves() {
-    return this.game.room.players.filter(p => {
+    return Array.from(this.game.room.players.values()).filter(p => {
       if (p.role === 'game_master') return false
       const role = this.game.room.getRole(p.role)
       return role && role.team === 'werewolf'
@@ -138,7 +138,7 @@ export class WinConditions {
    * Получение всех жителей деревни
    */
   getAllVillagers() {
-    return this.game.room.players.filter(p => {
+    return Array.from(this.game.room.players.values()).filter(p => {
       if (p.role === 'game_master') return false
       const role = this.game.room.getRole(p.role)
       return role && ['village', 'special'].includes(role.team)
@@ -149,7 +149,7 @@ export class WinConditions {
    * Получение всех неудачников
    */
   getAllTanners() {
-    return this.game.room.players.filter(p => {
+    return Array.from(this.game.room.players.values()).filter(p => {
       if (p.role === 'game_master') return false
       const role = this.game.room.getRole(p.role)
       return role && role.team === 'tanner'
@@ -194,7 +194,7 @@ export class WinConditions {
   getDetailedWinInfo(winResult) {
     if (!winResult) return null
     
-    const allPlayers = this.game.room.players.filter(p => p.role !== 'game_master')
+    const allPlayers = Array.from(this.game.room.players.values()).filter(p => p.role !== 'game_master')
     
     return {
       ...winResult,
