@@ -6,7 +6,7 @@ import express from 'express'
 import { createServer } from 'http'
 import { Server } from 'socket.io'
 import { GameRoom } from './models/GameRoom.js'
-import { ChatCommandProcessor } from './services/ChatCommandProcessor.js'
+import { SimpleChatProcessor } from './services/SimpleChatProcessor.js'
 import { 
   validateUsername, 
   validateRoomCode, 
@@ -39,7 +39,7 @@ const logger = {
 const rooms = new Map()
 const playerRooms = new Map()
 const rateLimits = new Map()
-const chatProcessor = new ChatCommandProcessor()
+const chatProcessor = new SimpleChatProcessor()
 
 const PORT = process.env.SOCKET_PORT || 3001
 
@@ -215,7 +215,7 @@ const handleSelectRole = (socket, data) => {
   }
 }
 
-const handleSendMessage = (socket, data) => {
+const handleSendMessage = async (socket, data) => {
   if (!validateRequest(socket, 'send-message')) return
   
   try {
@@ -236,30 +236,28 @@ const handleSendMessage = (socket, data) => {
       return sendError(socket, ERROR_CODES.PLAYER_NOT_FOUND, 'Игрок не найден')
     }
     
-    // Проверяем права на отправку сообщений
+    // Обрабатываем команды чата
+    if (chatProcessor.isCommand(text)) {
+      const result = await chatProcessor.processCommand(socket.id, text, room)
+      
+      if (!result.success && result.error) {
+        return sendError(socket, ERROR_CODES.VALIDATION_ERROR, result.error)
+      }
+      
+      return // Команды не отображаются в общем чате
+    }
+    
+    // Проверяем права на отправку обычных сообщений
     if (!room.chatPermissions.canChat && room.gameState !== GAME_PHASES.SETUP) {
-      // Проверяем, может ли игрок писать в ночной чат оборотней
       if (room.gameState === GAME_PHASES.NIGHT && room.chatPermissions.werewolfChat) {
         if (!room.isWerewolf(player.role)) {
           return sendError(socket, ERROR_CODES.PERMISSION_DENIED, 'В ночную фазу могут писать только оборотни')
         }
       } else if (room.gameState === GAME_PHASES.VOTING) {
-        // В фазу голосования можно только шептать ведущему
-        return sendError(socket, ERROR_CODES.PERMISSION_DENIED, 'Во время голосования чат отключен')
+        return sendError(socket, ERROR_CODES.PERMISSION_DENIED, 'Во время голосования чат отключен. Используйте /ш ведущий для связи')
       } else {
         return sendError(socket, ERROR_CODES.PERMISSION_DENIED, 'Сейчас нельзя писать в чат')
       }
-    }
-    
-    // Обрабатываем команды чата
-    const result = chatProcessor.processMessage(text, socket.id, room)
-    
-    if (result.isCommand) {
-      if (!result.success) {
-        sendError(socket, ERROR_CODES.VALIDATION_ERROR, result.error)
-      }
-      // Команды не отображаются в чате
-      return
     }
     
     // Обычное сообщение

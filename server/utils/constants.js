@@ -1,5 +1,5 @@
 /**
- * Константы игры
+ * Игровые константы
  */
 
 // Фазы игры
@@ -15,7 +15,7 @@ export const GAME_PHASES = {
 // Длительность фаз в секундах
 export const PHASE_DURATIONS = {
   [GAME_PHASES.INTRODUCTION]: 180, // 3 минуты
-  [GAME_PHASES.NIGHT]: null,       // Зависит от действий
+  [GAME_PHASES.NIGHT]: null,       // Зависит от действий ролей
   [GAME_PHASES.DAY]: 300,          // 5 минут
   [GAME_PHASES.VOTING]: 120        // 2 минуты
 }
@@ -88,21 +88,6 @@ export const ERROR_CODES = {
   PLAYER_NOT_FOUND: 'PLAYER_NOT_FOUND',
   INVALID_ACTION: 'INVALID_ACTION',
   RATE_LIMITED: 'RATE_LIMITED'
-}
-
-// Команды чата
-export const CHAT_COMMANDS = {
-  WHISPER: ['/ш', '/w', '/whisper'],
-  WHISPER_GROUP: ['/wg'],
-  HELP: ['/help', '/помощь']
-}
-
-// Группы для шепота
-export const WHISPER_GROUPS = {
-  WEREWOLVES: ['оборотни', 'волки', 'wolves', 'werewolves'],
-  VILLAGE: ['деревня', 'жители', 'village', 'villagers'],
-  ALL: ['все', 'all'],
-  HOST: ['ведущий', 'host', 'gm']
 }
 
 // Команды ролей

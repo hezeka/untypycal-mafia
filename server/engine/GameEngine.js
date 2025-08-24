@@ -1,9 +1,5 @@
-/**
- * Центральный игровой движок
- */
-
 import { GAME_PHASES, PHASE_DURATIONS } from '../utils/constants.js'
-import { getNightRoles } from '../roles/rolesList.js'
+import { getNightRoles, executeRoleAction } from '../roles/rolesList.js'
 
 export class GameEngine {
   constructor(room) {
@@ -156,14 +152,14 @@ export class GameEngine {
       return
     }
 
-    const roleData = this.nightRoles[this.nightActionIndex]
-    const players = this.getPlayersWithRole(roleData.id)
+    const currentRole = this.nightRoles[this.nightActionIndex]
+    const players = this.getPlayersWithRole(currentRole.id)
     
     if (players.length > 0) {
       // Уведомляем игроков об их ходе
       players.forEach(player => {
         this.room.sendToPlayer(player.id, 'night-action-turn', {
-          role: roleData.id,
+          role: currentRole.id,
           timeLimit: 30
         })
       })
@@ -195,7 +191,7 @@ export class GameEngine {
     }
 
     try {
-      const result = await currentRole.instance.executeNightAction(this, player, action)
+      const result = await executeRoleAction(this, player, action)
       return result
     } catch (error) {
       return { error: error.message }
@@ -280,7 +276,8 @@ export class GameEngine {
   }
 
   getTeam(roleId) {
-    const roleInfo = this.room.getRoleInfo(roleId)
+    const { getRole } = require('../utils/gameHelpers.js')
+    const roleInfo = getRole(roleId)
     return roleInfo?.team || 'village'
   }
 

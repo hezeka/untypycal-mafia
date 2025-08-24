@@ -49,6 +49,7 @@ export class GameRoom {
       throw new Error('Комната переполнена')
     }
     
+    // Проверяем, есть ли отключенный игрок с таким именем
     const existingPlayer = Array.from(this.players.values())
       .find(p => p.name.toLowerCase() === name.toLowerCase())
     
@@ -56,8 +57,11 @@ export class GameRoom {
       throw new Error('Игрок с таким именем уже в игре')
     }
     
-    // Если игрок был отключен, восстанавливаем его слот
+    // Если есть отключенный игрок с таким именем - восстанавливаем его
     if (existingPlayer && !existingPlayer.connected) {
+      // Удаляем старую запись
+      this.players.delete(existingPlayer.id)
+      // Создаем новую с новым socketId
       existingPlayer.id = playerId
       existingPlayer.connected = true
       this.players.set(playerId, existingPlayer)
@@ -168,9 +172,14 @@ export class GameRoom {
   }
   
   broadcastMessage(message) {
+    // Отправляем сообщение только тем, кто может его видеть
     for (const [playerId, socket] of this.sockets) {
       if (this.canPlayerSeeMessage(playerId, message)) {
-        socket.emit('new-message', { message })
+        try {
+          socket.emit('new-message', { message })
+        } catch (error) {
+          console.error(`❌ Failed to send message to ${playerId}:`, error)
+        }
       }
     }
   }

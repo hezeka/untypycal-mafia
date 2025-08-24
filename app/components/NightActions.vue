@@ -1,77 +1,41 @@
 <template>
   <div class="night-actions">
     <div v-if="gameState.nightAction.active" class="night-panel">
-      <h3>Ваш ход: {{ getRoleName(gameState.nightAction.role) }}</h3>
-      <div class="action-hint">{{ getRoleHint() }}</div>
+      <h3>{{ getRoleName(gameState.nightAction.role) }}</h3>
+      <p>{{ getHint() }}</p>
       
       <div class="action-buttons">
-        <template v-if="gameState.nightAction.role === 'werewolf'">
-          <div class="werewolf-actions">
-            <h4>Выберите цель для убийства:</h4>
-            <button 
-              v-for="target in availableTargets"
-              :key="target.id"
-              @click="executeAction('vote_kill', target.id)"
-              class="target-btn"
-            >
-              {{ target.name }}
-            </button>
-          </div>
-        </template>
-        
-        <template v-else-if="gameState.nightAction.role === 'seer'">
-          <div class="seer-actions">
-            <button @click="actionType = 'player'" class="choice-btn">Посмотреть игрока</button>
-            <button @click="actionType = 'center'" class="choice-btn">Посмотреть центр</button>
-            
-            <div v-if="actionType === 'player'" class="target-selection">
-              <h4>Выберите игрока:</h4>
-              <button 
-                v-for="target in availableTargets"
-                :key="target.id"
-                @click="executeAction('look_player', target.id)"
-                class="target-btn"
-              >
-                {{ target.name }}
-              </button>
-            </div>
-            
-            <div v-if="actionType === 'center'" class="center-selection">
-              <h4>Выберите две карты:</h4>
-              <!-- TODO: Реализовать выбор центральных карт -->
-            </div>
-          </div>
-        </template>
-        
-        <!-- Добавить другие роли по аналогии -->
+        <button 
+          v-for="player in availableTargets"
+          :key="player.id"
+          @click="selectTarget(player.id)"
+          class="target-btn"
+        >
+          {{ player.name }}
+        </button>
         
         <button @click="skipAction" class="skip-btn">Пропустить</button>
       </div>
       
-      <div v-if="gameState.nightAction.data" class="action-result">
-        <div v-if="gameState.nightAction.data.success" class="result-success">
-          {{ gameState.nightAction.data.message }}
-        </div>
-        <div v-if="gameState.nightAction.data.error" class="result-error">
-          {{ gameState.nightAction.data.error }}
-        </div>
+      <div v-if="result" class="action-result">
+        <p :class="result.success ? 'success' : 'error'">{{ result.message }}</p>
       </div>
     </div>
     
     <div v-else class="waiting-night">
-      <div class="night-status">Ожидание других игроков...</div>
+      Ожидание ночных действий...
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useGame } from '~/composables/useGame'
-import { getAllRoles } from '../../shared/rolesRegistry.js'
+import { getAllRoles } from '../../../shared/rolesRegistry.js'
 
 const { gameState, executeNightAction } = useGame()
-const actionType = ref(null)
 const roles = getAllRoles()
+const result = ref(null)
 
 const availableTargets = computed(() => {
   return gameState.room.players.filter(p => 
@@ -80,13 +44,15 @@ const availableTargets = computed(() => {
 })
 
 const getRoleName = (roleId) => roles[roleId]?.name || roleId
-const getRoleHint = () => roles[gameState.nightAction.role]?.phaseHints?.night || ''
+const getHint = () => roles[gameState.nightAction.role]?.phaseHints?.night || ''
 
-const executeAction = (type, targetId) => {
-  executeNightAction({ type, targetId })
+const selectTarget = async (targetId) => {
+  const actionResult = await executeNightAction({ type: 'vote_kill', targetId })
+  result.value = actionResult
 }
 
-const skipAction = () => {
-  executeNightAction({ type: 'skip' })
+const skipAction = async () => {
+  const actionResult = await executeNightAction({ type: 'skip' })
+  result.value = actionResult
 }
 </script>

@@ -2,7 +2,6 @@ import { ref } from 'vue'
 
 const username = ref('')
 
-// Загружаем имя из localStorage при инициализации
 if (process.client) {
   username.value = localStorage.getItem('mafia_username') || ''
 }
@@ -15,16 +14,8 @@ export const useUser = () => {
     }
   }
   
-  const clearUsername = () => {
-    username.value = ''
-    if (process.client) {
-      localStorage.removeItem('mafia_username')
-    }
-  }
-  
   return {
-    username,
-    setUsername,
-    clearUsername
+    username: readonly(username),
+    setUsername
   }
 }

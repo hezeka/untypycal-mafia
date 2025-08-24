@@ -1,16 +1,16 @@
 /**
- * Основной composable для игровой логики
+ * app/composables/useGame.js - Исправленная игровая логика
  */
 
-import { ref, computed, reactive, onMounted, onUnmounted } from 'vue'
+import { ref, computed, reactive, onMounted, onUnmounted, watch } from 'vue'
 import { useSocket } from './useSocket.js'
+import { useRouter } from 'vue-router'
 
 // Глобальное состояние игры (singleton)
 const gameState = reactive({
   // Комната
   room: {
     id: null,
-    isHost: false,
     phase: 'setup',
     players: [],
     selectedRoles: [],
@@ -48,8 +48,7 @@ const gameState = reactive({
   
   // Голосование
   voting: {
-    myVote: null,
-    canVote: false
+    myVote: null
   },
   
   // Таймер
@@ -61,25 +60,17 @@ const gameState = reactive({
   },
   
   // Подключение
-  connected: false,
-  error: null
+  connected: false
 })
 
 export const useGame = () => {
-  const { socket, isConnected, emit, on, off } = useSocket()
+  const { socket, isConnected, emit, on } = useSocket()
+  const router = useRouter()
   const loading = ref(false)
   
   // Computed properties
   const currentPlayer = computed(() => {
     return gameState.room.players.find(p => p.isMe) || gameState.player
-  })
-  
-  const otherPlayers = computed(() => {
-    return gameState.room.players.filter(p => !p.isMe)
-  })
-  
-  const alivePlayers = computed(() => {
-    return gameState.room.players.filter(p => p.alive)
   })
   
   const canStartGame = computed(() => {
@@ -95,53 +86,98 @@ export const useGame = () => {
     return gameState.room.chatPermissions.canChat
   })
   
-  const isWerewolf = computed(() => {
-    const role = currentPlayer.value.role
-    return role && (role.includes('werewolf') || role === 'mystic_wolf') && role !== 'minion'
-  })
-  
   // Методы для работы с сокетами
   const createRoom = (username, isPrivate = false, hostAsObserver = false) => {
+    if (!isConnected.value) {
+      console.warn('⚠️ Socket not connected, waiting...')
+      // Ждем подключения и повторяем попытку
+      const checkConnection = setInterval(() => {
+        if (isConnected.value) {
+          clearInterval(checkConnection)
+          loading.value = true
+          emit('create-room', { username, isPrivate, hostAsObserver })
+        }
+      }, 100)
+      
+      // Таймаут на случай если подключение не произойдет
+      setTimeout(() => {
+        clearInterval(checkConnection)
+        if (!isConnected.value) {
+          console.error('❌ Failed to connect to server')
+          loading.value = false
+        }
+      }, 5000)
+      
+      return
+    }
+    
     loading.value = true
     emit('create-room', { username, isPrivate, hostAsObserver })
   }
   
   const joinRoom = (roomCode, username) => {
+    if (!isConnected.value) {
+      console.warn('⚠️ Socket not connected, waiting...')
+      // Ждем подключения и повторяем попытку
+      const checkConnection = setInterval(() => {
+        if (isConnected.value) {
+          clearInterval(checkConnection)
+          loading.value = true
+          emit('join-room', { roomCode, username })
+        }
+      }, 100)
+      
+      // Таймаут на случай если подключение не произойдет
+      setTimeout(() => {
+        clearInterval(checkConnection)
+        if (!isConnected.value) {
+          console.error('❌ Failed to connect to server')
+          loading.value = false
+        }
+      }, 5000)
+      
+      return
+    }
+    
     loading.value = true
     emit('join-room', { roomCode, username })
   }
   
+  // Безопасный emit с проверкой подключения
+  const safeEmit = (event, data) => {
+    if (!isConnected.value) {
+      console.warn(`⚠️ Cannot emit ${event} - not connected to server`)
+      return false
+    }
+    
+    return emit(event, data)
+  }
+  
   const startGame = () => {
-    emit('start-game')
+    safeEmit('start-game')
   }
   
   const selectRole = (roleId, action = 'add') => {
-    emit('select-role', { roleId, action })
+    safeEmit('select-role', { roleId, action })
   }
   
   const sendMessage = (text) => {
-    if (!canChat.value && !text.startsWith('/')) {
-      return false
-    }
-    emit('send-message', { text })
-    return true
+    if (!text.trim()) return false
+    return safeEmit('send-message', { text })
   }
   
   const executeNightAction = (action) => {
-    emit('night-action', action)
+    safeEmit('night-action', action)
   }
   
   const votePlayer = (targetId) => {
-    emit('vote-player', { targetId })
-    gameState.voting.myVote = targetId
+    if (safeEmit('vote-player', { targetId })) {
+      gameState.voting.myVote = targetId
+    }
   }
   
   const adminAction = (action, targetId) => {
-    emit('admin-action', { action, targetId })
-  }
-  
-  const reportVoiceActivity = (isActive) => {
-    emit('voice-activity', { isActive })
+    safeEmit('admin-action', { action, targetId })
   }
   
   // Методы таймера
@@ -184,33 +220,27 @@ export const useGame = () => {
     const phases = {
       setup: {
         name: 'Настройка',
-        description: 'Выберите роли и начните игру',
-        color: 'yellow'
+        description: 'Выберите роли и начните игру'
       },
       introduction: {
         name: 'Знакомство',
-        description: 'Представьтесь и обсудите стратегии',
-        color: 'blue'
+        description: 'Представьтесь и обсудите стратегии'
       },
       night: {
         name: 'Ночь',
-        description: 'Роли выполняют свои действия',
-        color: 'purple'
+        description: 'Роли выполняют свои действия'
       },
       day: {
         name: 'День',
-        description: 'Обсудите подозрения и найдите оборотней',
-        color: 'orange'
+        description: 'Обсудите подозрения и найдите оборотней'
       },
       voting: {
         name: 'Голосование',
-        description: 'Выберите кого исключить',
-        color: 'red'
+        description: 'Выберите кого исключить'
       },
       ended: {
         name: 'Завершено',
-        description: 'Игра окончена',
-        color: 'green'
+        description: 'Игра окончена'
       }
     }
     
@@ -219,21 +249,45 @@ export const useGame = () => {
   
   // Обработчики событий сокета
   const initSocketListeners = () => {
-    if (!socket.value) return
+    if (!socket.value) {
+      // Если сокет не инициализирован - инициализируем его
+      const { initSocket } = useSocket()
+      initSocket()
+      
+      // Ждем инициализации и повторяем попытку
+      setTimeout(() => {
+        if (socket.value) {
+          initSocketListeners()
+        }
+      }, 100)
+      return
+    }
+    
+    console.log('🔌 Initializing socket listeners...')
     
     // Подключение к комнате
     on('room-created', (data) => {
+      console.log('✅ Room created:', data.room.id)
       loading.value = false
-      gameState.room = data.room
-      gameState.player = data.player
+      Object.assign(gameState.room, data.room)
+      Object.assign(gameState.player, data.player)
       gameState.connected = true
+      
+      // Автоматический переход на игровую страницу
+      router.push(`/game/${data.room.id}`)
     })
     
     on('join-success', (data) => {
+      console.log('✅ Joined room:', data.room.id)
       loading.value = false
-      gameState.room = data.room
-      gameState.player = data.player
+      Object.assign(gameState.room, data.room)
+      Object.assign(gameState.player, data.player)
       gameState.connected = true
+      
+      // Автоматический переход на игровую страницу только если мы не на ней
+      if (route.name !== 'game-id') {
+        router.push(`/game/${data.room.id}`)
+      }
     })
     
     // Обновления игры
@@ -253,9 +307,6 @@ export const useGame = () => {
       } else {
         stopTimer()
       }
-      
-      // Воспроизводим звук смены фазы
-      playPhaseSound(data.phase)
     })
     
     // Ночные действия
@@ -274,7 +325,6 @@ export const useGame = () => {
       gameState.nightAction.data = data
       
       if (data.success) {
-        // Действие выполнено успешно
         gameState.nightAction.active = false
       }
     })
@@ -282,7 +332,6 @@ export const useGame = () => {
     // Чат
     on('new-message', (data) => {
       gameState.chat.push(data.message)
-      playMessageSound(data.message.type)
     })
     
     // Голосование
@@ -292,28 +341,19 @@ export const useGame = () => {
     
     on('voting-ended', (data) => {
       gameState.room.votingActive = false
-      // Результаты голосования уже в чате
     })
     
     // Ошибки
     on('error', (data) => {
+      console.error('🚨 Socket error:', data)
       loading.value = false
-      gameState.error = data.message
-      console.error('Game error:', data)
+      
+      // Если ошибка подключения к комнате - показываем пользователю
+      if (data.code === 'ROOM_NOT_FOUND') {
+        console.error('❌ Room not found, redirecting to home...')
+        router.push('/')
+      }
     })
-  }
-  
-  // Звуковые эффекты (заглушки)
-  const playPhaseSound = (phase) => {
-    console.log(`🔊 Playing ${phase} sound`)
-  }
-  
-  const playMessageSound = (type) => {
-    if (type === 'whisper') {
-      console.log('🔊 Playing whisper sound')
-    } else {
-      console.log('🔊 Playing message sound')
-    }
   }
   
   // Очистка при размонтировании
@@ -322,7 +362,18 @@ export const useGame = () => {
   }
   
   onMounted(() => {
+    // Синхронизируем состояние подключения
     gameState.connected = isConnected.value
+    
+    // Отслеживаем изменения подключения
+    watch(isConnected, (connected) => {
+      gameState.connected = connected
+      if (connected) {
+        console.log('🟢 Socket connected')
+      } else {
+        console.log('🔴 Socket disconnected')
+      }
+    })
   })
   
   onUnmounted(() => {
@@ -336,11 +387,8 @@ export const useGame = () => {
     
     // Computed
     currentPlayer,
-    otherPlayers,
-    alivePlayers,
     canStartGame,
     canChat,
-    isWerewolf,
     
     // Методы
     createRoom,
@@ -351,7 +399,6 @@ export const useGame = () => {
     executeNightAction,
     votePlayer,
     adminAction,
-    reportVoiceActivity,
     
     // Утилиты
     formatTime,

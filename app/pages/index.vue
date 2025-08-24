@@ -1,150 +1,184 @@
 <template>
   <div class="main-page">
     
-    <!-- Заголовок -->
+    <!-- Шапка: [Логотип "Нетипичка" | Навигация (Роли, Правила) | Панель пользователя] -->
     <header class="main-header">
       <div class="header-content">
-        <div class="logo">
-          <img src="/images/logo.png" alt="Нетипичка" />
-          <h1>НЕТИПИЧКА</h1>
+        
+        <!-- Логотип и название -->
+        <div class="logo-section">
+          <img src="/images/logo.png" alt="Нетипичка" class="logo-img" />
+          <h1 class="logo-text">НЕТИПИЧКА</h1>
         </div>
         
-        <nav class="nav-links">
-          <button @click="showRules = true" class="nav-btn">Правила</button>
-          <button @click="showRoles = true" class="nav-btn">Роли</button>
+        <!-- Навигация -->
+        <nav class="main-nav">
+          <button @click="showRoles = true" class="nav-button">Роли</button>
+          <button @click="showRules = true" class="nav-button">Правила</button>
         </nav>
         
+        <!-- Панель пользователя: Никнейм + кнопка смены -->
         <div class="user-panel">
-          <div class="username-display">
-            <span>{{ username || 'Гость' }}</span>
-            <button @click="showUsernameModal = true" class="change-btn">
+          <div class="user-info">
+            <span class="username">{{ username || 'Гость' }}</span>
+            <button @click="showUsernameModal = true" class="change-username-btn">
               {{ username ? 'Сменить' : 'Установить' }}
             </button>
           </div>
         </div>
+        
       </div>
     </header>
 
     <!-- Основной контент -->
     <main class="main-content">
       
-      <!-- Блоки создания и поиска комнат -->
-      <div class="room-actions">
+      <!-- Блок создания комнаты | Список публичных комнат + поиск по ID -->
+      <div class="content-layout">
         
-        <!-- Создание комнаты -->
-        <div class="action-card create-room">
-          <h2>Создать игру</h2>
-          <div class="create-form">
-            <div class="form-group">
-              <label>
-                <input 
-                  type="checkbox" 
-                  v-model="createOptions.isPrivate"
-                />
+        <!-- Левая часть - создание комнаты -->
+        <section class="create-room-section">
+          <div class="create-room-card">
+            <h2>Создать комнату</h2>
+            
+            <div class="room-options">
+              <label class="checkbox-label">
+                <input type="checkbox" v-model="createOptions.isPrivate" />
+                <span class="checkmark"></span>
                 Приватная комната
               </label>
-            </div>
-            <div class="form-group">
-              <label>
-                <input 
-                  type="checkbox" 
-                  v-model="createOptions.hostAsObserver"
-                />
+              
+              <label class="checkbox-label">
+                <input type="checkbox" v-model="createOptions.hostAsObserver" />
+                <span class="checkmark"></span>
                 Ведущий-наблюдатель
               </label>
             </div>
+            
             <button 
               @click="createRoom"
-              :disabled="!canCreateRoom"
-              class="create-btn"
+              :disabled="!canCreateRoom || loading"
+              class="create-room-btn"
             >
               {{ loading ? 'Создание...' : 'Создать комнату' }}
             </button>
           </div>
-        </div>
+        </section>
         
-        <!-- Присоединение к комнате -->
-        <div class="action-card join-room">
-          <h2>Присоединиться</h2>
-          <div class="join-form">
-            <div class="form-group">
+        <!-- Правая часть - поиск и список комнат -->
+        <section class="rooms-section">
+          
+          <!-- Поиск по ID комнаты -->
+          <div class="room-search">
+            <h3>Присоединиться к игре</h3>
+            <div class="search-input-group">
               <input 
                 v-model="joinRoomCode"
                 @keypress.enter="joinRoom"
                 type="text"
-                placeholder="Код комнаты"
+                placeholder="Введите код комнаты"
                 maxlength="6"
                 class="room-code-input"
               />
+              <button 
+                @click="joinRoom"
+                :disabled="!canJoinRoom || loading"
+                class="join-room-btn"
+              >
+                Войти
+              </button>
             </div>
-            <button 
-              @click="joinRoom"
-              :disabled="!canJoinRoom"
-              class="join-btn"
-            >
-              {{ loading ? 'Подключение...' : 'Войти' }}
+          </div>
+          
+          <!-- Список публичных комнат -->
+          <div class="public-rooms-list">
+            <h3>Публичные комнаты</h3>
+            
+            <div v-if="publicRooms.length === 0" class="no-rooms-message">
+              Сейчас нет активных публичных игр.<br>
+              Создайте свою комнату!
+            </div>
+            
+            <div v-else class="rooms-grid">
+              <div 
+                v-for="room in publicRooms" 
+                :key="room.id"
+                @click="quickJoinRoom(room.id)"
+                class="room-item"
+              >
+                <!-- Название комнаты | Фаза игры -->
+                <div class="room-header">
+                  <span class="room-name">{{ room.name || `Комната ${room.id}` }}</span>
+                  <span class="room-phase" :class="`phase-${room.phase}`">
+                    {{ getPhaseDisplayName(room.phase) }}
+                  </span>
+                </div>
+                
+                <!-- Ведущий: Имя ведущего -->
+                <div class="room-host">
+                  <span class="label">Ведущий:</span>
+                  <span class="value">{{ room.hostName }}</span>
+                </div>
+                
+                <!-- Количество живых игроков/Общее количество -->
+                <div class="room-players">
+                  <span class="label">Игроков:</span>
+                  <span class="value">{{ room.alivePlayers }}/{{ room.totalPlayers }}</span>
+                </div>
+                
+                <!-- Количество проведенных голосований -->
+                <div class="room-rounds">
+                  <span class="label">Раундов:</span>
+                  <span class="value">{{ room.votingRounds || 0 }}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          
+        </section>
+        
+      </div>
+      
+      <!-- Краткое представление игры и кнопка с правилами и ролями -->
+      <section class="game-info-section">
+        
+        <div class="info-block">
+          <h2>Что такое Нетипичная Мафия?</h2>
+          <p class="game-description">
+            Социально-дедукционная игра, основанная на One Night Ultimate Werewolf. 
+            Игроки получают тайные роли и пытаются найти оборотней среди жителей деревни.
+          </p>
+          
+          <div class="game-features">
+            <div class="feature">
+              <strong>3-10 игроков</strong><br>
+              Оптимальное количество
+            </div>
+            <div class="feature">
+              <strong>20-30 минут</strong><br>
+              Средняя длительность игры
+            </div>
+            <div class="feature">
+              <strong>27 уникальных ролей</strong><br>
+              С особыми способностями
+            </div>
+            <div class="feature">
+              <strong>Циклическая структура</strong><br>
+              Несколько раундов до победы
+            </div>
+          </div>
+          
+          <div class="info-actions">
+            <button @click="showRules = true" class="info-button">
+              Как играть?
+            </button>
+            <button @click="showRoles = true" class="info-button">
+              Список ролей
             </button>
           </div>
         </div>
         
-      </div>
-      
-      <!-- Список публичных комнат -->
-      <div class="public-rooms">
-        <h2>Публичные комнаты</h2>
-        <div v-if="publicRooms.length === 0" class="no-rooms">
-          Публичных комнат пока нет. Создайте первую!
-        </div>
-        <div v-else class="rooms-list">
-          <div 
-            v-for="room in publicRooms" 
-            :key="room.id"
-            class="room-card"
-            @click="joinRoomById(room.id)"
-          >
-            <div class="room-info">
-              <div class="room-name">Комната {{ room.id }}</div>
-              <div class="room-phase">{{ getPhaseDisplayName(room.phase) }}</div>
-              <div class="room-host">Ведущий: {{ room.hostName }}</div>
-              <div class="room-players">
-                Игроков: {{ room.alivePlayers }}/{{ room.totalPlayers }}
-              </div>
-              <div class="room-rounds">Раундов: {{ room.rounds }}</div>
-            </div>
-            <div class="room-status">
-              <span class="status-indicator" :class="`status-${room.phase}`"></span>
-            </div>
-          </div>
-        </div>
-      </div>
-      
-      <!-- Информация об игре -->
-      <div class="game-info">
-        <div class="info-card">
-          <h3>Что такое Нетипичная Мафия?</h3>
-          <p>
-            Социально-дедукционная игра, основанная на One Night Ultimate Werewolf. 
-            Игроки получают секретные роли и пытаются найти оборотней среди себя.
-          </p>
-          <ul>
-            <li><strong>3-10 игроков</strong> - оптимальное количество участников</li>
-            <li><strong>20-30 минут</strong> - средняя длительность игры</li>
-            <li><strong>27 уникальных ролей</strong> - с особыми способностями</li>
-            <li><strong>Циклическая структура</strong> - несколько раундов до победы</li>
-          </ul>
-        </div>
-        
-        <div class="info-card">
-          <h3>Как играть?</h3>
-          <ol>
-            <li><strong>Знакомство</strong> - представьтесь и обсудите стратегии</li>
-            <li><strong>Ночь</strong> - роли выполняют свои действия</li>
-            <li><strong>День</strong> - ищите подозрительное поведение</li>
-            <li><strong>Голосование</strong> - исключите подозреваемого</li>
-            <li><strong>Повтор</strong> - пока одна из команд не победит</li>
-          </ol>
-        </div>
-      </div>
+      </section>
       
     </main>
 
@@ -152,15 +186,15 @@
     <footer class="main-footer">
       <p>
         Проект некоммерческий, разработан в 2025 году. 
-        Основан на игре One Night Ultimate Werewolf.
+        Основан на настольной игре One Night Ultimate Werewolf.
       </p>
     </footer>
 
-    <!-- Модалы -->
+    <!-- Модальные окна -->
     <UsernameModal 
       v-if="showUsernameModal"
       :current-username="username"
-      @save="setUsername"
+      @save="handleUsernameSave"
       @close="showUsernameModal = false"
     />
     
@@ -174,8 +208,8 @@
       @close="showRoles = false"
     /> -->
     
-    <!-- Уведомления -->
-    <div v-if="error" class="error-notification" @click="error = null">
+    <!-- Уведомления об ошибках -->
+    <div v-if="error" @click="error = null" class="error-notification">
       {{ error }}
     </div>
 
@@ -183,37 +217,47 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useGame } from '~/composables/useGame'
 import { useUser } from '~/composables/useUser'
 
 const router = useRouter()
-const { createRoom: createGameRoom, joinRoom: joinGameRoom, loading, gameState } = useGame()
-const { username, setUsername: saveUsername } = useUser()
+const { 
+  createRoom: createGameRoom, 
+  joinRoom: joinGameRoom, 
+  loading, 
+  gameState,
+  initSocketListeners
+} = useGame()
+
+const { username, setUsername } = useUser()
 
 // Reactive state
 const createOptions = ref({
   isPrivate: false,
   hostAsObserver: false
 })
+
 const joinRoomCode = ref('')
-const publicRooms = ref([]) // TODO: Получать с сервера
+const publicRooms = ref([]) // TODO: Получать с сервера через API
 const error = ref(null)
+
+// Modal state
 const showUsernameModal = ref(false)
 const showRules = ref(false)
 const showRoles = ref(false)
 
-// Computed
+// Computed properties
 const canCreateRoom = computed(() => {
   return username.value && username.value.trim().length >= 2 && !loading.value
 })
 
 const canJoinRoom = computed(() => {
-  return username.value && joinRoomCode.value.length === 6 && !loading.value
+  return username.value && joinRoomCode.value.trim().length === 6 && !loading.value
 })
 
-// Методы
+// Methods
 const createRoom = async () => {
   if (!canCreateRoom.value) {
     if (!username.value) {
@@ -224,14 +268,14 @@ const createRoom = async () => {
   }
   
   try {
+    error.value = null
     await createGameRoom(
       username.value.trim(),
       createOptions.value.isPrivate,
       createOptions.value.hostAsObserver
     )
     
-    // Переход на игровую страницу произойдет автоматически после создания комнаты
-    router.push(`/game/${gameState.room.id}`)
+    // Переход будет выполнен автоматически через socket listener
   } catch (err) {
     error.value = err.message || 'Ошибка создания комнаты'
   }
@@ -247,20 +291,23 @@ const joinRoom = async () => {
   }
   
   try {
-    await joinGameRoom(joinRoomCode.value.toUpperCase(), username.value.trim())
-    router.push(`/game/${joinRoomCode.value.toUpperCase()}`)
+    error.value = null
+    const roomCode = joinRoomCode.value.toUpperCase().trim()
+    await joinGameRoom(roomCode, username.value.trim())
+    
+    // Переход будет выполнен автоматически через socket listener
   } catch (err) {
     error.value = err.message || 'Ошибка подключения к комнате'
   }
 }
 
-const joinRoomById = (roomId) => {
+const quickJoinRoom = (roomId) => {
   joinRoomCode.value = roomId
   joinRoom()
 }
 
-const setUsername = (newUsername) => {
-  saveUsername(newUsername)
+const handleUsernameSave = (newUsername) => {
+  setUsername(newUsername)
   showUsernameModal.value = false
 }
 
@@ -271,18 +318,35 @@ const getPhaseDisplayName = (phase) => {
     night: 'Ночь',
     day: 'День',
     voting: 'Голосование',
-    ended: 'Завершено'
+    ended: 'Завершена'
   }
   return phases[phase] || phase
 }
 
-// Получение публичных комнат (заглушка)
-const fetchPublicRooms = () => {
-  // TODO: Реальный запрос к серверу
-  publicRooms.value = []
+// Socket listeners для автоматического перехода на игровую страницу
+const handleRoomCreated = (data) => {
+  router.push(`/game/${data.room.id}`)
 }
 
+const handleJoinSuccess = (data) => {
+  router.push(`/game/${data.room.id}`)
+}
+
+// Получение списка публичных комнат (заглушка)
+const fetchPublicRooms = async () => {
+  // TODO: Реальный HTTP запрос к серверу
+  // const response = await fetch('/api/rooms/public')
+  // publicRooms.value = await response.json()
+  publicRooms.value = [] // Пока пустой список
+}
+
+// Lifecycle
 onMounted(() => {
+  initSocketListeners()
+  
+  // Подписываемся на события создания/подключения к комнате
+  // TODO: Добавить эти события в useGame
+  
   fetchPublicRooms()
   
   // Обновляем список каждые 30 секунд
@@ -291,5 +355,12 @@ onMounted(() => {
   onUnmounted(() => {
     clearInterval(interval)
   })
+})
+
+// Если игрок не ввел имя - показываем модал при загрузке
+onMounted(() => {
+  if (!username.value) {
+    showUsernameModal.value = true
+  }
 })
 </script>

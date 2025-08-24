@@ -1,21 +1,16 @@
-/**
- * Централизованный реестр ролей для клиента и сервера
- * Единственный источник правды о ролях в игре
- */
-
 export const ROLES_REGISTRY = {
+  // === КОМАНДА ДЕРЕВНИ ===
   villager: {
     id: 'villager',
     name: 'Житель',
-    description: 'Обычный житель деревни. Побеждает если убит хотя бы один оборотень.',
+    description: 'Обычный житель без особых способностей.',
     team: 'village',
     color: 'blue',
     hasNightAction: false,
-    nightOrder: 999,
+    nightOrder: 0,
     implemented: true,
     phaseHints: {
-      day: 'Ищите противоречия в заявлениях игроков',
-      night: 'Вы спите, пока другие роли выполняют действия'
+      day: 'Найдите оборотней по их поведению и противоречиям'
     }
   },
   
@@ -29,15 +24,15 @@ export const ROLES_REGISTRY = {
     nightOrder: 6,
     implemented: true,
     phaseHints: {
-      night: 'ВЫБЕРИТЕ: посмотреть роль игрока ИЛИ карты центра',
-      day: 'Поделитесь информацией чтобы помочь деревне'
+      night: 'Выберите: посмотреть роль игрока ИЛИ две центральные карты',
+      day: 'Используйте полученную информацию для поиска оборотней'
     }
   },
   
   robber: {
     id: 'robber',
     name: 'Грабитель', 
-    description: 'Ночью может поменяться ролями с другим игроком и узнать новую роль.',
+    description: 'Ночью меняется ролями с игроком и узнает новую роль.',
     team: 'village',
     color: 'blue',
     hasNightAction: true,
@@ -45,14 +40,14 @@ export const ROLES_REGISTRY = {
     implemented: true,
     phaseHints: {
       night: 'Выберите игрока для обмена ролями',
-      day: 'Играйте за новую роль, которую получили'
+      day: 'Играйте согласно новой роли'
     }
   },
   
   troublemaker: {
     id: 'troublemaker',
     name: 'Смутьян',
-    description: 'Ночью меняет роли двух других игроков местами, не узнавая их.',
+    description: 'Ночью меняет роли двух игроков местами (не узнает какие).',
     team: 'village', 
     color: 'blue',
     hasNightAction: true,
@@ -60,25 +55,41 @@ export const ROLES_REGISTRY = {
     implemented: true,
     phaseHints: {
       night: 'Выберите двух игроков для обмена ролями',
-      day: 'Помните кого вы поменяли - это поможет найти оборотней'
+      day: 'Наблюдайте за поведением - кого вы поменяли?'
     }
   },
   
   drunk: {
     id: 'drunk',
     name: 'Пьяница',
-    description: 'Ночью меняет свою роль с картой из центра, не узнавая новую.',
+    description: 'Ночью меняет роль с центральной картой (не узнает новую).',
     team: 'village',
     color: 'blue', 
     hasNightAction: true,
     nightOrder: 9,
     implemented: true,
     phaseHints: {
-      night: 'Поменяйтесь с картой из центра. Новая роль будет скрыта!',
-      day: 'Вы не знаете свою роль. Играйте осторожно'
+      night: 'Выберите центральную карту для обмена',
+      day: 'Вы не знаете свою новую роль'
     }
   },
   
+  bodyguard: {
+    id: 'bodyguard',
+    name: 'Страж',
+    description: 'Ночью ставит щит на игрока (защита от убийства).',
+    team: 'village',
+    color: 'blue',
+    hasNightAction: true,
+    nightOrder: 19,
+    implemented: true,
+    phaseHints: {
+      night: 'Выберите игрока для защиты',
+      day: 'Ваша защита могла спасти жизнь'
+    }
+  },
+  
+  // === КОМАНДА ОБОРОТНЕЙ ===
   werewolf: {
     id: 'werewolf',
     name: 'Оборотень',
@@ -90,56 +101,72 @@ export const ROLES_REGISTRY = {
     implemented: true,
     phaseHints: {
       night: 'Найдите других оборотней и выберите жертву',
-      day: 'Притворяйтесь жителем и сейте подозрения в других'
+      day: 'Притворяйтесь жителем и направляйте подозрения'
     }
   },
   
   mystic_wolf: {
     id: 'mystic_wolf',
     name: 'Мистический волк',
-    description: 'Узнает оборотней, затем может посмотреть карту ИЛИ проголосовать.',
+    description: 'Узнает оборотней, затем выбирает: голосовать ИЛИ посмотреть карту.',
     team: 'werewolf',
     color: 'red',
     hasNightAction: true,
     nightOrder: 11,
     implemented: true,
     phaseHints: {
-      night: 'Найдите оборотней, затем ВЫБЕРИТЕ: карту ИЛИ голосование',
-      day: 'Используйте информацию для обмана жителей'
+      night: 'Найдите оборотней, затем выберите действие',
+      day: 'Используйте информацию в своих интересах'
     }
   },
   
+  minion: {
+    id: 'minion',
+    name: 'Миньон',
+    description: 'Узнает оборотней (они его не знают). Побеждает с оборотнями.',
+    team: 'werewolf',
+    color: 'red',
+    hasNightAction: true,
+    nightOrder: 4,
+    implemented: true,
+    phaseHints: {
+      night: 'Вы узнаете оборотней',
+      day: 'Помогайте оборотням, не выдавая себя'
+    }
+  },
+  
+  // === НЕУДАЧНИК ===
   tanner: {
     id: 'tanner',
     name: 'Неудачник',
-    description: 'Побеждает только если его убивают. Все остальные проигрывают.',
+    description: 'Побеждает только если его убивают.',
     team: 'tanner',
     color: 'brown',
     hasNightAction: false,
-    nightOrder: 999,
+    nightOrder: 0,
     implemented: true,
     phaseHints: {
-      night: 'Вы спите',
-      day: 'Ведите себя подозрительно! Цель - чтобы вас убили'
+      day: 'Ведите себя подозрительно, чтобы вас убили'
     }
   },
   
+  // === ОСОБЫЕ РОЛИ ===
   doppelganger: {
     id: 'doppelganger',
     name: 'Доппельгангер',
-    description: 'Копирует роль игрока и становится ею. Выполняет ее ночное действие.',
+    description: 'Копирует роль игрока и выполняет ее действие.',
     team: 'special',
     color: 'purple',
     hasNightAction: true,
     nightOrder: 2,
     implemented: true,
     phaseHints: {
-      night: 'Посмотрите карту и скопируйте роль игрока',
-      day: 'Играйте за скопированную роль. Команда могла измениться!'
+      night: 'Выберите игрока для копирования роли',
+      day: 'Играйте согласно скопированной роли'
     }
   },
   
-  // Дополнительные оборотни для больших игр
+  // === ДОПОЛНИТЕЛЬНЫЕ ОБОРОТНИ ===
   werewolf_2: {
     id: 'werewolf_2',
     name: 'Оборотень',
@@ -151,13 +178,13 @@ export const ROLES_REGISTRY = {
     implemented: true,
     phaseHints: {
       night: 'Найдите других оборотней и выберите жертву',
-      day: 'Притворяйтесь жителем и сейте подозрения в других'
+      day: 'Притворяйтесь жителем и направляйте подозрения'
     }
   },
   
   werewolf_3: {
     id: 'werewolf_3',
-    name: 'Оборотень', 
+    name: 'Оборотень',
     description: 'Ночью узнает других оборотней и голосует за жертву.',
     team: 'werewolf',
     color: 'red',
@@ -166,74 +193,35 @@ export const ROLES_REGISTRY = {
     implemented: true,
     phaseHints: {
       night: 'Найдите других оборотней и выберите жертву',
-      day: 'Притворяйтесь жителем и сейте подозрения в других'
+      day: 'Притворяйтесь жителем и направляйте подозрения'
     }
   }
 }
 
 /**
- * Получение роли по ID
+ * API для работы с ролями
  */
-export const getRole = (roleId) => {
-  return ROLES_REGISTRY[roleId] || null
-}
+export const getRole = (roleId) => ROLES_REGISTRY[roleId] || null
+export const getAllRoles = () => ROLES_REGISTRY
+export const getImplementedRoles = () => Object.fromEntries(Object.entries(ROLES_REGISTRY).filter(([_, role]) => role.implemented))
+export const getRolesByTeam = (team) => Object.fromEntries(Object.entries(ROLES_REGISTRY).filter(([_, role]) => role.team === team))
+export const validateRole = (roleId) => ROLES_REGISTRY.hasOwnProperty(roleId)
+export const getTeamNames = () => ({
+  village: 'Деревня',
+  werewolf: 'Оборотни', 
+  tanner: 'Неудачник',
+  special: 'Особые'
+})
 
-/**
- * Получение всех ролей
- */
-export const getAllRoles = () => {
-  return ROLES_REGISTRY
-}
-
-/**
- * Получение реализованных ролей
- */
-export const getImplementedRoles = () => {
-  return Object.fromEntries(
-    Object.entries(ROLES_REGISTRY).filter(([_, role]) => role.implemented)
-  )
-}
-
-/**
- * Получение ролей по команде
- */
-export const getRolesByTeam = (team) => {
-  return Object.fromEntries(
-    Object.entries(ROLES_REGISTRY).filter(([_, role]) => role.team === team)
-  )
-}
-
-/**
- * Получение названий команд
- */
-export const getTeamNames = () => {
-  return {
-    village: 'Деревня',
-    werewolf: 'Оборотни', 
-    tanner: 'Неудачник',
-    special: 'Особые'
-  }
-}
-
-/**
- * Валидация роли
- */
-export const validateRole = (roleId) => {
-  return ROLES_REGISTRY.hasOwnProperty(roleId)
-}
-
-/**
- * Проверка баланса ролей
- */
 export const validateRoleBalance = (selectedRoles) => {
   const counts = { village: 0, werewolf: 0, tanner: 0, special: 0 }
+  const warnings = []
   
   selectedRoles.forEach(roleId => {
     const role = getRole(roleId)
     if (role) counts[role.team]++
   })
   
-  const warnings = []
   const total = selectedRoles.length
   
   if (counts.werewolf === 0) warnings.push('Добавьте хотя бы одного оборотня')

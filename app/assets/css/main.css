@@ -1,4 +1,4 @@
-/* Основные стили для "Нетипичная Мафия" */
+/* Основные стили "Нетипичная Мафия" */
 
 * {
   margin: 0;
@@ -8,12 +8,12 @@
 
 body {
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-  background: linear-gradient(135deg, #0a0a0a 0%, #1a1a1a 100%);
+  background: #0a0a0a;
   color: #ffffff;
-  min-height: 100vh;
+  line-height: 1.4;
 }
 
-/* ====== ГЛАВНАЯ СТРАНИЦА ====== */
+/* === ГЛАВНАЯ СТРАНИЦА === */
 
 .main-page {
   min-height: 100vh;
@@ -35,18 +35,18 @@ body {
   align-items: center;
 }
 
-.logo {
+.logo-section {
   display: flex;
   align-items: center;
-  gap: 1rem;
+  gap: 0.75rem;
 }
 
-.logo img {
-  width: 48px;
-  height: 48px;
+.logo-img {
+  width: 40px;
+  height: 40px;
 }
 
-.logo h1 {
+.logo-text {
   font-size: 1.5rem;
   font-weight: 700;
   background: linear-gradient(45deg, #ff6b6b, #ffa500);
@@ -54,24 +54,35 @@ body {
   -webkit-text-fill-color: transparent;
 }
 
-.nav-links {
+.main-nav {
   display: flex;
   gap: 1rem;
 }
 
-.nav-btn, .change-btn {
+.nav-button, .change-username-btn {
   background: transparent;
   border: 1px solid rgba(255, 255, 255, 0.2);
   color: white;
   padding: 0.5rem 1rem;
   border-radius: 6px;
   cursor: pointer;
+  font-size: 0.9rem;
   transition: all 0.2s;
 }
 
-.nav-btn:hover, .change-btn:hover {
+.nav-button:hover, .change-username-btn:hover {
   border-color: #ff6b6b;
   background: rgba(255, 107, 107, 0.1);
+}
+
+.user-panel {
+  display: flex;
+  align-items: center;
+}
+
+.username {
+  margin-right: 0.5rem;
+  font-weight: 500;
 }
 
 .main-content {
@@ -79,50 +90,45 @@ body {
   max-width: 1200px;
   margin: 0 auto;
   padding: 2rem;
+  width: 100%;
 }
 
-.room-actions {
+.content-layout {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 2rem;
+  gap: 3rem;
   margin-bottom: 3rem;
 }
 
-.action-card {
+/* Создание комнаты */
+.create-room-card {
   background: rgba(255, 255, 255, 0.05);
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 12px;
   padding: 2rem;
 }
 
-.action-card h2 {
-  margin-bottom: 1.5rem;
+.create-room-card h2 {
   color: #ff6b6b;
+  margin-bottom: 1.5rem;
 }
 
-.form-group {
-  margin-bottom: 1rem;
+.room-options {
+  margin-bottom: 2rem;
 }
 
-.form-group label {
+.checkbox-label {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  margin-bottom: 1rem;
   cursor: pointer;
 }
 
-.room-code-input {
-  width: 100%;
-  padding: 0.75rem;
-  background: rgba(255, 255, 255, 0.1);
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  border-radius: 6px;
-  color: white;
-  font-size: 1rem;
-  text-transform: uppercase;
+.checkbox-label input {
+  margin-right: 0.5rem;
 }
 
-.create-btn, .join-btn {
+.create-room-btn {
   width: 100%;
   padding: 0.75rem;
   background: linear-gradient(45deg, #ff6b6b, #ffa500);
@@ -131,15 +137,162 @@ body {
   color: white;
   font-weight: 600;
   cursor: pointer;
-  transition: opacity 0.2s;
+  font-size: 1rem;
 }
 
-.create-btn:disabled, .join-btn:disabled {
+.create-room-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
 
-/* ====== ИГРОВАЯ СТРАНИЦА ====== */
+/* Поиск комнат */
+.rooms-section h3 {
+  margin-bottom: 1rem;
+  color: #ffa500;
+}
+
+.search-input-group {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 2rem;
+}
+
+.room-code-input {
+  flex: 1;
+  padding: 0.5rem;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 4px;
+  color: white;
+  text-transform: uppercase;
+}
+
+.join-room-btn {
+  padding: 0.5rem 1rem;
+  background: #4dabf7;
+  border: none;
+  border-radius: 4px;
+  color: white;
+  cursor: pointer;
+}
+
+.no-rooms-message {
+  text-align: center;
+  opacity: 0.7;
+  font-style: italic;
+}
+
+.rooms-grid {
+  display: grid;
+  gap: 1rem;
+}
+
+.room-item {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  padding: 1rem;
+  cursor: pointer;
+  transition: border-color 0.2s;
+}
+
+.room-item:hover {
+  border-color: #ffa500;
+}
+
+.room-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+
+.room-name {
+  font-weight: 600;
+}
+
+.room-phase {
+  padding: 0.2rem 0.5rem;
+  border-radius: 12px;
+  font-size: 0.8rem;
+}
+
+.phase-setup { background: #ffa500; color: black; }
+.phase-introduction { background: #4dabf7; }
+.phase-night { background: #7c3aed; }
+.phase-day { background: #fd7e14; }
+.phase-voting { background: #e03131; }
+.phase-ended { background: #51cf66; }
+
+.room-host, .room-players, .room-rounds {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.9rem;
+  margin-bottom: 0.25rem;
+}
+
+.label {
+  opacity: 0.7;
+}
+
+/* Информация об игре */
+.game-info-section {
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 12px;
+  padding: 2rem;
+}
+
+.game-description {
+  font-size: 1.1rem;
+  margin-bottom: 2rem;
+  line-height: 1.6;
+}
+
+.game-features {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1.5rem;
+  margin-bottom: 2rem;
+}
+
+.feature {
+  text-align: center;
+  padding: 1rem;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 8px;
+}
+
+.info-actions {
+  display: flex;
+  gap: 1rem;
+  justify-content: center;
+}
+
+.info-button {
+  padding: 0.75rem 1.5rem;
+  background: transparent;
+  border: 2px solid #ff6b6b;
+  color: #ff6b6b;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: 600;
+  transition: all 0.2s;
+}
+
+.info-button:hover {
+  background: #ff6b6b;
+  color: white;
+}
+
+/* Футер */
+.main-footer {
+  text-align: center;
+  padding: 2rem;
+  opacity: 0.7;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+/* === ИГРОВАЯ СТРАНИЦА === */
 
 .game-page {
   height: 100vh;
@@ -153,53 +306,94 @@ body {
 
 .game-header {
   grid-area: header;
+  background: rgba(255, 255, 255, 0.05);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 1rem 2rem;
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 1rem 2rem;
-  background: rgba(255, 255, 255, 0.05);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
 }
 
-.room-code {
-  font-family: 'Monaco', monospace;
-  font-size: 1.1rem;
-  padding: 0.5rem;
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 2rem;
+}
+
+.header-nav {
+  display: flex;
+  gap: 1rem;
+}
+
+.header-right {
+  display: flex;
+  align-items: center;
+}
+
+.game-controls {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.control-btn {
+  width: 40px;
+  height: 40px;
   background: rgba(255, 255, 255, 0.1);
-  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 6px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.control-btn.active {
+  background: rgba(81, 207, 102, 0.2);
+  border-color: #51cf66;
+}
+
+.control-btn img {
+  width: 20px;
+  height: 20px;
+}
+
+.control-separator {
+  width: 1px;
+  height: 30px;
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.room-status {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
   cursor: pointer;
 }
 
-.phase-indicator {
-  padding: 0.3rem 0.8rem;
-  border-radius: 20px;
-  font-size: 0.9rem;
-  font-weight: 600;
-}
-
-.phase-setup { background: #ffa500; color: black; }
-.phase-introduction { background: #4dabf7; }
-.phase-night { background: #7c3aed; }
-.phase-day { background: #fd7e14; }
-.phase-voting { background: #e03131; }
-.phase-ended { background: #51cf66; }
-
-.timer {
-  font-family: 'Monaco', monospace;
-  font-size: 1.2rem;
-  font-weight: bold;
-  color: #ffa500;
-}
-
-.connection-status .status-dot {
-  width: 12px;
-  height: 12px;
+.status-indicator {
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
   background: #e03131;
 }
 
-.connection-status.connected .status-dot {
+.room-status.connected .status-indicator {
   background: #51cf66;
+}
+
+.room-code {
+  font-family: 'Monaco', monospace;
+  font-weight: 600;
+}
+
+.leave-btn {
+  background: #e03131;
+  border: none;
+  color: white;
+  padding: 0.5rem 1rem;
+  border-radius: 6px;
+  cursor: pointer;
 }
 
 .game-main {
@@ -208,106 +402,89 @@ body {
   overflow-y: auto;
 }
 
-.game-sidebar {
-  grid-area: sidebar;
-  background: rgba(255, 255, 255, 0.03);
-  border-left: 1px solid rgba(255, 255, 255, 0.1);
+.game-layout {
+  height: 100%;
   display: flex;
   flex-direction: column;
 }
 
-/* ====== НАСТРОЙКА ИГРЫ ====== */
-
-.game-setup {
-  max-width: 1000px;
-}
-
-.setup-header {
-  text-align: center;
-  margin-bottom: 2rem;
-}
-
-.players-grid, .roles-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: 1rem;
-  margin-bottom: 2rem;
-}
-
-.player-card, .role-card {
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 8px;
-  padding: 1rem;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.role-card:hover {
-  border-color: #ff6b6b;
-  transform: translateY(-2px);
-}
-
-.role-card.selected {
-  border-color: #ffa500;
-  background: rgba(255, 165, 0, 0.1);
-}
-
-.role-card.not-implemented {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.role-image img {
-  width: 64px;
-  height: 64px;
-  border-radius: 6px;
-}
-
-.role-count {
-  position: absolute;
-  top: -8px;
-  right: -8px;
-  background: #ffa500;
-  color: black;
-  width: 24px;
-  height: 24px;
-  border-radius: 50%;
+.phase-header {
   display: flex;
+  justify-content: space-between;
   align-items: center;
-  justify-content: center;
-  font-weight: bold;
-  font-size: 0.8rem;
-}
-
-.start-button {
-  width: 100%;
-  padding: 1rem 2rem;
-  background: linear-gradient(45deg, #51cf66, #40c057);
-  border: none;
+  margin-bottom: 2rem;
+  padding: 1rem;
+  background: rgba(255, 255, 255, 0.05);
   border-radius: 8px;
-  color: white;
-  font-size: 1.1rem;
-  font-weight: 600;
-  cursor: pointer;
-  transition: opacity 0.2s;
 }
 
-.start-button:disabled {
+.current-phase {
+  font-size: 1.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.phase-timer {
+  font-family: 'Monaco', monospace;
+  font-size: 1.2rem;
+  color: #ffa500;
+}
+
+.phase-timer.inactive {
   opacity: 0.5;
-  cursor: not-allowed;
 }
 
-/* ====== СЕТКА ИГРОКОВ ====== */
+.cheatsheet-btn {
+  background: #4dabf7;
+  border: none;
+  color: white;
+  padding: 0.5rem 1rem;
+  border-radius: 4px;
+  cursor: pointer;
+}
 
-.players-area {
-  margin: 2rem 0;
+.cheatsheet-content {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  background: #1a1a1a;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 4px;
+  padding: 1rem;
+  max-width: 300px;
+  z-index: 10;
+}
+
+.center-cards-section {
+  margin-bottom: 2rem;
+}
+
+.center-cards-grid {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.center-card {
+  width: 60px;
+  height: 84px;
+}
+
+.center-card img {
+  width: 100%;
+  height: 100%;
+  border-radius: 4px;
+  object-fit: cover;
+}
+
+/* Сетка игроков */
+.players-section {
+  flex: 1;
 }
 
 .players-grid {
   display: grid;
-  gap: 1rem;
+  gap: 1.5rem;
   justify-items: center;
+  margin-bottom: 2rem;
 }
 
 .grid-2x2 { grid-template-columns: repeat(2, 1fr); }
@@ -318,8 +495,8 @@ body {
   background: rgba(255, 255, 255, 0.08);
   border: 2px solid rgba(255, 255, 255, 0.1);
   border-radius: 12px;
-  padding: 1rem;
-  width: 180px;
+  padding: 1.5rem;
+  width: 200px;
   text-align: center;
   transition: all 0.3s;
 }
@@ -353,7 +530,7 @@ body {
 }
 
 .default-avatar {
-  background: linear-gradient(45deg, #495057, #6c757d);
+  background: linear-gradient(135deg, #495057, #6c757d);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -376,6 +553,7 @@ body {
 
 .player-name {
   font-weight: 600;
+  font-size: 1.1rem;
   margin-bottom: 0.5rem;
 }
 
@@ -383,15 +561,20 @@ body {
   color: #ffa500;
   font-size: 0.9rem;
   margin-bottom: 0.5rem;
+  font-weight: 500;
 }
 
 .player-status {
   font-size: 0.8rem;
   opacity: 0.7;
+  margin-bottom: 1rem;
 }
 
+.status-dead { color: #e03131; }
+.status-offline { color: #6c757d; }
+.status-host { color: #ffa500; }
+
 .player-actions {
-  margin-top: 1rem;
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem;
@@ -404,6 +587,7 @@ body {
   border-radius: 4px;
   font-size: 0.8rem;
   cursor: pointer;
+  font-weight: 500;
   transition: all 0.2s;
 }
 
@@ -425,6 +609,7 @@ body {
 .werewolf-btn {
   background: #e03131;
   color: white;
+  font-size: 1rem;
 }
 
 .vote-btn {
@@ -436,13 +621,73 @@ body {
   background: #51cf66;
 }
 
-.role-btn {
+.role-info-btn {
   background: #4dabf7;
   color: white;
   width: 100%;
 }
 
-/* ====== ЧАТ ====== */
+.action-btn:hover {
+  transform: translateY(-1px);
+  opacity: 0.9;
+}
+
+.phase-hint {
+  padding: 1rem;
+  background: rgba(255, 165, 0, 0.1);
+  border: 1px solid rgba(255, 165, 0, 0.3);
+  border-radius: 8px;
+  text-align: center;
+}
+
+.phase-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.admin-phase-controls {
+  background: rgba(255, 107, 107, 0.1);
+  border: 1px solid rgba(255, 107, 107, 0.3);
+  border-radius: 8px;
+  padding: 1rem;
+}
+
+.admin-phase-controls h4 {
+  margin-bottom: 0.5rem;
+  color: #ff6b6b;
+}
+
+.phase-buttons {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.phase-btn {
+  background: #ff6b6b;
+  color: white;
+  border: none;
+  padding: 0.5rem 1rem;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: 500;
+}
+
+.phase-btn:hover {
+  background: #e55656;
+}
+
+/* Боковая панель */
+.game-sidebar {
+  grid-area: sidebar;
+  background: rgba(255, 255, 255, 0.03);
+  border-left: 1px solid rgba(255, 255, 255, 0.1);
+  display: flex;
+  flex-direction: column;
+}
+
+/* === ЧАТ === */
 
 .game-chat {
   display: flex;
@@ -453,6 +698,25 @@ body {
 .chat-header {
   padding: 1rem;
   border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.chat-header h3 {
+  margin-bottom: 0.5rem;
+}
+
+.chat-status .status-disabled {
+  color: #e03131;
+  font-size: 0.9rem;
+}
+
+.chat-status .status-night {
+  color: #7c3aed;
+  font-size: 0.9rem;
+}
+
+.chat-status .status-enabled {
+  color: #51cf66;
+  font-size: 0.9rem;
 }
 
 .chat-messages {
@@ -478,13 +742,20 @@ body {
   border-left: 3px solid #51cf66;
 }
 
+.message-game-event {
+  background: rgba(255, 165, 0, 0.2);
+  border-left: 3px solid #ffa500;
+}
+
 .message-own {
   background: rgba(77, 171, 247, 0.2);
+  border-left: 3px solid #4dabf7;
 }
 
 .message-header {
   display: flex;
   justify-content: space-between;
+  align-items: center;
   margin-bottom: 0.5rem;
   font-size: 0.9rem;
 }
@@ -503,9 +774,27 @@ body {
   font-size: 0.8rem;
 }
 
+.message-text {
+  line-height: 1.4;
+}
+
 .chat-input {
   padding: 1rem;
   border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.input-disabled {
+  text-align: center;
+  opacity: 0.7;
+  font-size: 0.9rem;
+}
+
+.chat-commands {
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 4px;
+  padding: 0.5rem;
+  margin-bottom: 0.5rem;
+  font-size: 0.8rem;
 }
 
 .input-row {
@@ -522,55 +811,287 @@ body {
   color: white;
 }
 
+.input-row input::placeholder {
+  color: rgba(255, 255, 255, 0.5);
+}
+
 .send-btn, .help-btn {
   padding: 0.5rem 1rem;
-  background: #4dabf7;
   border: none;
   border-radius: 4px;
-  color: white;
   cursor: pointer;
+  font-size: 0.9rem;
+}
+
+.send-btn {
+  background: #4dabf7;
+  color: white;
+}
+
+.send-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .help-btn {
   background: #6c757d;
+  color: white;
 }
 
-/* ====== НОЧНЫЕ ДЕЙСТВИЯ ====== */
+/* === НАСТРОЙКА ИГРЫ === */
+
+.game-setup {
+  max-width: 1000px;
+}
+
+.setup-header {
+  text-align: center;
+  margin-bottom: 2rem;
+}
+
+.setup-grid {
+  display: grid;
+  grid-template-columns: 1fr 2fr;
+  gap: 3rem;
+}
+
+.players-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.player-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 6px;
+}
+
+.player-item.is-me {
+  border: 1px solid #4dabf7;
+}
+
+.player-item.is-host {
+  background: rgba(255, 165, 0, 0.1);
+}
+
+.player-badge {
+  background: #ffa500;
+  color: black;
+  padding: 0.2rem 0.5rem;
+  border-radius: 12px;
+  font-size: 0.8rem;
+}
+
+.roles-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 1rem;
+  margin-bottom: 2rem;
+}
+
+.role-item {
+  position: relative;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  padding: 1rem;
+  cursor: pointer;
+  text-align: center;
+  transition: all 0.2s;
+}
+
+.role-item:hover {
+  border-color: #ff6b6b;
+  transform: translateY(-2px);
+}
+
+.role-item.selected {
+  border-color: #ffa500;
+  background: rgba(255, 165, 0, 0.1);
+}
+
+.role-item img {
+  width: 60px;
+  height: 60px;
+  border-radius: 6px;
+  margin-bottom: 0.5rem;
+}
+
+.role-name {
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+
+.role-count {
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  background: #ffa500;
+  color: black;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: bold;
+  font-size: 0.8rem;
+}
+
+.balance-info {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 2rem;
+  padding: 1rem;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 6px;
+}
+
+.start-button {
+  width: 100%;
+  padding: 1rem;
+  background: linear-gradient(45deg, #51cf66, #40c057);
+  border: none;
+  border-radius: 6px;
+  color: white;
+  font-size: 1.1rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.start-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.waiting-host {
+  text-align: center;
+  opacity: 0.7;
+  font-style: italic;
+}
+
+/* === НОЧНЫЕ ДЕЙСТВИЯ === */
 
 .night-actions {
   background: rgba(124, 58, 237, 0.1);
   border: 1px solid #7c3aed;
   border-radius: 8px;
-  padding: 1.5rem;
-  margin: 2rem 0;
+  padding: 2rem;
+  margin-bottom: 2rem;
 }
 
-.target-btn, .choice-btn {
+.night-panel h3 {
+  margin-bottom: 1rem;
+  color: #7c3aed;
+}
+
+.action-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 1.5rem 0;
+}
+
+.target-btn, .skip-btn {
   background: rgba(255, 255, 255, 0.1);
   border: 1px solid rgba(255, 255, 255, 0.2);
   color: white;
   padding: 0.5rem 1rem;
-  margin: 0.25rem;
   border-radius: 4px;
   cursor: pointer;
   transition: all 0.2s;
 }
 
-.target-btn:hover, .choice-btn:hover {
+.target-btn:hover {
   background: rgba(255, 107, 107, 0.2);
   border-color: #ff6b6b;
 }
 
 .skip-btn {
   background: #6c757d;
-  color: white;
-  padding: 0.5rem 1rem;
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
+  border-color: #6c757d;
 }
 
-/* ====== МОДАЛЫ ====== */
+.action-result {
+  margin-top: 1rem;
+  padding: 0.75rem;
+  border-radius: 4px;
+}
+
+.action-result.success {
+  background: rgba(81, 207, 102, 0.2);
+  border: 1px solid #51cf66;
+}
+
+.action-result.error {
+  background: rgba(224, 49, 49, 0.2);
+  border: 1px solid #e03131;
+}
+
+.waiting-night {
+  text-align: center;
+  opacity: 0.7;
+  font-style: italic;
+}
+
+/* === РЕЗУЛЬТАТЫ ИГРЫ === */
+
+.game-results {
+  text-align: center;
+  padding: 2rem;
+  background: rgba(81, 207, 102, 0.1);
+  border: 1px solid #51cf66;
+  border-radius: 12px;
+}
+
+.winner-team {
+  font-size: 2rem;
+  font-weight: bold;
+  margin: 1rem 0;
+  color: #51cf66;
+}
+
+.winners-list {
+  margin: 2rem 0;
+}
+
+.winner {
+  display: inline-block;
+  background: rgba(255, 255, 255, 0.1);
+  padding: 0.5rem 1rem;
+  margin: 0.25rem;
+  border-radius: 20px;
+}
+
+.game-actions {
+  display: flex;
+  gap: 1rem;
+  justify-content: center;
+}
+
+.new-game-btn, .leave-btn {
+  padding: 0.75rem 1.5rem;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.new-game-btn {
+  background: #4dabf7;
+  color: white;
+}
+
+.leave-btn {
+  background: #6c757d;
+  color: white;
+}
+
+/* === МОДАЛЬНЫЕ ОКНА === */
 
 .modal-overlay {
   position: fixed;
@@ -594,85 +1115,45 @@ body {
   width: 90%;
 }
 
-.modal-actions {
+.modal-content h3 {
+  margin-bottom: 1.5rem;
+  text-align: center;
+}
+
+.modal-content input {
+  width: 100%;
+  padding: 0.75rem;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 4px;
+  color: white;
+  margin-bottom: 1.5rem;
+}
+
+.modal-buttons {
   display: flex;
   gap: 1rem;
   justify-content: flex-end;
-  margin-top: 1.5rem;
 }
 
-.modal-actions button {
+.modal-buttons button {
   padding: 0.5rem 1rem;
   border: none;
   border-radius: 4px;
   cursor: pointer;
 }
 
-/* ====== РЕЗУЛЬТАТЫ ИГРЫ ====== */
-
-.game-results {
-  text-align: center;
-  padding: 2rem;
-  background: rgba(81, 207, 102, 0.1);
-  border: 1px solid #51cf66;
-  border-radius: 12px;
+.modal-buttons button:first-child {
+  background: #4dabf7;
+  color: white;
 }
 
-.winner-team {
-  font-size: 1.5rem;
-  font-weight: bold;
-  margin: 1rem 0;
+.modal-buttons button:last-child {
+  background: #6c757d;
+  color: white;
 }
 
-.team-village { color: #4dabf7; }
-.team-werewolf { color: #e03131; }
-.team-tanner { color: #fd7e14; }
-
-.winner-cards {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 1rem;
-  justify-content: center;
-  margin: 1rem 0;
-}
-
-.winner-card {
-  background: rgba(255, 255, 255, 0.1);
-  padding: 1rem;
-  border-radius: 8px;
-}
-
-/* ====== АДАПТИВНОСТЬ ====== */
-
-@media (max-width: 768px) {
-  .game-page {
-    grid-template-columns: 1fr;
-    grid-template-areas: 
-      "header"
-      "main"
-      "sidebar";
-  }
-  
-  .game-sidebar {
-    height: 300px;
-    border-left: none;
-    border-top: 1px solid rgba(255, 255, 255, 0.1);
-  }
-  
-  .room-actions {
-    grid-template-columns: 1fr;
-  }
-  
-  .players-grid {
-    grid-template-columns: repeat(2, 1fr);
-  }
-  
-  .player-card {
-    width: 100%;
-  }
-}
-
-/* ====== УТИЛИТЫ ====== */
+/* === УВЕДОМЛЕНИЯ === */
 
 .error-notification {
   position: fixed;
@@ -680,11 +1161,12 @@ body {
   right: 20px;
   background: #e03131;
   color: white;
-  padding: 1rem;
+  padding: 1rem 1.5rem;
   border-radius: 8px;
   cursor: pointer;
   z-index: 1001;
   animation: slideIn 0.3s ease;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
 }
 
 @keyframes slideIn {
@@ -698,8 +1180,68 @@ body {
   }
 }
 
-.waiting-message {
-  text-align: center;
-  opacity: 0.7;
-  font-style: italic;
+/* === АДАПТИВНОСТЬ === */
+
+@media (max-width: 768px) {
+  .game-page {
+    grid-template-columns: 1fr;
+    grid-template-areas: 
+      "header"
+      "main"
+      "sidebar";
+  }
+  
+  .game-sidebar {
+    height: 40vh;
+    border-left: none;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+  }
+  
+  .content-layout {
+    grid-template-columns: 1fr;
+    gap: 2rem;
+  }
+  
+  .setup-grid {
+    grid-template-columns: 1fr;
+  }
+  
+  .players-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  
+  .player-card {
+    width: 100%;
+    max-width: 180px;
+  }
+  
+  .header-left {
+    gap: 1rem;
+  }
+  
+  .header-nav {
+    display: none;
+  }
+}
+
+@media (max-width: 480px) {
+  .main-content {
+    padding: 1rem;
+  }
+  
+  .game-main {
+    padding: 1rem;
+  }
+  
+  .players-grid {
+    grid-template-columns: 1fr;
+  }
+  
+  .game-controls {
+    gap: 0.5rem;
+  }
+  
+  .room-code {
+    font-size: 0.9rem;
+  }
 }

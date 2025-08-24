@@ -1,17 +1,19 @@
 <template>
   <div class="modal-overlay" @click="$emit('close')">
     <div class="modal-content" @click.stop>
-      <h3>{{ currentUsername ? 'Сменить имя' : 'Введите имя' }}</h3>
+      <h3>{{ currentUsername ? 'Изменить имя' : 'Введите ваше имя' }}</h3>
+      
       <input 
-        v-model="newUsername"
-        @keypress.enter="save"
+        v-model="username"
+        @keyup.enter="save"
         type="text"
         placeholder="Ваше имя"
         maxlength="16"
-        ref="usernameInput"
+        ref="input"
       />
-      <div class="modal-actions">
-        <button @click="save" :disabled="!canSave">Сохранить</button>
+      
+      <div class="modal-buttons">
+        <button @click="save" :disabled="!isValid">Сохранить</button>
         <button @click="$emit('close')">Отмена</button>
       </div>
     </div>
@@ -24,20 +26,20 @@ import { ref, computed, onMounted } from 'vue'
 const props = defineProps(['currentUsername'])
 const emit = defineEmits(['save', 'close'])
 
-const newUsername = ref(props.currentUsername || '')
-const usernameInput = ref(null)
+const username = ref(props.currentUsername || '')
+const input = ref()
 
-const canSave = computed(() => {
-  return newUsername.value.trim().length >= 2 && newUsername.value.trim().length <= 16
+const isValid = computed(() => {
+  return username.value.trim().length >= 2 && username.value.trim().length <= 16
 })
 
 const save = () => {
-  if (canSave.value) {
-    emit('save', newUsername.value.trim())
+  if (isValid.value) {
+    emit('save', username.value.trim())
   }
 }
 
 onMounted(() => {
-  usernameInput.value?.focus()
+  input.value?.focus()
 })
 </script>
