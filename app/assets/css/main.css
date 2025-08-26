@@ -140,6 +140,37 @@ body {
   line-height: 1.4;
 }
 
+/* Красивые тёмные скроллбары */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 4px;
+  transition: background-color 0.2s ease;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+::-webkit-scrollbar-corner {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+/* Для Firefox */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.2) rgba(255, 255, 255, 0.05);
+}
+
 /* === ГЛАВНАЯ СТРАНИЦА === */
 
 .main-page {
@@ -429,7 +460,8 @@ body {
   grid-template-areas: 
     "header header"
     "main sidebar";
-  gap: 32px;
+  row-gap: 32px;
+  column-gap: 16px;
   padding: 0 32px 32px;
 }
 
@@ -641,6 +673,7 @@ body {
   gap: 16px;
   display: flex;
   flex-direction: column;
+  padding-top: 16px;
 }
 
 .players-grid {
@@ -895,64 +928,100 @@ body {
 }
 
 .chat-messages {
+  display: flex;
+  flex-direction: column;
   flex: 1;
   overflow-y: auto;
   padding: 1rem;
   flex-shrink: 1;
   flex-grow: 1;
+  gap: 16px;
 }
 
 .message {
-  margin-bottom: 1rem;
-  padding: 0.75rem;
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.05);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.02);
+  border-radius: 12px;
+  padding: 14px;
+  background: rgba(217, 217, 217, 0.03);
+  position: relative;
+}
+
+.message-role {
+  font-size: 12px;
+  font-weight: 600;
 }
 
 .message-whisper {
-  background: rgba(124, 58, 237, 0.2);
-  border-left: 3px solid #7c3aed;
+  background: rgba(124, 58, 237, 0.05);
+  box-shadow: inset 0 0 0 1px #7c3aed58;
+}
+
+.message-whisper .message-role {
+  color: #966ae2;
 }
 
 .message-system {
-  background: rgba(81, 207, 102, 0.2);
-  border-left: 3px solid #51cf66;
+  background: rgba(81, 207, 102, 0.05);
+  box-shadow: inset 0 0 0 1px #51cf6658;
+}
+
+.message-system .message-role {
+  color: #83ec94;
 }
 
 .message-game-event {
-  background: rgba(255, 165, 0, 0.2);
-  border-left: 3px solid #ffa500;
+  background: rgba(255, 165, 0, 0.05);
+  box-shadow: inset 0 0 0 1px #ffa50058;
+}
+
+.message-game-event .message-role {
+  color: #ffbc3f;
 }
 
 .message-own {
-  background: rgba(77, 171, 247, 0.2);
-  border-left: 3px solid #4dabf7;
+  background: rgba(77, 171, 247, 0.05);
+  box-shadow: inset 0 0 0 1px #4dabf73f;
+}
+
+.message-own .message-role {
+  color: #85c4f8;
 }
 
 .message-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 0.5rem;
-  font-size: 0.9rem;
+  margin-bottom: 6px;
+  font-size: 12px;
 }
 
 .message-sender {
-  font-weight: 600;
+  font-weight: 700;
+  font-size: 12px;
+  color: #A2A2A2;
 }
 
-.message-role {
-  color: #ffa500;
-  font-size: 0.8rem;
+.message-top {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: space-between;
 }
 
 .message-time {
-  opacity: 0.7;
-  font-size: 0.8rem;
+  font-size: 12px;
+  position: absolute;
+  color: #707070;
+  bottom: 8px;
+  right: 8px;
+  font-weight: 600;
 }
 
 .message-text {
-  line-height: 1.4;
+  font-size: 14px;
+  color: #fff;
+  font-weight: 600;
 }
 
 .chat-input {
@@ -1023,9 +1092,46 @@ body {
 }
 
 .setup-header {
-  text-align: start;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
   margin-bottom: 2rem;
+  flex-wrap: wrap;
+  gap: 16px;
+  padding-right: 16px;
 }
+
+.phase-info {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.phase-description {
+
+}
+
+.phase-help {
+  font-size: 12px;
+  flex-shrink: 1;
+  background-color: #ffffff13;
+  border-radius: 12px;
+  box-shadow: inset 0 0 0 1px #ffffff20;
+  padding: 12px;
+  max-width: 500px;
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.phase-icon {
+  width: 26px;
+  height: 26px;
+  background-position: center;
+  background-repeat: no-repeat;
+}
+
+.phase-icon.setup { background-image: url('/icons/setup.png'); }
 
 .setup-header h2 {
   font-size: 18px;
@@ -1045,6 +1151,8 @@ body {
   gap: 3rem;
   overflow: auto;
   max-height: 100%;
+  flex-grow: 1;
+  margin-top: -16px;
 }
 
 .roles-section {
@@ -1066,12 +1174,13 @@ body {
   align-items: center;
   justify-content: space-between;
   padding: 0.75rem;
+  padding-left: 1rem;
   background: rgba(255, 255, 255, 0.05);
-  border-radius: 6px;
+  border-radius: 15px;
 }
 
 .player-item.is-me {
-  border: 1px solid #4dabf7;
+  box-shadow: inset 0 0 0 2px #4dabf766;
 }
 
 .player-item.is-host {
@@ -1079,9 +1188,9 @@ body {
 }
 
 .player-badge {
-  background: #ffa500;
-  color: black;
-  padding: 0.2rem 0.5rem;
+  background: #ffa6001b;
+  color: #ffa500;
+  padding: 0.4rem 0.7rem;
   border-radius: 12px;
   font-size: 0.8rem;
 }
@@ -1112,54 +1221,162 @@ body {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
   gap: 1rem;
-  margin-bottom: 2rem;
+  padding: 16px;
 }
 
+
+
 .role-item {
-  position: relative;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 8px;
-  padding: 1rem;
+  background: #1b1b1b;
+  border-radius: 12px;
   cursor: pointer;
-  text-align: center;
-  transition: all 0.2s;
+  transition: all 0.3s ease;
+  position: relative;
+  overflow: hidden;
+  user-select: none;
+}
+
+.role-item .role-image {
+  filter: grayscale(.8);
 }
 
 .role-item:hover {
-  border-color: #ff6b6b;
-  transform: translateY(-2px);
+  transform: translateY(-3px);
+}
+
+.role-item:hover .role-image {
+  filter: grayscale(.5);
 }
 
 .role-item.selected {
-  border-color: #ffa500;
-  background: rgba(255, 165, 0, 0.1);
+  box-shadow: 0 0 0 2px rgb(0, 145, 255), 0 10px 20px rgba(0, 170, 255, 0.3);
+  background: #1e3a8a;
 }
 
-.role-item img {
-  aspect-ratio: 238 / 324;
-  margin-bottom: 0.5rem;
+.role-item.selected .role-image {
+  filter: none;
 }
 
-.role-name {
-  font-size: 0.9rem;
-  font-weight: 500;
+.role-item.readonly {
+  cursor: default;
+  opacity: 0.8;
+}
+
+.role-item.loading {
+  opacity: 0.6;
+}
+
+.role-image-container {
+  position: relative;
+  display: flex;
+  justify-content: center;
 }
 
 .role-count {
   position: absolute;
   top: -8px;
   right: -8px;
+  background: #3b82f6;
+  color: white;
+  border-radius: 50%;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.night-action-badge {
+  position: absolute;
+  bottom: 12px;
+  right: 12px;
+  border-radius: 12px;
+  padding: 4px 8px 3px 6px;
+  background: #fbbe2415;
+  color: #fbbe24;
+  box-shadow: inset 0 0 0 1px #fbbe2420;
+  font-size: 0.75rem;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-weight: 800;
+  backdrop-filter: blur(5px);
+}
+
+.night-icon {
+  font-size: 0.7rem;
+}
+
+.night-order {
+  font-weight: 600;
+}
+
+.role-info {
+  text-align: center;
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 100%;
+  padding: 16px 16px;
+  background: rgba(0, 0, 0, 0.7);
+  transform: translateY(5px);
+  transition: 0.3s;
+  backdrop-filter: blur(20px);
+  visibility: hidden;
+  opacity: 0;
+}
+
+.role-item:hover .role-info {
+  transform: translateY(0);
+  visibility: visible;
+  opacity: .98;
+}
+
+.role-description {
+  font-size: 12px;
+  text-align: left;
+  color: #d1d5db;
+  line-height: 1.2;
+  hyphens: auto;
+}
+
+.role-item img {
+  aspect-ratio: 238 / 324;
+  width: 100%;
+  pointer-events: none;
+  transition: .2s;
+}
+
+.role-name {
+  font-size: 16px;
+  font-weight: 700;
+  text-align: left;
+  color: #fff;
+  margin-bottom: 4px;
+}
+
+.role-count {
+  position: absolute;
+  top: 12px;
+  left: 12px;
   background: #ffa500;
   color: black;
   width: 24px;
   height: 24px;
+  padding-top: 2px;
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
   font-weight: bold;
   font-size: 0.8rem;
+  text-align: center;
+  background: #fbbe2415;
+  color: #fbbe24;
+  box-shadow: inset 0 0 0 1px #fbbe2420;
+  backdrop-filter: blur(5px);
 }
 
 .balance-info {
@@ -1407,8 +1624,15 @@ body {
 
 /* === АДАПТИВНОСТЬ === */
 
+@media (min-width: 1440px) {
+  .roles-grid {
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  }
+}
+
 @media (max-width: 768px) {
   .game-page {
+    height: auto;
     grid-template-columns: 1fr;
     grid-template-areas: 
       "header"
@@ -1419,7 +1643,6 @@ body {
   .game-sidebar {
     height: 40vh;
     border-left: none;
-    border-top: 1px solid rgba(255, 255, 255, 0.1);
   }
   
   .content-layout {

@@ -17,10 +17,14 @@
         :class="getMessageClass(message)"
       >
         <div class="message-header">
-          <span class="message-sender">{{ getSenderDisplay(message) }}</span>
-          <span v-if="message.senderRole && shouldShowRole(message)" class="message-role">
-            {{ getRoleName(message.senderRole) }}
-          </span>
+          <div class="message-top">
+            <span class="message-sender">{{ getSenderDisplay(message) }}</span>
+            <span v-if="message.senderRole && shouldShowRole(message)" class="message-role">
+                {{ getRoleName(message.senderRole) }}
+            </span>
+            <span v-else-if="message.type == 'whisper'" class="message-role">Шепот</span>
+            <span v-else-if="message.isOwn == true" class="message-role">(Вы)</span>
+          </div>
           <span class="message-time">{{ formatTime(message.timestamp) }}</span>
         </div>
         <div class="message-text">{{ message.text }}</div>

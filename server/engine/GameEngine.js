@@ -21,21 +21,80 @@ export class GameEngine {
     const players = Array.from(this.room.players.values()).filter(p => p.role !== 'game_master')
     const roles = [...this.room.selectedRoles]
     
-    // Перемешиваем роли
-    for (let i = roles.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [roles[i], roles[j]] = [roles[j], roles[i]]
+    // Разделяем роли на оборотней и остальных
+    const werewolfRoles = roles.filter(role => {
+      const roleData = this.getRoleData(role)
+      return roleData && roleData.team === 'werewolf'
+    })
+    
+    const otherRoles = roles.filter(role => {
+      const roleData = this.getRoleData(role)
+      return !roleData || roleData.team !== 'werewolf'
+    })
+    
+    // Перемешиваем каждую категорию отдельно
+    this.shuffleArray(werewolfRoles)
+    this.shuffleArray(otherRoles)
+    
+    // Гарантируем, что хотя бы один оборотень попадёт игрокам
+    const playerRoles = []
+    const centerRoles = []
+    
+    if (werewolfRoles.length > 0 && players.length > 0) {
+      // Добавляем первого оборотня в роли игроков
+      playerRoles.push(werewolfRoles[0])
+      
+      // Распределяем оставшихся оборотней
+      for (let i = 1; i < werewolfRoles.length; i++) {
+        if (playerRoles.length < players.length) {
+          playerRoles.push(werewolfRoles[i])
+        } else {
+          centerRoles.push(werewolfRoles[i])
+        }
+      }
     }
+    
+    // Добавляем остальные роли
+    for (const role of otherRoles) {
+      if (playerRoles.length < players.length) {
+        playerRoles.push(role)
+      } else {
+        centerRoles.push(role)
+      }
+    }
+    
+    // Перемешиваем финальный список ролей игроков
+    this.shuffleArray(playerRoles)
     
     // Назначаем роли игрокам
     players.forEach((player, index) => {
-      if (index < roles.length) {
-        player.role = roles[index]
+      if (index < playerRoles.length) {
+        player.role = playerRoles[index]
       }
     })
     
     // Оставшиеся роли - центральные карты
-    this.room.centerCards = roles.slice(players.length)
+    this.room.centerCards = centerRoles
+  }
+  
+  // Вспомогательный метод для перемешивания массива
+  shuffleArray(array) {
+    for (let i = array.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [array[i], array[j]] = [array[j], array[i]]
+    }
+  }
+  
+  // Вспомогательный метод для получения данных роли
+  getRoleData(roleId) {
+    try {
+      const { getAllRoles } = require('../../../shared/rolesRegistry.js')
+      const allRoles = getAllRoles()
+      return allRoles[roleId]
+    } catch (error) {
+      console.error('Failed to get role data:', error)
+      return null
+    }
   }
 
   async setPhase(newPhase) {

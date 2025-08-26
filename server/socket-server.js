@@ -430,10 +430,8 @@ const handleAdminAction = (socket, data) => {
     
     switch (action) {
       case 'kill':
-        if (room.gameEngine) {
-          room.gameEngine.killPlayer(targetId)
-          room.addSystemMessage(`${target.name} был убит администратором`)
-        }
+        target.alive = false
+        room.addSystemMessage(`${target.name} был убит администратором`)
         break
       case 'revive':
         target.alive = true
