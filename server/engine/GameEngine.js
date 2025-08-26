@@ -1,5 +1,5 @@
 import { GAME_PHASES, PHASE_DURATIONS } from '../utils/constants.js'
-import { getNightRoles, executeRoleAction } from '../roles/rolesList.js'
+import { getNightRoles, executeRoleAction, getRoleInfo } from '../roles/rolesList.js'
 
 export class GameEngine {
   constructor(room) {
@@ -12,9 +12,9 @@ export class GameEngine {
     this.protectedPlayers = []
   }
 
-  startGame() {
+  async startGame() {
     this.assignRoles()
-    this.setPhase(GAME_PHASES.INTRODUCTION)
+    await this.setPhase(GAME_PHASES.INTRODUCTION)
   }
 
   assignRoles() {
@@ -38,7 +38,7 @@ export class GameEngine {
     this.room.centerCards = roles.slice(players.length)
   }
 
-  setPhase(newPhase) {
+  async setPhase(newPhase) {
     this.currentPhase = newPhase
     this.room.gameState = newPhase
     
@@ -54,7 +54,7 @@ export class GameEngine {
         this.startNightPhase()
         break
       case GAME_PHASES.DAY:
-        this.announceNightResults()
+        await this.announceNightResults()
         break
       case GAME_PHASES.VOTING:
         this.room.votes.clear()
@@ -66,36 +66,14 @@ export class GameEngine {
       phase: newPhase,
       timer: PHASE_DURATIONS[newPhase] || 0
     })
+    
+    // Обновляем состояние комнаты (включая права чата)
+    this.room.broadcast('game-updated', { room: this.room.getClientData() })
   }
 
   updateChatPermissions() {
-    switch (this.currentPhase) {
-      case GAME_PHASES.INTRODUCTION:
-      case GAME_PHASES.DAY:
-        this.room.chatPermissions = {
-          canChat: true,
-          canSeeAll: true,
-          canWhisper: true,
-          werewolfChat: false
-        }
-        break
-      case GAME_PHASES.NIGHT:
-        this.room.chatPermissions = {
-          canChat: false,
-          canSeeAll: false,
-          canWhisper: true,
-          werewolfChat: true
-        }
-        break
-      case GAME_PHASES.VOTING:
-        this.room.chatPermissions = {
-          canChat: false,
-          canSeeAll: false,
-          canWhisper: true,
-          werewolfChat: false
-        }
-        break
-    }
+    // Используем метод GameRoom для обновления прав чата
+    this.room.updateChatPermissions()
   }
 
   startPhaseTimer() {
@@ -105,29 +83,33 @@ export class GameEngine {
     
     const duration = PHASE_DURATIONS[this.currentPhase]
     if (duration) {
-      this.phaseTimer = setTimeout(() => {
-        this.nextPhase()
+      this.phaseTimer = setTimeout(async () => {
+        await this.nextPhase()
       }, duration * 1000)
     }
   }
 
-  nextPhase() {
+  async nextPhase() {
     switch (this.currentPhase) {
       case GAME_PHASES.INTRODUCTION:
-        this.setPhase(GAME_PHASES.NIGHT)
+        await this.setPhase(GAME_PHASES.NIGHT)
         break
       case GAME_PHASES.NIGHT:
-        this.setPhase(GAME_PHASES.DAY)
+        await this.setPhase(GAME_PHASES.DAY)
         break
       case GAME_PHASES.DAY:
-        this.setPhase(GAME_PHASES.VOTING)
+        await this.setPhase(GAME_PHASES.VOTING)
         break
       case GAME_PHASES.VOTING:
-        this.processVoting()
-        if (this.checkWinConditions()) {
-          this.setPhase(GAME_PHASES.ENDED)
-        } else {
-          this.setPhase(GAME_PHASES.NIGHT)
+        // Проверяем, не было ли голосование уже обработано досрочно
+        if (this.room.votingActive) {
+          this.processVoting()
+          if (this.checkWinConditions()) {
+            // Игра уже закончена в endGame(), ничего не делаем
+            console.log('🏆 Game ended, no phase transition needed')
+          } else {
+            await this.setPhase(GAME_PHASES.NIGHT)
+          }
         }
         break
     }
@@ -137,6 +119,11 @@ export class GameEngine {
     this.killedPlayers = []
     this.protectedPlayers = []
     this.nightActionIndex = 0
+    this.completedActions = new Set() // Отслеживание выполненных действий
+    this.currentPhaseTimer = null
+    this.werewolfVotes = new Map() // Голоса оборотней
+    this.pendingMessages = [] // Отложенные сообщения для отправки днём
+    this.attackedPlayers = [] // Игроки, на которых было покушение (для сообщений о защите)
     
     const players = Array.from(this.room.players.values())
     const playerRoles = players.map(p => p.role).filter(r => r && r !== 'game_master')
@@ -148,7 +135,7 @@ export class GameEngine {
   async processNextNightAction() {
     if (this.nightActionIndex >= this.nightRoles.length) {
       // Все действия выполнены, переходим к дню
-      setTimeout(() => this.nextPhase(), 2000)
+      setTimeout(async () => await this.nextPhase(), 2000)
       return
     }
 
@@ -156,6 +143,9 @@ export class GameEngine {
     const players = this.getPlayersWithRole(currentRole.id)
     
     if (players.length > 0) {
+      // Очищаем список выполненных действий для новой роли
+      this.completedActions.clear()
+      
       // Уведомляем игроков об их ходе
       players.forEach(player => {
         this.room.sendToPlayer(player.id, 'night-action-turn', {
@@ -164,15 +154,39 @@ export class GameEngine {
         })
       })
       
-      // Ждем 30 секунд на действие
-      setTimeout(() => {
-        this.nightActionIndex++
-        this.processNextNightAction()
+      // Устанавливаем таймер на 30 секунд
+      this.currentPhaseTimer = setTimeout(() => {
+        console.log(`⏰ Night action timeout for role ${currentRole.id}`)
+        this.nextNightAction()
       }, 30000)
     } else {
       // Нет игроков с этой ролью, пропускаем
-      this.nightActionIndex++
-      this.processNextNightAction()
+      this.nextNightAction()
+    }
+  }
+  
+  // Переход к следующему ночному действию
+  nextNightAction() {
+    if (this.currentPhaseTimer) {
+      clearTimeout(this.currentPhaseTimer)
+      this.currentPhaseTimer = null
+    }
+    
+    this.nightActionIndex++
+    this.processNextNightAction()
+  }
+  
+  // Проверяем, все ли игроки текущей роли выполнили действие
+  checkAllPlayersCompleted() {
+    if (this.nightActionIndex >= this.nightRoles.length) return
+    
+    const currentRole = this.nightRoles[this.nightActionIndex]
+    const players = this.getPlayersWithRole(currentRole.id)
+    
+    // Если все игроки с текущей ролью выполнили действие
+    if (players.length > 0 && this.completedActions.size >= players.length) {
+      console.log(`✅ All players with role ${currentRole.id} completed their actions`)
+      this.nextNightAction()
     }
   }
 
@@ -190,69 +204,268 @@ export class GameEngine {
       return { error: 'Сейчас не ваш ход' }
     }
 
+    // Проверяем, не выполнял ли уже этот игрок действие
+    if (this.completedActions.has(playerId)) {
+      return { error: 'Вы уже выполнили своё действие' }
+    }
+
     try {
       const result = await executeRoleAction(this, player, action)
+      
+      // Если действие успешно, отмечаем игрока как выполнившего действие
+      if (result && !result.error) {
+        this.completedActions.add(playerId)
+        console.log(`✅ Player ${player.name} (${player.role}) completed action`)
+        
+        // Проверяем, все ли игроки с этой ролью завершили действие
+        this.checkAllPlayersCompleted()
+      }
+      
       return result
     } catch (error) {
       return { error: error.message }
     }
   }
 
-  announceNightResults() {
+  async announceNightResults() {
+    console.log('🌅 Announcing night results...')
     const messages = []
     
+    // Обрабатываем голосование оборотней
+    this.processWerewolfVotes()
+    
+    // Отправляем отложенные личные сообщения игрокам
+    this.sendPendingMessages()
+    
+    // Небольшая задержка перед системными сообщениями (чтобы избежать конфликтов)
+    await new Promise(resolve => setTimeout(resolve, 50))
+    
+    // Удаляем дубликаты из списка убитых (на всякий случай)
+    this.killedPlayers = [...new Set(this.killedPlayers)]
+    
+    // Формируем сообщения о результатах ночи
     if (this.killedPlayers.length > 0) {
       this.killedPlayers.forEach(playerId => {
         const player = this.room.getPlayer(playerId)
-        if (player) {
+        if (player && player.alive) { // Проверяем, что игрок еще жив
           player.alive = false
           messages.push(`${player.name} был убит ночью`)
+          console.log(`💀 ${player.name} killed during night`)
+        }
+      })
+    } else if (this.attackedPlayers.length > 0) {
+      // Были покушения, но все защищены
+      this.attackedPlayers.forEach(playerId => {
+        const player = this.room.getPlayer(playerId)
+        if (player) {
+          messages.push(`Ночью было совершено покушение на ${player.name}, но его защитил страж`)
+          console.log(`🛡️ ${player.name} was attacked but protected`)
         }
       })
     } else {
       messages.push('Ночь прошла спокойно')
+      console.log('😴 Peaceful night - no kills')
     }
     
     messages.forEach(msg => {
       this.room.addSystemMessage(msg, 'game-event')
     })
+    
+    // Обновляем состояние комнаты для всех игроков
+    this.room.broadcast('game-updated', { room: this.room.getClientData() })
+  }
+  
+  // Добавление сообщения в пул для отправки днём
+  addPendingMessage(playerId, message) {
+    this.pendingMessages.push({ playerId, message })
+  }
+  
+  // Отправка всех отложенных сообщений
+  sendPendingMessages() {
+    this.pendingMessages.forEach(({ playerId, message }) => {
+      this.room.addSystemWhisper(message, playerId)
+    })
+    this.pendingMessages = [] // Очищаем после отправки
+  }
+  
+  processWerewolfVotes() {
+    if (!this.werewolfVotes || this.werewolfVotes.size === 0) {
+      console.log('No werewolf votes to process')
+      return
+    }
+    
+    // Подсчитываем голоса
+    const voteCounts = new Map()
+    for (const [voterId, targetId] of this.werewolfVotes) {
+      if (targetId) {
+        voteCounts.set(targetId, (voteCounts.get(targetId) || 0) + 1)
+      }
+    }
+    
+    if (voteCounts.size === 0) {
+      console.log('No valid werewolf votes')
+      return
+    }
+    
+    // Находим игрока(ов) с наибольшим количеством голосов
+    const maxVotes = Math.max(...voteCounts.values())
+    const victims = []
+    
+    for (const [targetId, votes] of voteCounts) {
+      if (votes === maxVotes) {
+        victims.push(targetId)
+      }
+    }
+    
+    // Если ничья, никто не умирает
+    if (victims.length > 1) {
+      console.log(`Werewolf voting tie between ${victims.length} players - no kill`)
+      return
+    }
+    
+    // Убиваем выбранного игрока (если он не защищен и еще не убит)
+    if (victims.length === 1) {
+      const victimId = victims[0]
+      
+      // Отслеживаем атакованного игрока (для сообщений о защите)
+      if (!this.attackedPlayers.includes(victimId)) {
+        this.attackedPlayers.push(victimId)
+      }
+      
+      if (!this.protectedPlayers.includes(victimId) && !this.killedPlayers.includes(victimId)) {
+        this.killedPlayers.push(victimId)
+        const victim = this.room.getPlayer(victimId)
+        console.log(`🐺 Werewolves killed ${victim?.name} (${victimId})`)
+      } else if (this.protectedPlayers.includes(victimId)) {
+        console.log(`🛡️ Target was protected from werewolf attack`)
+      } else {
+        console.log(`⚠️ Target already killed by another action`)
+      }
+    }
   }
 
   processVoting() {
     this.room.votingActive = false
-    const result = this.room.countVotes()
+    const result = this.room.getVotingResults()
+    
+    // Показываем детальные результаты голосования в чате
+    this.announceVotingResults(result)
     
     // Исключаем игрока(ов) с наибольшим количеством голосов
+    const huntersKilled = []
     if (result.eliminated.length > 0) {
       result.eliminated.forEach(playerId => {
         const player = this.room.getPlayer(playerId)
         if (player) {
           player.alive = false
-          this.room.addSystemMessage(`${player.name} был исключен голосованием`, 'voting-result')
+          
+          // Проверяем, если убили охотника
+          if (player.role === 'hunter') {
+            huntersKilled.push(player)
+          }
+          
+          const roleInfo = getRoleInfo(player.role)
+          const roleName = roleInfo?.name || player.role
+          this.room.addSystemMessage(`💀 ${player.name} (${roleName}) был исключен голосованием`, 'voting-result')
         }
       })
     } else {
       this.room.addSystemMessage('Никто не был исключен', 'voting-result')
     }
     
+    // Обрабатываем месть охотников
+    this.processHunterRetaliation(huntersKilled, result)
+    
     // Показываем результаты голосования
     this.room.broadcast('voting-ended', result)
+    
+    // ВАЖНО: Обновляем состояние игры для всех игроков
+    this.room.broadcast('game-updated', { room: this.room.getClientData() })
+  }
+  
+  announceVotingResults(result) {
+    const { voteCounts, abstainCount, totalVotes } = result
+    
+    // Сортируем по количеству голосов
+    const sortedVotes = Object.entries(voteCounts)
+      .sort(([,a], [,b]) => b - a)
+    
+    // Формируем одно сообщение со всеми результатами
+    let message = '📊 Результаты голосования: '
+    
+    const voteParts = []
+    
+    if (sortedVotes.length > 0) {
+      sortedVotes.forEach(([playerId, votes]) => {
+        const player = this.room.getPlayer(playerId)
+        if (player) {
+          const plural = votes === 1 ? 'голос' : votes < 5 ? 'голоса' : 'голосов'
+          voteParts.push(`${player.name} - ${votes} ${plural}`)
+        }
+      })
+    }
+    
+    if (abstainCount > 0) {
+      const plural = abstainCount === 1 ? 'воздержался' : 'воздержались'
+      voteParts.push(`Воздержались: ${abstainCount}`)
+    }
+    
+    if (voteParts.length === 0) {
+      message += 'Никто не голосовал'
+    } else {
+      message += voteParts.join(', ')
+    }
+    
+    this.room.addSystemMessage(message, 'voting-result')
+  }
+  
+  processHunterRetaliation(huntersKilled, votingResult) {
+    huntersKilled.forEach(hunter => {
+      // Нужно найти за кого голосовал этот охотник
+      const hunterVote = this.room.votes.get(hunter.id)
+      
+      if (hunterVote && hunterVote !== null) {
+        const target = this.room.getPlayer(hunterVote)
+        if (target && target.alive) {
+          target.alive = false
+          const targetRoleInfo = getRoleInfo(target.role)
+          const targetRoleName = targetRoleInfo?.name || target.role
+          this.room.addSystemMessage(
+            `💀 ${hunter.name} (Охотник) забирает с собой ${target.name} (${targetRoleName})!`, 
+            'voting-result'
+          )
+        }
+      } else {
+        this.room.addSystemMessage(
+          `💀 ${hunter.name} (Охотник) умирает, но не выбрал цель для мести`, 
+          'voting-result'
+        )
+      }
+    })
   }
 
   checkWinConditions() {
     const alivePlayers = Array.from(this.room.players.values()).filter(p => p.alive)
     const deadPlayers = Array.from(this.room.players.values()).filter(p => !p.alive)
     
+    console.log('🏆 Checking win conditions...')
+    console.log('🏆 Alive players:', alivePlayers.map(p => `${p.name} (${p.role})`))
+    console.log('🏆 Dead players:', deadPlayers.map(p => `${p.name} (${p.role})`))
+    
     // 1. Неудачник убит - он побеждает
     const tannerKilled = deadPlayers.find(p => p.role === 'tanner')
     if (tannerKilled) {
+      console.log('🏆 WIN: Tanner killed - Tanner wins!')
       this.endGame('tanner', [tannerKilled.id])
       return true
     }
     
     // 2. Хотя бы один оборотень убит - победа деревни
-    const werewolfKilled = deadPlayers.find(p => p.role?.includes('werewolf') && p.role !== 'minion')
+    const werewolfKilled = deadPlayers.find(p => 
+      this.getTeam(p.role) === 'werewolf' && p.role !== 'minion'
+    )
     if (werewolfKilled) {
+      console.log(`🏆 WIN: Werewolf ${werewolfKilled.name} killed - Village wins!`)
       const villageWinners = alivePlayers.filter(p => 
         ['village', 'special'].includes(this.getTeam(p.role)) || p.role === 'minion'
       )
@@ -265,6 +478,7 @@ export class GameEngine {
       this.getTeam(p.role) === 'village' || p.role === 'tanner'
     )
     if (aliveVillagers.length === 0) {
+      console.log('🏆 WIN: All villagers killed - Werewolves win!')
       const werewolfWinners = alivePlayers.filter(p => 
         this.getTeam(p.role) === 'werewolf'
       )
@@ -272,12 +486,12 @@ export class GameEngine {
       return true
     }
     
+    console.log('🏆 No win condition met - game continues')
     return false
   }
 
   getTeam(roleId) {
-    const { getRole } = require('../utils/gameHelpers.js')
-    const roleInfo = getRole(roleId)
+    const roleInfo = getRoleInfo(roleId)
     return roleInfo?.team || 'village'
   }
 
@@ -288,7 +502,23 @@ export class GameEngine {
       endedAt: Date.now()
     }
     
-    this.room.addSystemMessage(`Игра окончена! Победила команда: ${this.getTeamName(winnerTeam)}`, 'game-end')
+    // Устанавливаем фазу завершения игры
+    this.room.gameState = GAME_PHASES.ENDED
+    
+    this.room.addSystemMessage(`🏆 Игра окончена! Победила команда: ${this.getTeamName(winnerTeam)}`, 'game-end')
+    
+    // Обновляем состояние для всех игроков
+    this.room.broadcast('game-updated', { room: this.room.getClientData() })
+    
+    // Останавливаем все таймеры
+    if (this.phaseTimer) {
+      clearTimeout(this.phaseTimer)
+      this.phaseTimer = null
+    }
+    if (this.currentPhaseTimer) {
+      clearTimeout(this.currentPhaseTimer)
+      this.currentPhaseTimer = null
+    }
   }
 
   getTeamName(team) {
@@ -302,13 +532,15 @@ export class GameEngine {
 
   // Методы для ролей
   killPlayer(playerId) {
-    if (!this.protectedPlayers.includes(playerId)) {
+    if (!this.protectedPlayers.includes(playerId) && !this.killedPlayers.includes(playerId)) {
       this.killedPlayers.push(playerId)
     }
   }
 
   protectPlayer(playerId) {
-    this.protectedPlayers.push(playerId)
+    if (!this.protectedPlayers.includes(playerId)) {
+      this.protectedPlayers.push(playerId)
+    }
   }
 
   swapRoles(playerId1, playerId2) {
@@ -331,9 +563,33 @@ export class GameEngine {
     }
   }
 
+  forceEndVoting() {
+    if (this.room.gameState !== GAME_PHASES.VOTING || !this.room.votingActive) {
+      throw new Error('Голосование не активно')
+    }
+    
+    console.log('🔧 Force ending voting phase by admin')
+    this.processVoting()
+    
+    // Проверяем условия победы и переходим к следующей фазе
+    setTimeout(async () => {
+      if (this.checkWinConditions()) {
+        // Игра уже закончена в endGame(), ничего не делаем
+        console.log('🏆 Game ended, no phase transition needed')
+      } else {
+        await this.setPhase(GAME_PHASES.NIGHT)
+      }
+    }, 2000)
+    
+    return { success: true, message: 'Голосование принудительно завершено' }
+  }
+
   destroy() {
     if (this.phaseTimer) {
       clearTimeout(this.phaseTimer)
+    }
+    if (this.currentPhaseTimer) {
+      clearTimeout(this.currentPhaseTimer)
     }
   }
 }

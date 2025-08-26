@@ -24,6 +24,7 @@
     "consola": "^3.4.2",
     "cross-env": "^10.0.0",
     "express": "^5.1.0",
+    "express-rate-limit": "^8.0.1",
     "less": "^4.4.0",
     "nuxt": "^4.0.1",
     "socket.io": "^4.8.1",

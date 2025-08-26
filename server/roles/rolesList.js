@@ -39,6 +39,15 @@ export const executeRoleAction = async (gameEngine, player, action) => {
     return { error: 'У этой роли нет ночных действий' }
   }
   
+  // Универсальная обработка пропуска действия
+  if (action.type === 'skip') {
+    return {
+      success: true,
+      message: 'Вы пропустили свой ход',
+      data: { skipped: true }
+    }
+  }
+  
   try {
     return await getRoleHandler(roleId)(gameEngine, player, action)
   } catch (error) {
@@ -54,11 +63,14 @@ const getRoleHandler = (roleId) => {
     werewolf: handleWerewolf,
     mystic_wolf: handleMysticWolf,
     minion: handleMinion,
+    dream_wolf: handleDreamWolf,
     seer: handleSeer,
     robber: handleRobber,
     troublemaker: handleTroublemaker,
     drunk: handleDrunk,
     bodyguard: handleBodyguard,
+    hunter: handleHunter,
+    insomniac: handleInsomniac,
     doppelganger: handleDoppelganger,
     werewolf_2: handleWerewolf,
     werewolf_3: handleWerewolf
@@ -117,7 +129,7 @@ const handleSeer = async (gameEngine, player, action) => {
     return {
       success: true,
       message: `Роль ${target.name}: ${getRoleInfo(target.role)?.name || target.role}`,
-      data: { targetRole: target.role }
+      data: { targetRole: target.role, targetName: target.name }
     }
   }
   
@@ -213,8 +225,38 @@ const handleBodyguard = async (gameEngine, player, action) => {
 }
 
 const handleMysticWolf = async (gameEngine, player, action) => {
-  // Упрощенная версия - только голосование
-  return handleWerewolf(gameEngine, player, action)
+  const { type, targetId } = action
+  const room = gameEngine.room
+  
+  if (type === 'vote_kill' && targetId) {
+    // Голосование за убийство (как обычный оборотень)
+    return handleWerewolf(gameEngine, player, action)
+  }
+  
+  if (type === 'look_player' && targetId) {
+    // Просмотр роли игрока (как провидец)
+    const target = room.getPlayer(targetId)
+    if (!target || target.id === player.id) {
+      return { error: 'Недопустимая цель' }
+    }
+    
+    return {
+      success: true,
+      message: `Роль ${target.name}: ${getRoleInfo(target.role)?.name || target.role}`,
+      data: { targetRole: target.role, targetName: target.name }
+    }
+  }
+  
+  // Показать других оборотней (базовая информация)
+  const werewolves = Array.from(room.players.values())
+    .filter(p => p.alive && room.isWerewolf(p.role) && p.id !== player.id)
+    .map(p => ({ id: p.id, name: p.name, role: p.role }))
+  
+  return {
+    success: true,
+    message: werewolves.length > 0 ? 'Вы нашли других оборотней. Выберите действие.' : 'Вы единственный оборотень. Выберите действие.',
+    data: { werewolves }
+  }
 }
 
 const handleMinion = async (gameEngine, player, action) => {
@@ -250,6 +292,38 @@ const handleDoppelganger = async (gameEngine, player, action) => {
     success: true,
     message: `Вы скопировали роль ${target.name}: ${getRoleInfo(target.role)?.name || target.role}`,
     data: { newRole: target.role }
+  }
+}
+
+const handleDreamWolf = async (gameEngine, player, action) => {
+  // Волк-сновидец не делает ничего, только показывает палец оборотням
+  return {
+    success: true,
+    message: 'Вы крепко спите...',
+    data: { sleeping: true }
+  }
+}
+
+const handleHunter = async (gameEngine, player, action) => {
+  // У охотника нет ночного действия, но он может выбрать цель днем
+  return {
+    success: true,
+    message: 'Охотник готов к бою',
+    data: {}
+  }
+}
+
+const handleInsomniac = async (gameEngine, player, action) => {
+  const room = gameEngine.room
+  const roleInfo = room.getRoleInfo(player.role)
+  
+  return {
+    success: true,
+    message: `Ваша роль: ${roleInfo?.name || player.role}`,
+    data: {
+      currentRole: player.role,
+      roleInfo
+    }
   }
 }
 

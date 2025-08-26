@@ -1,7 +1,3 @@
-/**
- * Модель игровой комнаты с интеграцией GameEngine
- */
-
 import { GameEngine } from '../engine/GameEngine.js'
 import { getRoleInfo, validateRole } from '../roles/rolesList.js'
 import { generateRoomId, sanitizeHtml } from '../utils/gameHelpers.js'
@@ -24,15 +20,11 @@ export class GameRoom {
     this.gameState = GAME_PHASES.SETUP
     this.gameEngine = null
     this.gameResult = null
+    this.votingRounds = 0
     
     // Чат
     this.chat = []
-    this.chatPermissions = {
-      canChat: true,
-      canSeeAll: true,
-      canWhisper: true,
-      werewolfChat: false
-    }
+    this.chatPermissions = this.getDefaultChatPermissions()
     
     // Голосование
     this.votes = new Map()
@@ -40,6 +32,70 @@ export class GameRoom {
     
     // Подключения Socket.IO
     this.sockets = new Map()
+  }
+  
+  // ✅ ПРАВА ЧАТА ПО УМОЛЧАНИЮ
+  getDefaultChatPermissions() {
+    return {
+      canChat: true,
+      canSeeAll: true,
+      canWhisper: true,
+      werewolfChat: false
+    }
+  }
+
+  // ✅ ОБНОВЛЕНИЕ ПРАВ ЧАТА ПО ФАЗАМ
+  updateChatPermissions() {
+    switch (this.gameState) {
+      case GAME_PHASES.SETUP:
+      case GAME_PHASES.INTRODUCTION:
+        this.chatPermissions = {
+          canChat: true,
+          canSeeAll: true,
+          canWhisper: true,
+          werewolfChat: false
+        }
+        break
+        
+      case GAME_PHASES.NIGHT:
+        this.chatPermissions = {
+          canChat: true,           // Оборотни могут говорить
+          canSeeAll: false,        // Обычные не видят сообщения
+          canWhisper: true,        // Личные сообщения разрешены
+          werewolfChat: true       // Только оборотни видят ночной чат
+        }
+        break
+        
+      case GAME_PHASES.DAY:
+        this.chatPermissions = {
+          canChat: true,
+          canSeeAll: true,
+          canWhisper: true,
+          werewolfChat: false
+        }
+        break
+        
+      case GAME_PHASES.VOTING:
+        this.chatPermissions = {
+          canChat: false,          // Чат полностью отключен
+          canSeeAll: false,
+          canWhisper: true,        // Только шепот ведущему
+          werewolfChat: false
+        }
+        break
+        
+      case GAME_PHASES.ENDED:
+        this.chatPermissions = {
+          canChat: true,
+          canSeeAll: true,
+          canWhisper: true,
+          werewolfChat: false
+        }
+        break
+        
+      default:
+        this.chatPermissions = this.getDefaultChatPermissions()
+    }
   }
   
   addPlayer(socketId, name) {
@@ -118,7 +174,7 @@ export class GameRoom {
     }
   }
   
-  startGame() {
+  async startGame() {
     const playerCount = Array.from(this.players.values())
       .filter(p => p.role !== 'game_master').length
     
@@ -131,15 +187,18 @@ export class GameRoom {
     }
     
     this.gameEngine = new GameEngine(this)
-    this.gameEngine.startGame()
+    await this.gameEngine.startGame()
     
     this.addSystemMessage('Игра началась! Удачи!', MESSAGE_TYPES.GAME_EVENT)
   }
-  
+
+  // ✅ ДОБАВЛЕНИЕ СООБЩЕНИЯ С ПРАВИЛЬНЫМИ ТИПАМИ
   addMessage(senderId, text, type = MESSAGE_TYPES.PUBLIC, recipientId = null) {
     const sender = this.getPlayer(senderId)
     if (!sender) return
-    
+
+    const recipient = recipientId ? this.getPlayer(recipientId) : null
+
     const message = {
       id: Date.now(),
       senderId,
@@ -148,115 +207,168 @@ export class GameRoom {
       text: sanitizeHtml(text),
       type,
       recipientId,
+      recipientName: recipient ? recipient.name : null,
       timestamp: Date.now()
     }
-    
+
     this.chat.push(message)
-    
-    // Отправляем сообщение нужным получателям
-    this.broadcastMessage(message)
+    return message
   }
-  
+
+  // ✅ СИСТЕМНЫЕ СООБЩЕНИЯ
   addSystemMessage(text, type = MESSAGE_TYPES.SYSTEM) {
     const message = {
       id: Date.now(),
       senderId: 'system',
       senderName: 'Система',
+      senderRole: null,
       text: sanitizeHtml(text),
       type,
       timestamp: Date.now()
     }
-    
+
     this.chat.push(message)
+    
+    // Отправляем всем подключенным
     this.broadcast('new-message', { message })
+    
+    return message
   }
-  
-  broadcastMessage(message) {
-    // Отправляем сообщение только тем, кто может его видеть
-    for (const [playerId, socket] of this.sockets) {
-      if (this.canPlayerSeeMessage(playerId, message)) {
-        try {
-          socket.emit('new-message', { message })
-        } catch (error) {
-          console.error(`❌ Failed to send message to ${playerId}:`, error)
-        }
-      }
+
+  // ✅ СИСТЕМНЫЕ ЛИЧНЫЕ СООБЩЕНИЯ
+  addSystemWhisper(text, recipientId) {
+    const recipient = this.getPlayer(recipientId)
+    if (!recipient) return null
+
+    const message = {
+      id: Date.now(),
+      senderId: 'system',
+      senderName: 'Система',
+      senderRole: null,
+      text: sanitizeHtml(text),
+      type: MESSAGE_TYPES.WHISPER,
+      recipientId,
+      recipientName: recipient.name,
+      timestamp: Date.now()
     }
+
+    this.chat.push(message)
+    
+    // Отправляем только получателю
+    console.log(`📥 Sending private system message to ${recipientId} (${recipient.name}): "${text.substring(0, 50)}..."`)
+    this.sendToPlayer(recipientId, 'new-message', { message })
+    
+    return message
   }
-  
-  canPlayerSeeMessage(playerId, message) {
-    const player = this.getPlayer(playerId)
-    if (!player) return false
+
+  // ✅ ПРОВЕРКА - ЯВЛЯЕТСЯ ЛИ ИГРОК ОБОРОТНЕМ
+  isWerewolf(roleId) {
+    if (!roleId) return false
     
-    // Системные сообщения видят все
-    if (message.type === MESSAGE_TYPES.SYSTEM || message.senderId === 'system') {
-      return true
-    }
+    const werewolfRoles = [
+      'werewolf', 'werewolf_2', 'werewolf_3',
+      'mystic_wolf', 'alpha_wolf', 'dream_wolf'
+    ]
     
-    // Личные сообщения видят только участники
-    if (message.type === MESSAGE_TYPES.WHISPER) {
-      return message.senderId === playerId || message.recipientId === playerId
-    }
-    
-    // game_master видит все
-    if (player.role === 'game_master') {
-      return true
-    }
-    
-    // В ночную фазу только оборотни видят чат
-    if (this.gameState === GAME_PHASES.NIGHT && this.chatPermissions.werewolfChat) {
-      return this.isWerewolf(player.role) || message.senderId === playerId
-    }
-    
-    // В фазу голосования чат отключен (кроме шепота ведущему)
-    if (this.gameState === GAME_PHASES.VOTING) {
-      return message.type === MESSAGE_TYPES.WHISPER && message.recipientId && 
-             this.getPlayer(message.recipientId)?.role === 'game_master'
-    }
-    
-    return this.chatPermissions.canSeeAll
+    return werewolfRoles.includes(roleId)
   }
-  
+
+  // ✅ ДОЛЖНА ЛИ БЫТЬ ВИДНА РОЛЬ
   shouldShowRole(playerId) {
     const player = this.getPlayer(playerId)
     if (!player) return false
+
+    // В setup фазе роли не видны
+    if (this.gameState === GAME_PHASES.SETUP) return false
     
+    // Свою роль видишь всегда (кроме setup)
+    return true
+  }
+
+  // ✅ ПРАВА НА ПРОСМОТР РОЛЕЙ ДРУГИХ ИГРОКОВ
+  shouldShowPlayerRole(targetPlayer, viewerPlayer) {
+    if (!viewerPlayer || !targetPlayer) return false
+    
+    // В setup фазе роли не показываются
+    if (this.gameState === GAME_PHASES.SETUP) return false
+
+    // Свою роль видишь всегда
+    if (targetPlayer.id === viewerPlayer.id) return true
+
     // game_master видит все роли
-    if (player.role === 'game_master') return true
-    
-    // Оборотни видят роли других оборотней
-    if (this.isWerewolf(player.role)) {
-      return this.gameState !== GAME_PHASES.SETUP
+    if (viewerPlayer.role === 'game_master') return true
+
+    // Оборотни видят других оборотней (после setup)
+    if (this.isWerewolf(viewerPlayer.role) && this.isWerewolf(targetPlayer.role)) {
+      return true
     }
-    
+
     return false
   }
   
-  isWerewolf(role) {
-    if (!role) return false
-    const roleInfo = getRoleInfo(role)
-    return roleInfo?.team === ROLE_TEAMS.WEREWOLF && role !== 'minion'
-  }
-  
-  votePlayer(voterId, targetId) {
+  addVote(voterId, targetId) {
     if (!this.votingActive) {
       throw new Error('Голосование не активно')
     }
     
     const voter = this.getPlayer(voterId)
     if (!voter || !voter.alive || voter.role === 'game_master') {
-      throw new Error('Вы не можете голосовать')
+      throw new Error('Игрок не может голосовать')
     }
     
     // null означает воздержание
     this.votes.set(voterId, targetId)
+    
+    // Проверяем, все ли проголосовали
+    this.checkVotingCompletion()
   }
   
-  countVotes() {
+  checkVotingCompletion() {
+    if (!this.votingActive) return
+    
+    // Считаем всех живых игроков (кроме game_master)
+    const eligibleVoters = Array.from(this.players.values())
+      .filter(p => p.alive && p.role !== 'game_master')
+    
+    const votesCount = this.votes.size
+    
+    console.log(`🗳️ Voting progress: ${votesCount}/${eligibleVoters.length} votes cast`)
+    console.log(`🗳️ Eligible voters:`, eligibleVoters.map(p => `${p.name} (${p.id})`))
+    console.log(`🗳️ Votes received:`, Array.from(this.votes.keys()))
+    
+    // Если все проголосовали, завершаем голосование досрочно
+    if (votesCount >= eligibleVoters.length && this.gameEngine) {
+      console.log(`✅ All ${eligibleVoters.length} players voted, ending voting phase early`)
+      
+      // Останавливаем таймер голосования
+      if (this.gameEngine.phaseTimer) {
+        clearTimeout(this.gameEngine.phaseTimer)
+        this.gameEngine.phaseTimer = null
+      }
+      
+      // Обрабатываем голосование немедленно
+      setTimeout(() => {
+        this.gameEngine.processVoting()
+        
+        // Переходим к следующей фазе
+        setTimeout(async () => {
+          // Проверяем условия победы - если игра закончилась, не переходим дальше
+          if (this.gameEngine.checkWinConditions()) {
+            // Игра уже закончена в endGame(), ничего не делаем
+            console.log('🏆 Game ended, no phase transition needed')
+          } else {
+            await this.gameEngine.setPhase(GAME_PHASES.NIGHT)
+          }
+        }, 2000)
+      }, 500) // Небольшая задержка для UI
+    }
+  }
+  
+  getVotingResults() {
     const voteCounts = new Map()
     let abstainCount = 0
     
-    for (const [, targetId] of this.votes) {
+    for (const [voterId, targetId] of this.votes) {
       if (targetId === null) {
         abstainCount++
       } else {
@@ -264,7 +376,7 @@ export class GameRoom {
       }
     }
     
-    // Находим максимальное количество голосов
+    // Находим игроков с максимальным количеством голосов
     const maxVotes = Math.max(0, ...voteCounts.values())
     const eliminated = []
     
@@ -312,6 +424,31 @@ export class GameRoom {
             room: this.getClientData(playerId)
           }
         }
+        
+        // Логируем системные сообщения для отладки
+        if (event === 'new-message' && data?.message?.senderId === 'system') {
+          console.log(`📢 Broadcasting system message to ${playerId}: "${data.message.text.substring(0, 50)}..."`)
+        }
+        
+        socket.emit(event, personalizedData)
+      } catch (error) {
+        console.error(`❌ Failed to send ${event} to ${playerId}:`, error)
+      }
+    }
+  }
+  
+  broadcastExcept(event, data, excludePlayerIds = []) {
+    for (const [playerId, socket] of this.sockets) {
+      if (excludePlayerIds.includes(playerId)) continue
+      
+      try {
+        let personalizedData = data
+        if (data && data.room && event === 'game-updated') {
+          personalizedData = {
+            ...data,
+            room: this.getClientData(playerId)
+          }
+        }
         socket.emit(event, personalizedData)
       } catch (error) {
         console.error(`❌ Failed to send ${event} to ${playerId}:`, error)
@@ -349,6 +486,7 @@ export class GameRoom {
       chatPermissions: this.chatPermissions,
       votingActive: this.votingActive,
       gameResult: this.gameResult,
+      votingRounds: this.votingRounds,
       players: Array.from(this.players.values()).map(p => ({
         id: p.id,
         name: p.name,
@@ -359,23 +497,6 @@ export class GameRoom {
         isMe: p.id === playerId
       }))
     }
-  }
-  
-  shouldShowPlayerRole(targetPlayer, viewerPlayer) {
-    if (!viewerPlayer) return false
-    
-    // Свою роль видишь всегда
-    if (targetPlayer.id === viewerPlayer.id) return true
-    
-    // game_master видит все роли
-    if (viewerPlayer.role === 'game_master') return true
-    
-    // Оборотни видят других оборотней
-    if (this.isWerewolf(viewerPlayer.role) && this.isWerewolf(targetPlayer.role)) {
-      return this.gameState !== GAME_PHASES.SETUP
-    }
-    
-    return false
   }
   
   destroy() {

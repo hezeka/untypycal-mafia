@@ -110,8 +110,13 @@ const getSenderDisplay = (message) => {
   }
   
   if (message.type === 'whisper') {
-    const recipient = gameState.room.players.find(p => p.id === message.recipientId)
-    return `${message.senderName} → ${recipient?.name || 'Неизвестно'}`
+    // Сначала пробуем использовать enriched данные из API
+    const recipientName = message.recipientName || 
+      // Fallback: ищем в текущих игроках
+      gameState.room.players.find(p => p.id === message.recipientId)?.name ||
+      'Неизвестно'
+      
+    return `${message.senderName} → ${recipientName}`
   }
   
   return message.senderName
@@ -145,7 +150,17 @@ const getMessageClass = (message) => {
     classes.push('message-game-event')
   }
   
-  if (message.senderId === gameState.player.id) {
+  // Проверяем принадлежность сообщения: по флагу API, по ID или по имени
+  const isOwn = message.isOwn || 
+                message.senderId === gameState.player.id ||
+                (message.senderName === gameState.player.name && message.senderId !== 'system')
+  
+  if (message.senderId !== 'system') {
+    console.log(`🎨 Message styling: sender=${message.senderName}, player=${gameState.player.name}, isOwn=${message.isOwn}, final=${isOwn}`)
+  }
+  
+  // Используем enriched данные из API или fallback к сравнению имени
+  if (isOwn) {
     classes.push('message-own')
   }
   

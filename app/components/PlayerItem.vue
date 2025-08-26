@@ -9,6 +9,7 @@
       'protected': player.protected,
       'disconnected': !player.connected,
       'speaking': isSpeaking(player.id),
+      'whispering': isWhispering(player.id),
       'non-votable': gameState.voting.active && gameState.room.phase === 'voting' && 
                      (player.role === 'game_master' || player.id === currentPlayer?.id)
     }"
@@ -49,6 +50,11 @@
           <div class="wave"></div>
           <div class="wave"></div>
         </div>
+      </div>
+      
+      <!-- Индикатор шепота -->
+      <div v-if="isWhispering(player.id)" class="indicator whispering">
+        <div class="whisper-icon">💬</div>
       </div>
       
       <!-- Голос -->
@@ -138,6 +144,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useGame } from '~/composables/useGame'
 import { useVoiceActivity } from '~/composables/useVoiceActivity'
+import { useSocket } from '~/composables/useSocket'
 
 const props = defineProps({
   player: {
@@ -150,6 +157,10 @@ const emit = defineEmits(['vote', 'admin-action'])
 
 const { gameState, currentPlayer, getRole } = useGame()
 const { speakingPlayers } = useVoiceActivity()
+const { socket } = useSocket()
+
+// Состояние шепчущих игроков
+const whisperingPlayers = ref(new Set())
 
 // Состояние меню
 const showAdminMenu = ref(false)
@@ -211,8 +222,27 @@ const isSpeaking = (playerId) => {
   return speakingPlayers.value.includes(playerId)
 }
 
+const isWhispering = (playerId) => {
+  return whisperingPlayers.value.has(playerId)
+}
+
 const hasVoted = (playerId) => {
   return gameState.voting.votes.hasOwnProperty(playerId)
+}
+
+// Обработка шепота
+const handleWhisperActivity = (data) => {
+  console.log('💬 Whisper activity received:', data)
+  if (data.playerId) {
+    console.log(`💬 Adding whisper indication for player ${data.playerId} (${data.playerName})`)
+    whisperingPlayers.value.add(data.playerId)
+    
+    // Убираем индикацию через 500ms
+    setTimeout(() => {
+      console.log(`💬 Removing whisper indication for player ${data.playerId}`)
+      whisperingPlayers.value.delete(data.playerId)
+    }, 500)
+  }
 }
 
 const handlePlayerClick = () => {
@@ -309,10 +339,20 @@ const handleClickOutside = (event) => {
 // Слушатель для закрытия меню
 onMounted(() => {
   document.addEventListener('click', handleClickOutside)
+  
+  // Прослушиваем события шепота
+  if (socket.value) {
+    socket.value.on('whisper-activity', handleWhisperActivity)
+  }
 })
 
 onUnmounted(() => {
   document.removeEventListener('click', handleClickOutside)
+  
+  // Отписываемся от событий шепота
+  if (socket.value) {
+    socket.value.off('whisper-activity', handleWhisperActivity)
+  }
 })
 </script>
 
@@ -351,6 +391,27 @@ onUnmounted(() => {
 .player-item.speaking {
   box-shadow: 0 0 20px rgba(255, 107, 107, 0.3);
   border: 1px solid rgba(255, 107, 107, 0.5);
+}
+
+.player-item.whispering {
+  box-shadow: 0 0 15px rgba(168, 85, 247, 0.4);
+  border: 1px solid rgba(168, 85, 247, 0.6);
+  animation: whisper-pulse 0.5s ease-in-out;
+}
+
+@keyframes whisper-pulse {
+  0% {
+    box-shadow: 0 0 5px rgba(168, 85, 247, 0.2);
+    border-color: rgba(168, 85, 247, 0.3);
+  }
+  50% {
+    box-shadow: 0 0 20px rgba(168, 85, 247, 0.6);
+    border-color: rgba(168, 85, 247, 0.8);
+  }
+  100% {
+    box-shadow: 0 0 15px rgba(168, 85, 247, 0.4);
+    border-color: rgba(168, 85, 247, 0.6);
+  }
 }
 
 .player-item.game-master {
@@ -450,6 +511,44 @@ onUnmounted(() => {
 
 .indicator.shield {
   font-size: 1rem;
+}
+
+.indicator.whispering {
+  background: rgba(168, 85, 247, 0.2);
+  border: 1px solid rgba(168, 85, 247, 0.5);
+  animation: whisper-icon-pulse 0.5s ease-in-out;
+}
+
+.whisper-icon {
+  font-size: 0.9rem;
+  animation: whisper-icon-bounce 0.5s ease-in-out;
+}
+
+@keyframes whisper-icon-pulse {
+  0% {
+    background: rgba(168, 85, 247, 0.1);
+    border-color: rgba(168, 85, 247, 0.3);
+    transform: scale(1);
+  }
+  50% {
+    background: rgba(168, 85, 247, 0.3);
+    border-color: rgba(168, 85, 247, 0.7);
+    transform: scale(1.1);
+  }
+  100% {
+    background: rgba(168, 85, 247, 0.2);
+    border-color: rgba(168, 85, 247, 0.5);
+    transform: scale(1);
+  }
+}
+
+@keyframes whisper-icon-bounce {
+  0%, 100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.2);
+  }
 }
 
 /* Анимация звуковых волн */

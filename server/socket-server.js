@@ -1,71 +1,132 @@
-/**
- * Главный сокет сервер с полной игровой логикой
- */
-
-import express from 'express'
+// server/socket-server.js
 import { createServer } from 'http'
 import { Server } from 'socket.io'
+import express from 'express'
+import cors from 'cors'
+import rateLimit from 'express-rate-limit'
+
 import { GameRoom } from './models/GameRoom.js'
-import { SimpleChatProcessor } from './services/SimpleChatProcessor.js'
-import { 
-  validateUsername, 
-  validateRoomCode, 
-  validateMessage, 
-  generateRoomId,
-  sanitizeHtml,
-  throttle 
-} from './utils/gameHelpers.js'
-import { SOCKET_EVENTS, LIMITS, ERROR_CODES, GAME_PHASES } from './utils/constants.js'
+import { ChatCommandProcessor } from './services/ChatCommandProcessor.js'
+import { SOCKET_EVENTS, ERROR_CODES, LIMITS, GAME_PHASES, MESSAGE_TYPES } from './utils/constants.js'
+import { sanitizeHtml } from './utils/gameHelpers.js'
+import { getRoleInfo } from './roles/rolesList.js'
+import { createLogger } from './utils/logger.js'
+
+const logger = createLogger('SocketServer')
+
+// Функция форматирования результатов ночных действий для чата
+const formatNightActionResult = (result, roleId) => {
+  const roleInfo = getRoleInfo(roleId)
+  const roleName = roleInfo?.name || roleId
+
+  // Провидец - просмотр роли игрока
+  if (result.data.targetRole) {
+    const targetRoleInfo = getRoleInfo(result.data.targetRole)
+    const targetRoleName = targetRoleInfo?.name || result.data.targetRole
+    const targetName = result.data.targetName || 'игрок'
+    return `🔮 Результат просмотра: ${targetName} имеет роль «${targetRoleName}»`
+  }
+  
+  // Провидец - просмотр центральных карт
+  if (result.data.centerCards && result.data.centerCards.length > 0) {
+    const cardNames = result.data.centerCards.map(card => {
+      const cardInfo = getRoleInfo(card)
+      return cardInfo?.name || card
+    })
+    return `🔮 Центральные карты: ${cardNames.join(', ')}`
+  }
+  
+  // Грабитель - новая роль
+  if (result.data.newRole) {
+    const newRoleInfo = getRoleInfo(result.data.newRole)
+    const newRoleName = newRoleInfo?.name || result.data.newRole
+    return `🔄 Ваша новая роль: «${newRoleName}»`
+  }
+  
+  // Миньон/Оборотень - информация о других оборотнях
+  if (result.data.werewolves && result.data.werewolves.length > 0) {
+    const werewolfList = result.data.werewolves.map(wolf => {
+      const wolfRoleInfo = getRoleInfo(wolf.role)
+      return `${wolf.name} (${wolfRoleInfo?.name || wolf.role})`
+    }).join(', ')
+    return `🐺 Оборотни в игре: ${werewolfList}`
+  }
+  
+  // Смутьян - обмен ролей
+  if (result.data.swapped) {
+    return `🔄 Роли между игроками поменяны местами`
+  }
+  
+  // Охранник - защита
+  if (result.data.protected) {
+    const protectedPlayer = result.message.match(/защитили (.+)$/)?.[1] || 'игрока'
+    return `🛡️ Вы защитили ${protectedPlayer} на эту ночь`
+  }
+  
+  // Голосование оборотней
+  if (result.data.voted) {
+    return `🐺 Ваш голос учтен`
+  }
+  
+  // Общий результат, если нет специальных данных
+  return `✅ ${result.message}`
+}
+
+// Функция определения, нужно ли показывать результат в чате
+const shouldShowResultInChat = (result, roleId) => {
+  // Показываем результаты для информативных действий
+  return result.data.targetRole ||           // Провидец - просмотр роли
+         result.data.centerCards ||          // Провидец - центральные карты
+         result.data.werewolves ||           // Миньон - оборотни
+         result.data.newRole ||              // Грабитель - новая роль
+         result.data.protected ||            // Охранник - подтверждение защиты
+         (result.data.swapped && Array.isArray(result.data.swapped)) // Смутьян - обмен ролей
+  
+  // НЕ показываем для:
+  // - Голосования оборотней (result.data.voted) - это служебное действие
+}
 
 const app = express()
 const server = createServer(app)
+
+// JSON body parsing
+app.use(express.json())
+app.use(express.urlencoded({ extended: true }))
+
+// CORS настройки
+app.use(cors({
+  origin: process.env.NODE_ENV === 'production' 
+    ? ['https://mafia.waifucards.app', 'https://untypical-mafia.vercel.app']
+    : ['http://localhost:3000', 'http://127.0.0.1:3000'],
+  credentials: true
+}))
+
+// Rate limiting
+const limiter = rateLimit({
+  windowMs: 60 * 1000, // 1 минута
+  max: LIMITS.MESSAGES_PER_MINUTE || 20,
+  message: 'Слишком много сообщений, попробуйте позже'
+})
+app.use('/api', limiter)
+
 const io = new Server(server, {
   cors: {
-    origin: process.env.NODE_ENV === 'production' 
-      ? "https://mafia.waifucards.app" 
-      : "http://localhost:3000",
-    methods: ["GET", "POST"],
+    origin: process.env.NODE_ENV === 'production'
+      ? ['https://mafia.waifucards.app', 'https://untypical-mafia.vercel.app']
+      : ['http://localhost:3000', 'http://127.0.0.1:3000'],
+    methods: ['GET', 'POST'],
     credentials: true
   }
 })
 
-const logger = {
-  info: (...args) => console.log(`🎮 [SocketServer]`, ...args),
-  warn: (...args) => console.warn(`⚠️ [SocketServer]`, ...args),
-  error: (...args) => console.error(`❌ [SocketServer]`, ...args)
-}
-
-// Хранилища
+// Глобальное состояние
 const rooms = new Map()
-const playerRooms = new Map()
-const rateLimits = new Map()
-const chatProcessor = new SimpleChatProcessor()
+const playerRooms = new Map() // socketId -> roomId
+const rateLimitMap = new Map() // Простой rate limiting для сообщений
 
-const PORT = process.env.SOCKET_PORT || 3001
-
-const validateRequest = (socket, eventName) => {
-  const socketId = socket.id
-  if (!rateLimits.has(socketId)) {
-    rateLimits.set(socketId, [])
-  }
-  
-  const requests = rateLimits.get(socketId)
-  const now = Date.now()
-  const oneMinute = 60 * 1000
-  
-  const recentRequests = requests.filter(time => now - time < oneMinute)
-  
-  if (recentRequests.length >= LIMITS.MAX_MESSAGES_PER_MINUTE) {
-    socket.emit(SOCKET_EVENTS.ERROR, {
-      code: ERROR_CODES.RATE_LIMITED,
-      message: 'Слишком много запросов. Подождите минуту.'
-    })
-    return false
-  }
-  
-  recentRequests.push(now)
-  rateLimits.set(socketId, recentRequests)
-  return true
+// Утилиты
+const sendError = (socket, code, message) => {
+  socket.emit(SOCKET_EVENTS.ERROR, { code, message })
 }
 
 const getPlayerRoom = (socketId) => {
@@ -73,81 +134,66 @@ const getPlayerRoom = (socketId) => {
   return roomId ? rooms.get(roomId) : null
 }
 
-const sendError = (socket, code, message, details = null) => {
-  socket.emit(SOCKET_EVENTS.ERROR, {
-    code,
-    message,
-    details,
-    timestamp: Date.now()
-  })
+// Простая функция валидации запросов
+const validateRequest = (socket, eventName) => {
+  // Базовая валидация - можно расширить при необходимости
+  return socket && socket.id
 }
 
-const handleCreateRoom = (socket, data) => {
-  if (!validateRequest(socket, 'create-room')) return
+const checkMessageRateLimit = (socketId) => {
+  const now = Date.now()
+  const key = socketId
   
-  try {
-    const { username, isPrivate = false, hostAsObserver = false } = data
-    
-    const usernameValidation = validateUsername(username)
-    if (!usernameValidation.valid) {
-      return sendError(socket, ERROR_CODES.VALIDATION_ERROR, usernameValidation.error)
-    }
-    
-    const room = new GameRoom(socket.id, isPrivate, hostAsObserver)
-    rooms.set(room.id, room)
-    
-    const player = room.addPlayer(socket.id, usernameValidation.username)
-    room.addSocket(socket.id, socket)
-    playerRooms.set(socket.id, room.id)
-    
-    logger.info(`Room ${room.id} created by ${player.name}`)
-    
-    socket.emit(SOCKET_EVENTS.ROOM_CREATED, {
-      room: room.getClientData(socket.id),
-      player
-    })
-    
-  } catch (error) {
-    logger.error('Create room error:', error)
-    sendError(socket, ERROR_CODES.VALIDATION_ERROR, error.message)
+  if (!rateLimitMap.has(key)) {
+    rateLimitMap.set(key, [])
   }
+  
+  const messages = rateLimitMap.get(key)
+  // Удаляем сообщения старше минуты
+  const filtered = messages.filter(timestamp => now - timestamp < 60000)
+  
+  if (filtered.length >= LIMITS.MESSAGES_PER_MINUTE) {
+    return false
+  }
+  
+  filtered.push(now)
+  rateLimitMap.set(key, filtered)
+  return true
 }
+
+// === ОСНОВНЫЕ ОБРАБОТЧИКИ ===
 
 const handleJoinRoom = (socket, data) => {
-  if (!validateRequest(socket, 'join-room')) return
-  
   try {
     const { roomCode, username } = data
     
-    const codeValidation = validateRoomCode(roomCode)
-    if (!codeValidation.valid) {
-      return sendError(socket, ERROR_CODES.VALIDATION_ERROR, codeValidation.error)
+    if (!roomCode || !username) {
+      return sendError(socket, ERROR_CODES.VALIDATION_ERROR, 'Неверные данные')
     }
     
-    const usernameValidation = validateUsername(username)
-    if (!usernameValidation.valid) {
-      return sendError(socket, ERROR_CODES.VALIDATION_ERROR, usernameValidation.error)
-    }
-    
-    const room = rooms.get(codeValidation.code)
+    const room = rooms.get(roomCode)
     if (!room) {
       return sendError(socket, ERROR_CODES.ROOM_NOT_FOUND, 'Комната не найдена')
     }
     
-    const player = room.addPlayer(socket.id, usernameValidation.username)
+    // Добавляем игрока
+    const player = room.addPlayer(socket.id, sanitizeHtml(username))
+    playerRooms.set(socket.id, roomCode)
     room.addSocket(socket.id, socket)
-    playerRooms.set(socket.id, room.id)
     
-    logger.info(`${player.name} joined room ${room.id}`)
+    logger.info(`🎮 Player ${username} joined room ${roomCode}`)
     
-    socket.emit(SOCKET_EVENTS.JOIN_SUCCESS, {
+    // Отправляем данные игроку  
+    socket.emit('join-success', { 
       room: room.getClientData(socket.id),
-      player
+      player: player 
     })
     
-    room.broadcast(SOCKET_EVENTS.GAME_UPDATED, {
-      room: {}
-    })
+    // Уведомляем остальных
+    room.broadcast(SOCKET_EVENTS.GAME_UPDATED, { room: room.getClientData() })
+    
+    // Системное сообщение
+    // room.addSystemMessage(`${player.name} присоединился к игре`) // Убираем чтобы не засорять чат
     
   } catch (error) {
     logger.error('Join room error:', error)
@@ -155,75 +201,18 @@ const handleJoinRoom = (socket, data) => {
   }
 }
 
-const handleStartGame = (socket, data) => {
-  if (!validateRequest(socket, 'start-game')) return
-  
-  try {
-    const room = getPlayerRoom(socket.id)
-    if (!room) {
-      return sendError(socket, ERROR_CODES.ROOM_NOT_FOUND, 'Комната не найдена')
-    }
-    
-    const player = room.getPlayer(socket.id)
-    if (!player || !player.isHost) {
-      return sendError(socket, ERROR_CODES.PERMISSION_DENIED, 'Только хост может начать игру')
-    }
-    
-    room.startGame()
-    
-    logger.info(`Game started in room ${room.id}`)
-    
-    room.broadcast(SOCKET_EVENTS.GAME_UPDATED, {
-      room: {}
-    })
-    
-  } catch (error) {
-    logger.error('Start game error:', error)
-    sendError(socket, ERROR_CODES.VALIDATION_ERROR, error.message)
-  }
-}
-
-const handleSelectRole = (socket, data) => {
-  if (!validateRequest(socket, 'select-role')) return
-  
-  try {
-    const { roleId, action } = data // action: 'add' or 'remove'
-    
-    const room = getPlayerRoom(socket.id)
-    if (!room) {
-      return sendError(socket, ERROR_CODES.ROOM_NOT_FOUND, 'Комната не найдена')
-    }
-    
-    const player = room.getPlayer(socket.id)
-    if (!player || !player.isHost) {
-      return sendError(socket, ERROR_CODES.PERMISSION_DENIED, 'Только хост может выбирать роли')
-    }
-    
-    if (action === 'add') {
-      room.addRole(roleId)
-    } else if (action === 'remove') {
-      room.removeRole(roleId)
-    }
-    
-    room.broadcast(SOCKET_EVENTS.GAME_UPDATED, {
-      room: {}
-    })
-    
-  } catch (error) {
-    logger.error('Select role error:', error)
-    sendError(socket, ERROR_CODES.VALIDATION_ERROR, error.message)
-  }
-}
-
+// ✅ ИСПРАВЛЕННЫЙ ОБРАБОТЧИК СООБЩЕНИЙ
 const handleSendMessage = async (socket, data) => {
-  if (!validateRequest(socket, 'send-message')) return
-  
   try {
     const { text } = data
     
-    const messageValidation = validateMessage(text)
-    if (!messageValidation.valid) {
-      return sendError(socket, ERROR_CODES.VALIDATION_ERROR, messageValidation.error)
+    if (!text || typeof text !== 'string' || !text.trim()) {
+      return sendError(socket, ERROR_CODES.VALIDATION_ERROR, 'Пустое сообщение')
+    }
+    
+    // Rate limiting
+    if (!checkMessageRateLimit(socket.id)) {
+      return sendError(socket, ERROR_CODES.RATE_LIMIT, 'Слишком много сообщений')
     }
     
     const room = getPlayerRoom(socket.id)
@@ -236,84 +225,155 @@ const handleSendMessage = async (socket, data) => {
       return sendError(socket, ERROR_CODES.PLAYER_NOT_FOUND, 'Игрок не найден')
     }
     
-    // Обрабатываем команды чата
-    if (chatProcessor.isCommand(text)) {
-      const result = await chatProcessor.processCommand(socket.id, text, room)
+    const cleanText = sanitizeHtml(text.trim())
+    
+    // ✅ ИСПОЛЬЗУЕМ ChatCommandProcessor
+    const chatProcessor = new ChatCommandProcessor(room)
+    
+    if (chatProcessor.isCommand(cleanText)) {
+      // Обрабатываем команду
+      const result = await chatProcessor.processCommand(socket.id, cleanText)
       
-      if (!result.success && result.error) {
+      if (!result.success) {
         return sendError(socket, ERROR_CODES.VALIDATION_ERROR, result.error)
       }
       
-      return // Команды не отображаются в общем чате
+      // Команда обработана успешно, ChatCommandProcessor уже отправил сообщения
+      return
     }
     
-    // Проверяем права на отправку обычных сообщений
-    if (!room.chatPermissions.canChat && room.gameState !== GAME_PHASES.SETUP) {
-      if (room.gameState === GAME_PHASES.NIGHT && room.chatPermissions.werewolfChat) {
-        if (!room.isWerewolf(player.role)) {
-          return sendError(socket, ERROR_CODES.PERMISSION_DENIED, 'В ночную фазу могут писать только оборотни')
-        }
-      } else if (room.gameState === GAME_PHASES.VOTING) {
-        return sendError(socket, ERROR_CODES.PERMISSION_DENIED, 'Во время голосования чат отключен. Используйте /ш ведущий для связи')
-      } else {
-        return sendError(socket, ERROR_CODES.PERMISSION_DENIED, 'Сейчас нельзя писать в чат')
+    // ✅ ОБЫЧНОЕ СООБЩЕНИЕ - проверяем права чата
+    if (!room.chatPermissions.canChat) {
+      return sendError(socket, ERROR_CODES.PERMISSION_DENIED, 'Чат отключен в этой фазе')
+    }
+    
+    // Проверяем специфичные права для ночи (только оборотни)
+    if (room.gameState === GAME_PHASES.NIGHT && !room.chatPermissions.werewolfChat) {
+      if (!room.isWerewolf(player.role)) {
+        return sendError(socket, ERROR_CODES.PERMISSION_DENIED, 'Ночью могут говорить только оборотни')
       }
     }
     
-    // Обычное сообщение
-    room.addMessage(socket.id, messageValidation.text)
+    // Создаем обычное сообщение
+    const message = room.addMessage(socket.id, cleanText, 'public')
+    
+    // Определяем получателей
+    let recipients = []
+    
+    if (room.gameState === GAME_PHASES.NIGHT && room.chatPermissions.werewolfChat) {
+      // Ночью - только оборотни видят сообщения оборотней
+      recipients = Array.from(room.players.values())
+        .filter(p => room.isWerewolf(p.role) || p.role === 'game_master')
+        .map(p => p.id)
+    } else if (room.chatPermissions.canSeeAll) {
+      // Обычные фазы - все живые + game_master
+      recipients = Array.from(room.players.values())
+        .filter(p => p.alive || p.role === 'game_master')
+        .map(p => p.id)
+    }
+    
+    // Отправляем сообщение получателям
+    recipients.forEach(playerId => {
+      const socket = room.sockets.get(playerId)
+      if (socket) {
+        try {
+          socket.emit(SOCKET_EVENTS.NEW_MESSAGE, { message })
+        } catch (error) {
+          logger.error(`Failed to send message to ${playerId}:`, error)
+        }
+      }
+    })
+    
+    logger.info(`💬 Message from ${player.name} in ${room.id}: ${cleanText.substring(0, 50)}...`)
     
   } catch (error) {
     logger.error('Send message error:', error)
-    sendError(socket, ERROR_CODES.VALIDATION_ERROR, error.message)
+    sendError(socket, ERROR_CODES.SERVER_ERROR, 'Ошибка отправки сообщения')
   }
 }
 
-const handleNightAction = async (socket, data) => {
-  if (!validateRequest(socket, 'night-action')) return
-  
+const handleCreateRoom = (socket, data) => {
+  console.log(data, 'data', socket.id, 'socket.id');
   try {
-    const room = getPlayerRoom(socket.id)
-    if (!room || !room.gameEngine) {
-      return sendError(socket, ERROR_CODES.ROOM_NOT_FOUND, 'Игра не найдена')
+    const { username, isPrivate = false, hostAsObserver = false } = data
+    
+    if (!username) {
+      return sendError(socket, ERROR_CODES.VALIDATION_ERROR, 'Укажите имя')
     }
     
-    if (room.gameState !== GAME_PHASES.NIGHT) {
-      return sendError(socket, ERROR_CODES.INVALID_ACTION, 'Сейчас не ночная фаза')
-    }
+    const room = new GameRoom(socket.id, isPrivate, hostAsObserver)
+    rooms.set(room.id, room)
     
-    const result = await room.gameEngine.executeNightAction(socket.id, data)
+    // Добавляем создателя как игрока
+    const player = room.addPlayer(socket.id, sanitizeHtml(username))
+    playerRooms.set(socket.id, room.id)
+    room.addSocket(socket.id, socket)
     
-    if (result.error) {
-      return sendError(socket, ERROR_CODES.INVALID_ACTION, result.error)
-    }
+    logger.info(`🎮 Room ${room.id} created by ${username}`)
     
-    socket.emit('night-action-result', result)
+    socket.emit(SOCKET_EVENTS.ROOM_CREATED, { 
+      room: room.getClientData(socket.id),
+      player: player 
+    })
     
   } catch (error) {
-    logger.error('Night action error:', error)
-    sendError(socket, ERROR_CODES.VALIDATION_ERROR, error.message)
+    logger.error('Create room error:', error)
+    sendError(socket, ERROR_CODES.SERVER_ERROR, error.message)
   }
 }
 
-const handleVotePlayer = (socket, data) => {
-  if (!validateRequest(socket, 'vote-player')) return
-  
+const handleStartGame = async (socket, data) => {
   try {
-    const { targetId } = data
-    
     const room = getPlayerRoom(socket.id)
     if (!room) {
       return sendError(socket, ERROR_CODES.ROOM_NOT_FOUND, 'Комната не найдена')
     }
     
-    if (room.gameState !== GAME_PHASES.VOTING) {
-      return sendError(socket, ERROR_CODES.INVALID_ACTION, 'Сейчас не фаза голосования')
+    const player = room.getPlayer(socket.id)
+    if (!player?.isHost) {
+      return sendError(socket, ERROR_CODES.PERMISSION_DENIED, 'Только ведущий может начать игру')
     }
     
-    room.votePlayer(socket.id, targetId)
+    await room.startGame()
+    room.broadcast(SOCKET_EVENTS.GAME_STARTED, { room: {} })
     
-    socket.emit('vote-confirmed', { targetId })
+    logger.info(`🎮 Game started in room ${room.id}`)
+    
+  } catch (error) {
+    logger.error('Start game error:', error)
+    sendError(socket, ERROR_CODES.VALIDATION_ERROR, error.message)
+  }
+}
+
+const handleVote = (socket, data) => {
+  try {
+    const { targetId } = data
+    const room = getPlayerRoom(socket.id)
+    
+    if (!room) {
+      return sendError(socket, ERROR_CODES.ROOM_NOT_FOUND, 'Комната не найдена')
+    }
+    
+    if (room.gameState !== GAME_PHASES.VOTING) {
+      return sendError(socket, ERROR_CODES.INVALID_ACTION, 'Сейчас не время голосования')
+    }
+    
+    const player = room.getPlayer(socket.id)
+    if (!player?.alive) {
+      return sendError(socket, ERROR_CODES.PERMISSION_DENIED, 'Мертвые не голосуют')
+    }
+    
+    if (player.role === 'game_master') {
+      return sendError(socket, ERROR_CODES.PERMISSION_DENIED, 'Ведущий не участвует в голосовании')
+    }
+    
+    room.addVote(socket.id, targetId)
+    room.broadcast(SOCKET_EVENTS.VOTE_CAST, { 
+      voterId: socket.id,
+      targetId: targetId
+    })
+    
+    logger.info(`🗳️ Vote cast in room ${room.id}`)
     
   } catch (error) {
     logger.error('Vote error:', error)
@@ -321,13 +381,39 @@ const handleVotePlayer = (socket, data) => {
   }
 }
 
+const handleNightAction = async (socket, data) => {
+  try {
+    const room = getPlayerRoom(socket.id)
+    if (!room?.gameEngine) {
+      return sendError(socket, ERROR_CODES.ROOM_NOT_FOUND, 'Игра не найдена')
+    }
+    
+    if (room.gameState !== GAME_PHASES.NIGHT) {
+      return sendError(socket, ERROR_CODES.INVALID_ACTION, 'Сейчас не ночь')
+    }
+    
+    const result = await room.gameEngine.executeNightAction(socket.id, data)
+    if (result.error) {
+      return sendError(socket, ERROR_CODES.INVALID_ACTION, result.error)
+    }
+    
+    // Уведомляем всех об успешном действии
+    room.broadcast('night-action-completed', {
+      playerId: socket.id,
+      result: result
+    })
+    
+  } catch (error) {
+    logger.error('Night action error:', error)
+    sendError(socket, ERROR_CODES.SERVER_ERROR, error.message)
+  }
+}
+
 const handleAdminAction = (socket, data) => {
-  if (!validateRequest(socket, 'admin-action')) return
-  
   try {
     const { action, targetId } = data
-    
     const room = getPlayerRoom(socket.id)
+    
     if (!room) {
       return sendError(socket, ERROR_CODES.ROOM_NOT_FOUND, 'Комната не найдена')
     }
@@ -377,7 +463,7 @@ const handleVoiceActivity = (socket, data) => {
   if (room) {
     const player = room.getPlayer(socket.id)
     if (player) {
-      room.broadcast('voice-activity', {
+      room.broadcast(SOCKET_EVENTS.VOICE_ACTIVITY, {
         playerId: socket.id,
         playerName: player.name,
         isActive: data.isActive
@@ -386,56 +472,386 @@ const handleVoiceActivity = (socket, data) => {
   }
 }
 
-const handleDisconnect = (socket, reason) => {
-  logger.info(`Player disconnected: ${socket.id}, reason: ${reason}`)
-  
+const handleDisconnect = (socket) => {
   const room = getPlayerRoom(socket.id)
   if (room) {
     room.removeSocket(socket.id)
+    playerRooms.delete(socket.id)
     
-    room.broadcast(SOCKET_EVENTS.GAME_UPDATED, { room: {} })
+    const player = room.getPlayer(socket.id)
+    if (player) {
+      // room.addSystemMessage(`${player.name} отключился`) // Убираем чтобы не засорять чат
+      room.broadcast(SOCKET_EVENTS.PLAYER_DISCONNECTED, { 
+        playerId: socket.id,
+        playerName: player.name
+      })
+      
+      logger.info(`🔌 Player ${player.name} disconnected from room ${room.id}`)
+    }
+    
+    // Удаляем пустые комнаты
+    if (Array.from(room.players.values()).every(p => !p.connected)) {
+      rooms.delete(room.id)
+      logger.info(`🗑️ Empty room ${room.id} deleted`)
+    }
   }
   
-  playerRooms.delete(socket.id)
-  rateLimits.delete(socket.id)
+  rateLimitMap.delete(socket.id)
 }
 
-// Socket.IO обработчики событий
+// === SOCKET.IO СОБЫТИЯ ===
+
 io.on('connection', (socket) => {
-  logger.info(`New connection: ${socket.id}`)
+  logger.info(`🔌 Client connected: ${socket.id}`)
   
+  // Основные события
   socket.on(SOCKET_EVENTS.CREATE_ROOM, (data) => handleCreateRoom(socket, data))
   socket.on(SOCKET_EVENTS.JOIN_ROOM, (data) => handleJoinRoom(socket, data))
-  socket.on(SOCKET_EVENTS.START_GAME, (data) => handleStartGame(socket, data))
-  socket.on(SOCKET_EVENTS.SELECT_ROLE, (data) => handleSelectRole(socket, data))
   socket.on(SOCKET_EVENTS.SEND_MESSAGE, (data) => handleSendMessage(socket, data))
+  socket.on(SOCKET_EVENTS.START_GAME, (data) => handleStartGame(socket, data))
+  socket.on(SOCKET_EVENTS.VOTE, (data) => handleVote(socket, data))
   socket.on(SOCKET_EVENTS.NIGHT_ACTION, (data) => handleNightAction(socket, data))
-  socket.on(SOCKET_EVENTS.VOTE_PLAYER, (data) => handleVotePlayer(socket, data))
   socket.on(SOCKET_EVENTS.ADMIN_ACTION, (data) => handleAdminAction(socket, data))
   socket.on(SOCKET_EVENTS.VOICE_ACTIVITY, (data) => handleVoiceActivity(socket, data))
   
-  socket.on('disconnect', (reason) => handleDisconnect(socket, reason))
+  socket.on('disconnect', () => handleDisconnect(socket))
 })
 
-// Очистка неактивных комнат каждые 30 минут
-setInterval(() => {
-  const now = Date.now()
-  const thirtyMinutes = 30 * 60 * 1000
+// === REST API ===
+
+// Получение списка публичных комнат
+app.get('/api/rooms/public', (req, res) => {
+  const publicRooms = Array.from(rooms.values())
+    .filter(room => !room.isPrivate)
+    .map(room => ({
+      id: room.id,
+      name: `Комната ${room.id}`,
+      hostName: room.getPlayer(room.hostId)?.name || 'Неизвестно',
+      phase: room.gameState,
+      totalPlayers: room.players.size,
+      alivePlayers: Array.from(room.players.values()).filter(p => p.alive).length,
+      votingRounds: room.votingRounds || 0
+    }))
   
-  for (const [roomId, room] of rooms) {
-    const hasActivePlayers = Array.from(room.players.values()).some(p => p.connected)
-    const isOld = now - room.createdAt > thirtyMinutes
-    
-    if (!hasActivePlayers && isOld) {
-      logger.info(`Cleaning up empty room: ${roomId}`)
-      room.destroy()
-      rooms.delete(roomId)
-    }
+  res.json(publicRooms)
+})
+
+// Получение данных конкретной комнаты
+app.get('/api/rooms/:roomId', (req, res) => {
+  const { roomId } = req.params
+  const room = rooms.get(roomId)
+  
+  if (!room) {
+    return res.status(404).json({ error: 'Комната не найдена' })
   }
-}, 30 * 60 * 1000)
+  
+  // Возвращаем данные комнаты для анонимного просмотра
+  const roomData = room.getClientData()
+  res.json(roomData)
+})
+
+// Присоединение к комнате через HTTP (создание игрока)
+app.post('/api/rooms/:roomId/join', (req, res) => {
+  const { roomId } = req.params
+  const { username, socketId } = req.body
+  
+  if (!username || !socketId) {
+    return res.status(400).json({ error: 'Укажите имя пользователя и socketId' })
+  }
+  
+  const room = rooms.get(roomId)
+  if (!room) {
+    return res.status(404).json({ error: 'Комната не найдена' })
+  }
+  
+  try {
+    const player = room.addPlayer(socketId, sanitizeHtml(username))
+    playerRooms.set(socketId, roomId)
+    
+    // Пытаемся найти и добавить сокет, если он подключен
+    const connectedSocket = Array.from(io.sockets.sockets.values())
+      .find(s => s.id === socketId)
+    
+    if (connectedSocket) {
+      room.addSocket(socketId, connectedSocket)
+      logger.info(`🔌 Socket ${socketId} registered to room ${roomId}`)
+    }
+    
+    logger.info(`🎮 Player ${username} joined room ${roomId} via HTTP`)
+    
+    // Уведомляем остальных через сокеты
+    room.broadcast(SOCKET_EVENTS.GAME_UPDATED, { room: room.getClientData() })
+    // room.addSystemMessage(`${player.name} присоединился к игре`) // Убираем чтобы не засорять чат
+    
+    res.json({
+      room: room.getClientData(socketId),
+      player: player
+    })
+    
+  } catch (error) {
+    logger.error('Join room HTTP error:', error)
+    res.status(400).json({ error: error.message })
+  }
+})
+
+// Получение истории чата комнаты
+app.get('/api/rooms/:roomId/chat', (req, res) => {
+  const { roomId } = req.params
+  const { playerId } = req.query
+  
+  const room = rooms.get(roomId)
+  if (!room) {
+    return res.status(404).json({ error: 'Комната не найдена' })
+  }
+  
+  const player = playerId ? room.getPlayer(playerId) : null
+  
+  // Фильтруем сообщения на основе прав доступа
+  const visibleMessages = room.chat.filter(message => {
+    // Системные сообщения и публичные видят все
+    if (message.type === 'system' || message.type === 'public') {
+      // Но в ночной фазе с werewolfChat только оборотни видят сообщения оборотней
+      if (room.gameState === 'night' && room.chatPermissions.werewolfChat && message.type === 'public') {
+        const messageSender = room.getPlayer(message.senderId)
+        if (messageSender && room.isWerewolf(messageSender.role)) {
+          // Сообщение от оборотня - показываем только оборотням и game_master
+          return player && (room.isWerewolf(player.role) || player.role === 'game_master')
+        }
+      }
+      return true
+    }
+    
+    // Приватные сообщения (шепот)
+    if (message.type === 'whisper') {
+      if (!player) return false
+      
+      // game_master видит все личные сообщения
+      if (player.role === 'game_master') return true
+      
+      // Проверяем по именам игроков (более надежно чем по ID)
+      const isSender = message.senderName === player.name
+      const isRecipient = message.recipientName === player.name
+      
+      console.log(`🔍 Whisper filter: message from ${message.senderName} to ${message.recipientName}, checking for player ${player.name}, sender=${isSender}, recipient=${isRecipient}`)
+      
+      return isSender || isRecipient
+    }
+    
+    return true
+  }).map(message => {
+    // Добавляем информацию для корректного отображения
+    const enrichedMessage = { ...message }
+    
+    // Маркируем собственные сообщения по имени игрока (более надежно чем ID)
+    if (player && message.senderName === player.name && message.senderId !== 'system') {
+      enrichedMessage.isOwn = true
+      console.log(`🔧 Marking message as own: "${message.text.substring(0, 30)}" from ${message.senderName}`)
+    }
+    
+    return enrichedMessage
+  })
+  
+  res.json({ 
+    messages: visibleMessages,
+    playerId: playerId,
+    playerName: player?.name
+  })
+})
+
+// Управление ролями в комнате
+app.post('/api/rooms/:roomId/roles', (req, res) => {
+  const { roomId } = req.params
+  const { roleId, action, playerId } = req.body
+  
+  if (!roleId || !action || !playerId) {
+    return res.status(400).json({ error: 'Укажите roleId, action и playerId' })
+  }
+  
+  const room = rooms.get(roomId)
+  if (!room) {
+    return res.status(404).json({ error: 'Комната не найдена' })
+  }
+  
+  const player = room.getPlayer(playerId)
+  if (!player || !player.isHost) {
+    return res.status(403).json({ error: 'Только ведущий может управлять ролями' })
+  }
+  
+  if (room.gameState !== 'setup') {
+    return res.status(400).json({ error: 'Роли можно изменять только в фазе настройки' })
+  }
+  
+  try {
+    if (action === 'add') {
+      room.addRole(roleId)
+      logger.info(`🎭 Role ${roleId} added to room ${roomId} by ${player.name}`)
+    } else if (action === 'remove') {
+      room.removeRole(roleId)
+      logger.info(`🎭 Role ${roleId} removed from room ${roomId} by ${player.name}`)
+    } else {
+      return res.status(400).json({ error: 'Неверное действие. Используйте add или remove' })
+    }
+    
+    // Уведомляем всех игроков об изменении
+    room.broadcast(SOCKET_EVENTS.GAME_UPDATED, { room: room.getClientData() })
+    
+    res.json({
+      success: true,
+      selectedRoles: room.selectedRoles,
+      room: room.getClientData(playerId)
+    })
+    
+  } catch (error) {
+    logger.error('Role management error:', error)
+    res.status(400).json({ error: error.message })
+  }
+})
+
+// Управление фазами игры
+app.put('/api/rooms/:roomId/phase', async (req, res) => {
+  const { roomId } = req.params
+  const { action, playerId } = req.body
+  
+  if (!action || !playerId) {
+    return res.status(400).json({ error: 'Укажите action и playerId' })
+  }
+  
+  const room = rooms.get(roomId)
+  if (!room) {
+    return res.status(404).json({ error: 'Комната не найдена' })
+  }
+  
+  const player = room.getPlayer(playerId)
+  if (!player || (!player.isHost && player.role !== 'game_master')) {
+    return res.status(403).json({ error: 'Только ведущий или game_master может управлять фазами' })
+  }
+  
+  try {
+    let result = { success: true }
+    
+    switch (action) {
+      case 'next-phase':
+        if (room.gameEngine) {
+          room.gameEngine.nextPhase()
+          result.message = 'Переход к следующей фазе'
+        } else {
+          return res.status(400).json({ error: 'Игра не начата' })
+        }
+        break
+        
+      case 'start-game':
+        if (room.gameState !== 'setup') {
+          return res.status(400).json({ error: 'Игра уже началась или завершена' })
+        }
+        await room.startGame()
+        result.message = 'Игра началась'
+        break
+        
+      case 'force-vote':
+        if (room.gameState !== 'voting') {
+          return res.status(400).json({ error: 'Сейчас не фаза голосования' })
+        }
+        if (room.gameEngine) {
+          room.gameEngine.forceEndVoting()
+          result.message = 'Голосование завершено принудительно'
+        }
+        break
+        
+      default:
+        return res.status(400).json({ error: 'Неверное действие' })
+    }
+    
+    logger.info(`🎮 Phase action '${action}' by ${player.name} in room ${roomId}`)
+    
+    // Уведомляем всех игроков об изменении
+    room.broadcast(SOCKET_EVENTS.GAME_UPDATED, { room: room.getClientData() })
+    
+    res.json({
+      ...result,
+      room: room.getClientData(playerId)
+    })
+    
+  } catch (error) {
+    logger.error('Phase management error:', error)
+    res.status(400).json({ error: error.message })
+  }
+})
+
+// Ночные действия
+app.post('/api/rooms/:roomId/night-action', async (req, res) => {
+  const { roomId } = req.params
+  const { playerId, action } = req.body
+  
+  if (!playerId || action === undefined || action === null) {
+    return res.status(400).json({ error: 'Укажите playerId и action' })
+  }
+  
+  const room = rooms.get(roomId)
+  if (!room) {
+    return res.status(404).json({ error: 'Комната не найдена' })
+  }
+  
+  if (!room.gameEngine) {
+    return res.status(400).json({ error: 'Игра не найдена' })
+  }
+  
+  if (room.gameState !== GAME_PHASES.NIGHT) {
+    return res.status(400).json({ error: 'Сейчас не ночь' })
+  }
+  
+  const player = room.getPlayer(playerId)
+  if (!player) {
+    return res.status(404).json({ error: 'Игрок не найден' })
+  }
+  
+  try {
+    const result = await room.gameEngine.executeNightAction(playerId, action)
+    
+    if (result.error) {
+      return res.status(400).json({ error: result.error })
+    }
+    
+    logger.info(`🌙 Night action by ${player.name} (${player.role}) in room ${roomId}:`, action)
+    
+    // Добавляем результат в пул отложенных сообщений (только для информативных действий)
+    if (result.message && result.data && shouldShowResultInChat(result, player.role)) {
+      const systemMessage = formatNightActionResult(result, player.role)
+      room.gameEngine.addPendingMessage(playerId, systemMessage)
+    }
+    
+    // Уведомляем остальных о том, что действие выполнено (без деталей)
+    room.broadcastExcept('night-action-completed', {
+      playerId: playerId,
+      roleCompleted: true
+    }, [playerId]) // Исключаем самого игрока из broadcast
+    
+    res.json({
+      success: true,
+      result: result,
+      message: 'Ночное действие выполнено'
+    })
+    
+  } catch (error) {
+    logger.error('Night action API error:', error)
+    res.status(500).json({ error: error.message })
+  }
+})
+
+// Запуск сервера
+const PORT = process.env.SOCKET_PORT || 3001
 
 server.listen(PORT, () => {
-  logger.info(`Socket server running on port ${PORT}`)
+  logger.info(`🚀 Socket server running on port ${PORT}`)
+  logger.info(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`)
+})
+
+// Graceful shutdown
+process.on('SIGTERM', () => {
+  logger.info('🛑 Shutting down socket server...')
+  server.close(() => {
+    logger.info('✅ Socket server closed')
+    process.exit(0)
+  })
 })
 
 export { io, rooms }

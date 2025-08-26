@@ -10,12 +10,9 @@ export {
   validateRoleBalance
 } from '../../shared/rolesRegistry.js'
 
-
-
 /**
- * Утилиты для игры
+ * Основные утилиты
  */
-import { LIMITS } from './constants.js'
 
 export const generateRoomId = () => {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
@@ -24,6 +21,17 @@ export const generateRoomId = () => {
     result += chars.charAt(Math.floor(Math.random() * chars.length))
   }
   return result
+}
+
+export const sanitizeHtml = (text) => {
+  if (!text || typeof text !== 'string') return ''
+  
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#x27;')
 }
 
 export const validateUsername = (username) => {
@@ -74,17 +82,6 @@ export const validateMessage = (message) => {
   }
   
   return { valid: true, text: trimmed }
-}
-
-export const sanitizeHtml = (text) => {
-  if (!text || typeof text !== 'string') return ''
-  
-  return text
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#x27;')
 }
 
 export const formatTime = (seconds) => {

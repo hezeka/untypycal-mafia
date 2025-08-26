@@ -1,4 +1,6 @@
-import { v4 as uuidv4 } from 'uuid'
+// server/services/ChatCommandProcessor.js
+import { sanitizeHtml } from '../utils/gameHelpers.js'
+import { GAME_PHASES, MESSAGE_TYPES } from '../utils/constants.js'
 
 export class ChatCommandProcessor {
   constructor(room) {
@@ -30,12 +32,7 @@ export class ChatCommandProcessor {
       'ш': ['whisper', 'w'],
       'помощь': ['help', 'h', '?'],
       'кто': ['who', 'список', 'list'],
-      'время': ['time', 'timer'],
-      'убить': ['kill', 'slay'],
-      'воскресить': ['revive', 'resurrect'],
-      'щит': ['shield', 'protect'],
-      'снятьщит': ['unshield', 'unprotect'],
-      'выгнать': ['kick', 'ban']
+      'время': ['time', 'timer']
     }
 
     for (const [cmd, aliases] of Object.entries(commands)) {
@@ -46,745 +43,549 @@ export class ChatCommandProcessor {
     return null
   }
 
-  // SECURITY: Enhanced command processing with validation
+  // ✅ ОСНОВНОЙ МЕТОД ОБРАБОТКИ КОМАНД
   async processCommand(senderId, message) {
-    // SECURITY: Basic input validation
-    if (!message || typeof message !== 'string') {
-      return { error: 'Неверный формат команды' }
-    }
-    
-    // SECURITY: Check message length
-    if (message.length > 1000) {
-      return { error: 'Команда слишком длинная' }
-    }
-    
-    const parsed = this.parseCommand(message)
-    if (!parsed) {
-      return { error: 'Неверный формат команды' }
-    }
-    
-    // SECURITY: Validate command name
-    if (parsed.command.length > 50) {
-      return { error: 'Слишком длинное имя команды' }
-    }
-    
-    // SECURITY: Block potential injection in command names
-    if (/[<>'"&]/.test(parsed.command)) {
-      return { error: 'Недопустимые символы в команде' }
-    }
-
-    const command = this.findCommand(parsed.command)
-    if (!command) {
-      return { 
-        error: `Неизвестная команда: /${parsed.command}. Используйте /помощь для списка команд.` 
+    try {
+      // Валидация
+      if (!message || typeof message !== 'string') {
+        return { success: false, error: 'Неверный формат команды' }
       }
-    }
+      
+      if (message.length > 1000) {
+        return { success: false, error: 'Команда слишком длинная' }
+      }
+      
+      const parsed = this.parseCommand(message)
+      if (!parsed) {
+        return { success: false, error: 'Неверный формат команды' }
+      }
+      
+      if (parsed.command.length > 50 || /[<>'"&]/.test(parsed.command)) {
+        return { success: false, error: 'Недопустимые символы в команде' }
+      }
 
-    const sender = this.room.players.get(senderId)
-    if (!sender) {
-      return { error: 'Игрок не найден' }
-    }
-    
-    // SECURITY: Check if player is connected
-    if (!sender.connected) {
-      return { error: 'Отключенные игроки не могут использовать команды' }
-    }
+      const sender = this.room.getPlayer(senderId)
+      if (!sender) {
+        return { success: false, error: 'Игрок не найден' }
+      }
 
-    switch (command) {
-      case 'ш':
-        return this.processWhisperCommand(sender, parsed.args)
-      case 'помощь':
-        return this.processHelpCommand(sender)
-      case 'кто':
-        return this.processWhoCommand(sender)
-      case 'время':
-        return this.processTimeCommand(sender)
-      case 'убить':
-        return this.processKillCommand(sender, parsed.args)
-      case 'воскресить':
-        return this.processReviveCommand(sender, parsed.args)
-      case 'щит':
-        return this.processShieldCommand(sender, parsed.args)
-      case 'снятьщит':
-        return this.processUnshieldCommand(sender, parsed.args)
-      case 'выгнать':
-        return this.processKickCommand(sender, parsed.args)
-      default:
-        return { error: 'Команда не реализована' }
+      const command = this.findCommand(parsed.command)
+      if (!command) {
+        return { 
+          success: false, 
+          error: `Неизвестная команда: /${parsed.command}. Используйте /помощь для справки.` 
+        }
+      }
+
+      // Обработка команд
+      switch (command) {
+        case 'ш':
+          return await this.handleWhisperCommand(sender, parsed.args)
+          
+        case 'помощь':
+          return await this.handleHelpCommand(sender)
+          
+        case 'кто':
+          return await this.handleWhoCommand(sender)
+          
+        case 'время':
+          return await this.handleTimeCommand(sender)
+          
+        default:
+          return { success: false, error: 'Команда не реализована' }
+      }
+    } catch (error) {
+      console.error('Command processing error:', error)
+      return { success: false, error: 'Ошибка обработки команды' }
     }
   }
 
-  // SECURITY: Enhanced whisper command processing
-  processWhisperCommand(sender, args) {
+  // ✅ ОБРАБОТКА КОМАНДЫ ШЕПОТА
+  async handleWhisperCommand(sender, args) {
     if (args.length < 2) {
       return {
-        error: 'Недостаточно аргументов. Используйте: /ш <игрок/группа> <сообщение>'
+        success: false,
+        error: 'Используйте: /ш <игрок|группа> <сообщение>\nПример: /ш Иван Привет!'
       }
     }
 
     const target = args[0].toLowerCase()
-    const message = args.slice(1).join(' ').trim()
-
-    // SECURITY: Enhanced message validation
-    if (!message) {
-      return {
-        error: 'Сообщение не может быть пустым'
-      }
-    }
-
-    if (message.length > 300) {
-      return {
-        error: 'Сообщение шепота слишком длинное (максимум 300 символов)'
-      }
-    }
+    const messageText = args.slice(1).join(' ').trim()
     
-    // SECURITY: Sanitize whisper message
-    const sanitizedMessage = message
-      .replace(/[<>'"&]/g, '')
-      .replace(/javascript:/gi, '')
-      .replace(/vbscript:/gi, '')
-      .replace(/[\x00-\x1F\x7F]/g, '')
-    
-    if (sanitizedMessage.length === 0) {
-      return {
-        error: 'Сообщение содержит только запрещенные символы'
-      }
-    }
-    
-    // SECURITY: Validate target name
-    if (target.length > 20) {
-      return {
-        error: 'Слишком длинное имя получателя'
-      }
+    if (!messageText) {
+      return { success: false, error: 'Сообщение не может быть пустым' }
     }
 
-    // Проверяем, можно ли отправлять шепот в текущей фазе
-    const messageType = this.room.isHost(sender.id) ? 'host' : 'player'
-    if (!this.canWhisper(sender, messageType)) {
-      return {
-        error: 'Шепот недоступен в текущей фазе игры'
-      }
+    if (messageText.length > 500) {
+      return { success: false, error: 'Сообщение слишком длинное' }
     }
 
-    // ИСПРАВЛЕНИЕ: Во время голосования разрешен только шепот ведущему
-    if (this.room.gameState === 'voting') {
-      if (target !== 'ведущий' && target !== 'host') {
-        return {
-          error: 'Во время голосования можно шептать только ведущему. Используйте: /ш ведущий <сообщение>'
-        }
-      }
-    }
+    const cleanMessage = sanitizeHtml(messageText)
 
-    // ИСПРАВЛЕНИЕ: Добавляем проверку для "ведущий"
+    // 1. Шепот ведущему (всегда доступен)
     if (target === 'ведущий' || target === 'host') {
-      return this.processHostWhisper(sender, sanitizedMessage, messageType)
+      return await this.whisperToHost(sender, cleanMessage)
     }
 
-    // НОВОЕ: Дневные ограничения - запрещаем групповые шепоты чтобы предотвратить выявление ролей
-    if (this.room.gameState === 'day' && messageType === 'player') {
-      // Проверяем, не является ли цель группой
-      if (this.isGroupName(target)) {
-        return {
-          error: 'Днем групповые шепоты запрещены. Используйте обычный чат или шепчите конкретным игрокам. Для связи с ведущим: /ш ведущий <сообщение>'
-        }
+    // 2. Групповой шепот
+    if (this.isGroupTarget(target)) {
+      return await this.whisperToGroup(sender, target, cleanMessage)
+    }
+
+    // 3. Личный шепот
+    return await this.whisperToPlayer(sender, target, cleanMessage)
+  }
+
+  // Проверяет, является ли цель группой
+  isGroupTarget(target) {
+    const groups = ['оборотни', 'волки', 'werewolves', 'деревня', 'жители', 'village', 'все', 'all']
+    return groups.includes(target)
+  }
+
+  // ✅ ШЕПОТ ВЕДУЩЕМУ
+  async whisperToHost(sender, message) {
+    const host = Array.from(this.room.players.values())
+      .find(p => p.isHost || p.role === 'game_master')
+    
+    if (!host) {
+      return { success: false, error: 'Ведущий не найден' }
+    }
+
+    if (sender.id === host.id) {
+      return { success: false, error: 'Нельзя шептать самому себе' }
+    }
+
+    const whisperMessage = {
+      id: Date.now(),
+      senderId: sender.id,
+      senderName: sender.name,
+      senderRole: this.room.shouldShowPlayerRole(sender, host) ? sender.role : null,
+      recipientId: host.id,
+      recipientName: host.name,
+      text: message,
+      type: MESSAGE_TYPES.WHISPER,
+      timestamp: Date.now()
+    }
+
+    // Добавляем в чат
+    this.room.chat.push(whisperMessage)
+
+    // Отправляем обоим участникам
+    const recipients = [sender.id, host.id]
+    
+    recipients.forEach(playerId => {
+      const socket = this.room.sockets.get(playerId)
+      if (socket) {
+        socket.emit('new-message', { message: whisperMessage })
       }
+    })
+
+    return { success: true }
+  }
+
+  // ✅ ГРУППОВОЙ ШЕПОТ
+  async whisperToGroup(sender, groupName, message) {
+    // Проверяем права на групповые шепоты в зависимости от фазы
+    const canGroupWhisper = this.canPlayerGroupWhisper(sender, groupName)
+    if (!canGroupWhisper.allowed) {
+      return { success: false, error: canGroupWhisper.reason }
     }
 
-    // НОВОЕ: Ночные ограничения для всех игроков
-    if (this.room.gameState === 'night' && messageType === 'player') {
-      // Если игрок не оборотень, он может писать только ведущему
-      if (!this.room.canSeeWerewolfRoles(sender.role)) {
-        // Проверяем, что цель - действительно ведущий
-        if (target !== 'ведущий' && target !== 'host') {
-          return {
-            error: 'Ночью вы можете писать только ведущему. Используйте: /ш ведущий <сообщение>'
-          }
-        }
-      } else {
-        // Если игрок оборотень, он может шептать только ведущему или другим оборотням
-        if (target !== 'ведущий' && target !== 'host') {
-          // Проверяем, является ли цель оборотнем (для личного шепота)
-          const targetPlayer = this.findPlayerByName(target)
-          if (targetPlayer && !this.room.isWerewolfRole(targetPlayer.role)) {
-            return {
-              error: 'Ночью оборотни могут шептать только ведущему или другим оборотням. Для общения с командой используйте обычный чат.'
-            }
-          }
-        }
+    const recipients = this.getGroupRecipients(groupName, sender)
+    if (recipients.length === 0) {
+      return { success: false, error: 'Нет получателей для этой группы' }
+    }
+
+    const whisperMessage = {
+      id: Date.now(),
+      senderId: sender.id,
+      senderName: sender.name,
+      senderRole: sender.role,
+      groupName: this.getGroupDisplayName(groupName),
+      text: message,
+      type: MESSAGE_TYPES.GROUP_WHISPER,
+      timestamp: Date.now()
+    }
+
+    // Добавляем в чат
+    this.room.chat.push(whisperMessage)
+
+    // Отправляем всем получателям
+    recipients.forEach(playerId => {
+      const socket = this.room.sockets.get(playerId)
+      if (socket) {
+        socket.emit('new-message', { message: whisperMessage })
       }
-    }
+    })
 
-    // Сначала проверяем группы
-    if (this.isGroupName(target)) {
-      return this.processGroupWhisper(sender, target, sanitizedMessage, messageType)
-    }
+    return { success: true }
+  }
 
-    // Затем ищем конкретного игрока
-    const targetPlayer = this.findPlayerByName(target)
+  // ✅ ЛИЧНЫЙ ШЕПОТ
+  async whisperToPlayer(sender, targetName, message) {
+    // Поиск игрока по имени (частичное совпадение)
+    const targetPlayer = Array.from(this.room.players.values())
+      .find(p => p.name.toLowerCase().includes(targetName))
+
     if (!targetPlayer) {
-      const availableTargets = this.getAvailableWhisperTargets(sender)
-      return {
-        error: `Игрок или группа "${target}" не найдены.\nДоступные цели: ${availableTargets.join(', ')}`
-      }
+      return { success: false, error: `Игрок "${targetName}" не найден` }
     }
 
     if (targetPlayer.id === sender.id) {
-      return {
-        error: 'Нельзя шептать самому себе'
-      }
+      return { success: false, error: 'Нельзя шептать самому себе' }
     }
 
-    return this.processPlayerWhisper(sender, targetPlayer, sanitizedMessage, messageType)
-  }
-
-  // НОВЫЙ МЕТОД: Обработка шепота ведущему
-  processHostWhisper(sender, message, messageType) {
-    // Если отправитель уже ведущий
-    if (messageType === 'host') {
-      return {
-        error: 'Вы уже ведущий, используйте обычный чат'
-      }
+    // Проверяем права на личные шепоты
+    if (!this.room.chatPermissions.canWhisper) {
+      return { success: false, error: 'Личные сообщения запрещены в этой фазе' }
     }
 
-    // Находим ведущего
-    const hostPlayer = this.room.players.get(this.room.hostId)
-    if (!hostPlayer) {
-      return {
-        error: 'Ведущий не найден'
-      }
-    }
-
-    // Создаем сообщение шепота ведущему
     const whisperMessage = {
-      id: uuidv4(),
-      playerId: sender.id,
-      playerName: sender.name,
-      targetPlayerId: hostPlayer.id,
-      targetPlayerName: 'Ведущий',
-      message: message,
-      type: 'whisper',
+      id: Date.now(),
+      senderId: sender.id,
+      senderName: sender.name,
+      senderRole: this.room.shouldShowPlayerRole(sender, targetPlayer) ? sender.role : null,
+      recipientId: targetPlayer.id,
+      recipientName: targetPlayer.name,
+      text: message,
+      type: MESSAGE_TYPES.WHISPER,
       timestamp: Date.now()
     }
 
-    // Определяем получателей (отправитель и ведущий)
-    const recipients = [sender.id, hostPlayer.id]
+    // Добавляем в чат
+    this.room.chat.push(whisperMessage)
 
-    return {
-      success: true,
-      whisperMessage,
-      recipients: [...new Set(recipients)]
+    // Получатели: отправитель, получатель, ведущий
+    const recipients = new Set([sender.id, targetPlayer.id])
+    
+    const host = Array.from(this.room.players.values())
+      .find(p => (p.isHost || p.role === 'game_master') && p.id !== sender.id && p.id !== targetPlayer.id)
+    
+    if (host) {
+      recipients.add(host.id)
     }
-  }
 
-  // Проверяет, является ли название группой
-  isGroupName(name) {
-    const groups = ['оборотни', 'волки', 'wolves', 'werewolves', 'деревня', 'жители', 'village', 'villagers', 'все', 'all', 'everyone']
-    return groups.includes(name)
-  }
+    // Отправляем сообщение
+    recipients.forEach(playerId => {
+      const socket = this.room.sockets.get(playerId)
+      if (socket) {
+        socket.emit('new-message', { message: whisperMessage })
+      }
+    })
 
-  // Находит игрока по имени
-  findPlayerByName(name) {
-    return Array.from(this.room.players.values()).find(p => 
-      p.name.toLowerCase() === name && p.role !== 'game_master'
-    )
-  }
-
-  // Обрабатывает групповой шепот
-  processGroupWhisper(sender, groupName, message, messageType) {
-    // Дополнительные ночные ограничения для групповых шепотов
-    if (this.room.gameState === 'night' && messageType === 'player') {
-      const normalizedGroup = groupName.toLowerCase()
+    // Отправляем событие о шепоте для визуальной индикации (днем, во время знакомства и не ведущему)
+    const isHost = targetPlayer.isHost || targetPlayer.role === 'game_master'
+    const isDayPhase = this.room.gameState === GAME_PHASES.DAY
+    const isIntroductionPhase = this.room.gameState === GAME_PHASES.INTRODUCTION
+    
+    if (!isHost && (isDayPhase || isIntroductionPhase)) {
+      // Отправляем всем в комнате событие о том, что игрок шепчет
+      this.room.broadcast('whisper-activity', {
+        playerId: sender.id,
+        playerName: sender.name
+      })
       
-      // Оборотни не могут шептать группе деревня ночью
-      if (this.room.canSeeWerewolfRoles(sender.role)) {
-        if (['деревня', 'жители', 'village', 'villagers'].includes(normalizedGroup)) {
-          return {
-            error: 'Ночью оборотни не могут шептать группе деревня. Используйте обычный чат для общения с командой или /ш ведущий'
+      console.log(`💬 Whisper activity sent for ${sender.name} (${sender.id})`)
+    }
+
+    return { success: true }
+  }
+
+  // ✅ ПРАВА НА ГРУППОВЫЕ ШЕПОТЫ ПО ФАЗАМ
+  canPlayerGroupWhisper(sender, groupName) {
+    const phase = this.room.gameState
+
+    // Во время голосования - только шепот ведущему
+    if (phase === GAME_PHASES.VOTING) {
+      return { 
+        allowed: false, 
+        reason: 'Во время голосования групповые шепоты запрещены' 
+      }
+    }
+
+    // Днем - запрещены групповые шепоты
+    if (phase === GAME_PHASES.DAY) {
+      return { 
+        allowed: false, 
+        reason: 'Днем групповые шепоты запрещены' 
+      }
+    }
+
+    // Ночью - только оборотни между собой
+    if (phase === GAME_PHASES.NIGHT) {
+      if (groupName === 'оборотни' || groupName === 'волки' || groupName === 'werewolves') {
+        if (!this.room.isWerewolf(sender.role)) {
+          return { 
+            allowed: false, 
+            reason: 'Только оборотни могут общаться ночью' 
+          }
+        }
+        return { allowed: true }
+      }
+      
+      return { 
+        allowed: false, 
+        reason: 'Ночью доступен только шепот между оборотнями' 
+      }
+    }
+
+    // В фазе знакомства и настройки - все разрешено
+    if (phase === GAME_PHASES.INTRODUCTION || phase === GAME_PHASES.SETUP) {
+      // Только ведущий может писать всем
+      if (groupName === 'все' || groupName === 'all') {
+        if (!sender.isHost && sender.role !== 'game_master') {
+          return { 
+            allowed: false, 
+            reason: 'Только ведущий может писать всем игрокам' 
           }
         }
       }
-      
-      // Не-оборотни не могут шептать группе оборотни ночью
-      if (!this.room.canSeeWerewolfRoles(sender.role)) {
-        if (['оборотни', 'волки', 'wolves', 'werewolves'].includes(normalizedGroup)) {
-          return {
-            error: 'Ночью вы не можете шептать группе оборотни. Используйте /ш ведущий'
+      return { allowed: true }
+    }
+
+    return { allowed: false, reason: 'Групповые шепоты недоступны в этой фазе' }
+  }
+
+  // ✅ ПОЛУЧЕНИЕ СПИСКА ПОЛУЧАТЕЛЕЙ ДЛЯ ГРУППЫ
+  getGroupRecipients(groupName, sender) {
+    const recipients = new Set()
+    
+    switch (groupName) {
+      case 'оборотни':
+      case 'волки':
+      case 'werewolves':
+        // Все оборотни + ведущий
+        Array.from(this.room.players.values()).forEach(p => {
+          if (this.room.isWerewolf(p.role) || p.role === 'game_master') {
+            recipients.add(p.id)
           }
+        })
+        break
+        
+      case 'деревня':
+      case 'жители':
+      case 'village':
+        // Все жители + ведущий
+        Array.from(this.room.players.values()).forEach(p => {
+          if (p.role === 'game_master' || 
+              (!this.room.isWerewolf(p.role) && p.role !== 'tanner')) {
+            recipients.add(p.id)
+          }
+        })
+        break
+        
+      case 'все':
+      case 'all':
+        // Все игроки (только для ведущего)
+        if (sender.isHost || sender.role === 'game_master') {
+          Array.from(this.room.players.values()).forEach(p => {
+            recipients.add(p.id)
+          })
         }
-      }
-    }
-
-    // Проверяем права отправки в группу
-    if (!this.room.canPlayerMessageGroup(sender, groupName)) {
-      const groupDisplayName = this.room.getGroupDisplayName(groupName)
-      return {
-        error: `У вас нет прав для отправки сообщений группе "${groupDisplayName}"`
-      }
-    }
-
-    // Находим получателей
-    const groupMembers = this.room.getGroupMembers(groupName)
-    if (groupMembers.length === 0) {
-      const groupDisplayName = this.room.getGroupDisplayName(groupName)
-      return {
-        error: `В группе "${groupDisplayName}" нет подходящих получателей`
-      }
-    }
-
-    const recipients = groupMembers.map(p => p.id)
-
-    if (!recipients.includes(sender.id)) {
-      recipients.push(sender.id)
+        break
     }
     
-    // Добавляем ведущего в получатели независимо от того, отправитель он или нет
-    if (!recipients.includes(this.room.hostId)) {
-      recipients.push(this.room.hostId)
-    }
-
-    // Создаем сообщение группового шепота
-    const whisperMessage = {
-      id: uuidv4(),
-      playerId: sender.id,
-      playerName: sender.name,
-      targetGroup: groupName,
-      targetGroupName: this.room.getGroupDisplayName(groupName),
-      targetMembers: groupMembers.map(p => p.name),
-      message: message,
-      type: 'group_whisper',
-      timestamp: Date.now()
-    }
-
-    return {
-      success: true,
-      whisperMessage,
-      recipients: [...new Set(recipients)] // Убираем дубликаты
-    }
+    return Array.from(recipients)
   }
 
-  // Обрабатывает личный шепот игроку
-  processPlayerWhisper(sender, targetPlayer, message, messageType) {
-    // Создаем сообщение личного шепота
-    const whisperMessage = {
-      id: uuidv4(),
-      playerId: sender.id,
-      playerName: sender.name,
-      targetPlayerId: targetPlayer.id,
-      targetPlayerName: targetPlayer.name,
-      message: message,
-      type: 'whisper',
-      timestamp: Date.now()
+  // Получение отображаемого имени группы
+  getGroupDisplayName(groupName) {
+    const names = {
+      'оборотни': 'Оборотни',
+      'волки': 'Оборотни', 
+      'werewolves': 'Оборотни',
+      'деревня': 'Деревня',
+      'жители': 'Деревня',
+      'village': 'Деревня',
+      'все': 'Все игроки',
+      'all': 'Все игроки'
     }
-
-    // Определяем получателей (отправитель, получатель, ведущий)
-    const recipients = [sender.id, targetPlayer.id]
-    if (!this.room.isHost(sender.id) && !this.room.isHost(targetPlayer.id)) {
-      recipients.push(this.room.hostId)
-    }
-
-    return {
-      success: true,
-      whisperMessage,
-      recipients: [...new Set(recipients)]
-    }
+    return names[groupName] || groupName
   }
 
-  // Обрабатывает команду помощи
-  processHelpCommand(sender) {
+  // ✅ КОМАНДА ПОМОЩИ
+  async handleHelpCommand(sender) {
     let helpText = '📋 **Доступные команды чата:**\n\n'
 
     helpText += '**Основные команды:**\n'
     helpText += '• `/ш <игрок> <текст>` - личное сообщение игроку\n'
+    helpText += '• `/ш ведущий <текст>` - сообщение ведущему (всегда доступно)\n'
     
-    // Показываем доступность групповых шепотов в зависимости от фазы
-    if (this.room.gameState === 'day') {
+    // Групповые команды в зависимости от фазы
+    const phase = this.room.gameState
+    if (phase === GAME_PHASES.VOTING) {
+      helpText += '• `/ш <группа> <текст>` - ❌ **Во время голосования запрещено**\n'
+    } else if (phase === GAME_PHASES.DAY) {
       helpText += '• `/ш <группа> <текст>` - ❌ **Днем групповые шепоты запрещены**\n'
-    } else if (this.room.gameState === 'voting') {
-      helpText += '• `/ш <группа> <текст>` - ❌ **Во время голосования групповые шепоты запрещены**\n'
+    } else if (phase === GAME_PHASES.NIGHT) {
+      helpText += '• `/ш оборотни <текст>` - сообщение оборотням (только для оборотней)\n'
     } else {
       helpText += '• `/ш <группа> <текст>` - сообщение группе игроков\n'
-    }
-    
-    // ДОБАВЛЯЕМ: помощь про шепот ведущему
-    if (!this.room.isHost(sender.id)) {
-      helpText += '• `/ш ведущий <текст>` - сообщение ведущему\n'
     }
     
     helpText += '• `/помощь` - показать эту справку\n'
     helpText += '• `/кто` - список всех игроков\n'
     
-    if (this.room.timer) {
+    if (this.room.gameEngine?.phaseTimer) {
       helpText += '• `/время` - показать оставшееся время\n'
     }
     helpText += '\n'
 
     helpText += '👥 **Доступные группы:**\n'
-    if (this.room.canPlayerMessageGroup(sender, 'оборотни')) {
-      helpText += '• **Оборотни** (оборотни, волки)\n'
+    if (this.canPlayerGroupWhisper(sender, 'оборотни').allowed) {
+      helpText += '• **оборотни** (волки, werewolves)\n'
     }
-    if (this.room.canPlayerMessageGroup(sender, 'деревня')) {
-      helpText += '• **Деревня** (деревня, жители)\n'
+    if (this.canPlayerGroupWhisper(sender, 'деревня').allowed) {
+      helpText += '• **деревня** (жители, village)\n'
     }
-    if (this.room.canPlayerMessageGroup(sender, 'все')) {
-      helpText += '• **Все игроки** (все)\n'
-    }
-    
-    // ДОБАВЛЯЕМ: ведущий как цель
-    if (!this.room.isHost(sender.id)) {
-      helpText += '• **Ведущий** (ведущий)\n'
+    if (this.canPlayerGroupWhisper(sender, 'все').allowed) {
+      helpText += '• **все** (all) - только для ведущего\n'
     }
     
-    helpText += '\n'
-
-    helpText += '💡 **Советы:**\n'
-    helpText += '• Используйте Tab для автодополнения команд\n'
-    helpText += '• **Днем:** групповые шепоты запрещены (только личные)\n'
-    helpText += '• **Ночью:** ограничения по ролям\n'
-    helpText += '• **При голосовании:** только шепот ведущему\n'
-    helpText += '• Ведущий видит все шепоты\n'
-    
-    // Показываем админ команды для ведущего
-    if (this.isGameMaster(sender)) {
-      helpText += '\n🎮 **Команды ведущего:**\n'
-      helpText += '• `/убить <игрок>` - убить игрока\n'
-      helpText += '• `/воскресить <игрок>` - воскресить игрока\n'
-      helpText += '• `/щит <игрок>` - поставить защиту\n'
-      helpText += '• `/снятьщит <игрок>` - снять защиту\n'
-      helpText += '• `/выгнать <игрок>` - исключить из игры\n'
+    helpText += '\n**Примеры:**\n'
+    helpText += '• `/ш Иван Привет, как дела?`\n'
+    helpText += '• `/ш ведущий У меня вопрос`\n'
+    if (phase === GAME_PHASES.NIGHT && this.room.isWerewolf(sender.role)) {
+      helpText += '• `/ш оборотни Кого убиваем?`'
     }
 
-    // Отправляем справку только отправителю
     const helpMessage = {
-      id: uuidv4(),
-      playerId: null,
-      playerName: 'Система',
-      message: helpText,
-      type: 'system',
+      id: Date.now(),
+      senderId: 'system',
+      senderName: 'Система',
+      text: helpText,
+      type: MESSAGE_TYPES.SYSTEM,
       timestamp: Date.now()
     }
 
-    return {
-      success: true,
-      helpMessage,
-      recipients: [sender.id]
+    // Отправляем только отправителю
+    const socket = this.room.sockets.get(sender.id)
+    if (socket) {
+      socket.emit('new-message', { message: helpMessage })
     }
+
+    return { success: true }
   }
 
-  // Обрабатывает команду "кто"
-  processWhoCommand(sender) {
-    const isHost = this.room.isHost(sender.id)
-    const gameEnded = this.room.gameState === 'ended'
-    
-    let whoText = '👥 **Список игроков:**\n\n'
-
+  // ✅ КОМАНДА СПИСКА ИГРОКОВ
+  async handleWhoCommand(sender) {
     const players = Array.from(this.room.players.values())
-      .filter(p => p.role !== 'game_master')
-      .sort((a, b) => a.name.localeCompare(b.name))
+    const alive = players.filter(p => p.alive && p.role !== 'game_master')
+    const dead = players.filter(p => !p.alive && p.role !== 'game_master')
+    const host = players.find(p => p.role === 'game_master' || p.isHost)
 
-    players.forEach((player, index) => {
-      const status = []
-      
-      if (!player.alive) status.push('💀 мертв')
-      if (!player.connected) status.push('😴 отключен')
-      if (player.protected) status.push('🛡️ защищен')
-      if (player.id === sender.id) status.push('👤 вы')
-      
-      // Показываем роль если разрешено
+    let whoText = '👥 **Список игроков:**\n\n'
+    
+    whoText += `**Живые игроки (${alive.length}):**\n`
+    alive.forEach(p => {
+      let status = p.connected ? '🟢' : '🔴'
       let roleInfo = ''
-      if (isHost || gameEnded) {
-        const role = this.room.roles?.[player.role] || { name: player.role }
-        roleInfo = ` (${role.name})`
-      } else if (sender.role && this.room.canSeeWerewolfRoles(sender.role) && this.room.isWerewolfRole(player.role)) {
-        const role = this.room.roles?.[player.role] || { name: player.role }
-        roleInfo = ` (${role.name})`
+      
+      // Показываем роль если можно
+      if (this.room.shouldShowPlayerRole(p, sender)) {
+        const roleData = this.room.getRoleInfo(p.role)
+        roleInfo = ` - ${roleData?.name || p.role}`
       }
       
-      const statusText = status.length > 0 ? ` [${status.join(', ')}]` : ''
-      whoText += `${index + 1}. **${player.name}**${roleInfo}${statusText}\n`
+      whoText += `${status} **${p.name}**${roleInfo}\n`
     })
 
-    whoText += `\n📊 Всего игроков: ${players.length}`
-    if (this.room.gameState === 'voting') {
-      const eligibleVoters = this.room.getEligibleVoters().length
-      const votesSubmitted = this.room.votes.size
-      whoText += `\n🗳️ Проголосовало: ${votesSubmitted}/${eligibleVoters}`
+    if (dead.length > 0) {
+      whoText += `\n**Мертвые игроки (${dead.length}):**\n`
+      dead.forEach(p => {
+        let roleInfo = ''
+        if (this.room.shouldShowPlayerRole(p, sender)) {
+          const roleData = this.room.getRoleInfo(p.role)
+          roleInfo = ` - ${roleData?.name || p.role}`
+        }
+        whoText += `💀 **${p.name}**${roleInfo}\n`
+      })
+    }
+
+    if (host) {
+      whoText += `\n**Ведущий:**\n`
+      const status = host.connected ? '🟢' : '🔴'
+      whoText += `${status} **${host.name}** - Ведущий`
+    }
+
+    whoText += `\n**Фаза игры:** ${this.getPhaseDisplayName(this.room.gameState)}`
+    
+    if (this.room.centerCards?.length > 0) {
+      whoText += `\n**Центральных карт:** ${this.room.centerCards.length}`
     }
 
     const whoMessage = {
-      id: uuidv4(),
-      playerId: null,
-      playerName: 'Система',
-      message: whoText,
-      type: 'system',
+      id: Date.now(),
+      senderId: 'system',
+      senderName: 'Система',
+      text: whoText,
+      type: MESSAGE_TYPES.SYSTEM,
       timestamp: Date.now()
     }
 
-    return {
-      success: true,
-      helpMessage: whoMessage,
-      recipients: [sender.id]
+    const socket = this.room.sockets.get(sender.id)
+    if (socket) {
+      socket.emit('new-message', { message: whoMessage })
     }
+
+    return { success: true }
   }
 
-  // Обрабатывает команду времени
-  processTimeCommand(sender) {
-    if (!this.room.timer) {
-      return {
-        error: 'Таймер не активен'
+  // ✅ КОМАНДА ВРЕМЕНИ
+  async handleTimeCommand(sender) {
+    if (!this.room.gameEngine?.phaseTimer) {
+      const timeMessage = {
+        id: Date.now(),
+        senderId: 'system',
+        senderName: 'Система',
+        text: '⏰ Таймер не активен',
+        type: MESSAGE_TYPES.SYSTEM,
+        timestamp: Date.now()
       }
+
+      const socket = this.room.sockets.get(sender.id)
+      if (socket) {
+        socket.emit('new-message', { message: timeMessage })
+      }
+
+      return { success: true }
     }
 
-    const minutes = Math.floor(this.room.timer / 60)
-    const seconds = this.room.timer % 60
-    const timeText = `⏰ **Оставшееся время:** ${minutes}:${seconds.toString().padStart(2, '0')}`
+    const remaining = this.room.gameEngine.getRemainingTime()
+    const minutes = Math.floor(remaining / 60)
+    const seconds = remaining % 60
+    
+    let timeText = '⏰ **Оставшееся время:**\n'
+    timeText += `${minutes}:${seconds.toString().padStart(2, '0')}\n`
+    timeText += `**Фаза:** ${this.getPhaseDisplayName(this.room.gameState)}`
 
     const timeMessage = {
-      id: uuidv4(),
-      playerId: null,
-      playerName: 'Система',
-      message: timeText,
-      type: 'system',
+      id: Date.now(),
+      senderId: 'system',
+      senderName: 'Система',
+      text: timeText,
+      type: MESSAGE_TYPES.SYSTEM,
       timestamp: Date.now()
     }
 
-    return {
-      success: true,
-      helpMessage: timeMessage,
-      recipients: [sender.id]
+    const socket = this.room.sockets.get(sender.id)
+    if (socket) {
+      socket.emit('new-message', { message: timeMessage })
     }
+
+    return { success: true }
   }
 
-  // Проверяет, может ли игрок отправлять шепот
-  canWhisper(sender, messageType) {
-    // Ведущий может шептать всегда
-    if (messageType === 'host') return true
-    
-    // Во время подготовки можно шептать
-    if (this.room.gameState === 'setup') return true
-    
-    // Во время дня можно шептать
-    if (this.room.gameState === 'day') return true
-    
-    // Ночью оборотни могут шептать, а все остальные могут писать только ведущему
-    if (this.room.gameState === 'night') {
-      return true // Разрешаем шепот всем ночью (ограничение будет в processWhisperCommand)
+  // Получение отображаемого имени фазы
+  getPhaseDisplayName(phase) {
+    const names = {
+      [GAME_PHASES.SETUP]: 'Настройка',
+      [GAME_PHASES.INTRODUCTION]: 'Знакомство',
+      [GAME_PHASES.NIGHT]: 'Ночь',
+      [GAME_PHASES.DAY]: 'День',
+      [GAME_PHASES.VOTING]: 'Голосование',
+      [GAME_PHASES.ENDED]: 'Игра завершена'
     }
-    
-    // Во время голосования шепот разрешен (проверка конкретной цели будет в processWhisperCommand)
-    if (this.room.gameState === 'voting') {
-      return true
-    }
-    
-    return false
-  }
-
-  // Получает список доступных целей для шепота
-  getAvailableWhisperTargets(sender) {
-    const targets = []
-
-    // Добавляем игроков
-    this.room.players.forEach((player) => {
-      if (player.role !== 'game_master' && player.id !== sender.id) {
-        targets.push(player.name)
-      }
-    })
-
-    // Добавляем доступные группы
-    if (this.room.canPlayerMessageGroup(sender, 'оборотни')) {
-      targets.push('оборотни')
-    }
-    if (this.room.canPlayerMessageGroup(sender, 'деревня')) {
-      targets.push('деревня')
-    }
-    if (this.room.canPlayerMessageGroup(sender, 'все')) {
-      targets.push('все')
-    }
-
-    // ДОБАВЛЯЕМ: ведущий как цель (если отправитель не ведущий)
-    if (!this.room.isHost(sender.id)) {
-      targets.push('ведущий')
-    }
-
-    return targets
-  }
-
-  // Проверяет, является ли отправитель ведущим
-  isGameMaster(sender) {
-    return sender.role === 'game_master'
-  }
-
-  // Находит игрока по имени
-  findPlayerByName(name) {
-    const players = Array.from(this.room.players.values())
-    return players.find(p => 
-      p.name.toLowerCase() === name.toLowerCase() && 
-      p.role !== 'game_master'
-    )
-  }
-
-  // Команда убить игрока (только для ведущего)
-  processKillCommand(sender, args) {
-    if (!this.isGameMaster(sender)) {
-      return { error: 'Только ведущий может использовать эту команду' }
-    }
-
-    if (args.length === 0) {
-      return { error: 'Укажите имя игрока. Используйте: /убить <игрок>' }
-    }
-
-    const targetName = args.join(' ')
-    const target = this.findPlayerByName(targetName)
-
-    if (!target) {
-      return { error: `Игрок "${targetName}" не найден` }
-    }
-
-    if (!target.alive) {
-      return { error: `${target.name} уже мертв` }
-    }
-
-    // Убиваем игрока
-    this.room.killPlayer(target.id)
-    
-    // Отправляем системное сообщение
-    this.room.addSystemMessage(`💀 Ведущий убил игрока ${target.name}`)
-
-    return { 
-      success: true, 
-      message: `Игрок ${target.name} убит`,
-      broadcast: true 
-    }
-  }
-
-  // Команда воскресить игрока (только для ведущего)
-  processReviveCommand(sender, args) {
-    if (!this.isGameMaster(sender)) {
-      return { error: 'Только ведущий может использовать эту команду' }
-    }
-
-    if (args.length === 0) {
-      return { error: 'Укажите имя игрока. Используйте: /воскресить <игрок>' }
-    }
-
-    const targetName = args.join(' ')
-    const target = this.findPlayerByName(targetName)
-
-    if (!target) {
-      return { error: `Игрок "${targetName}" не найден` }
-    }
-
-    if (target.alive) {
-      return { error: `${target.name} уже жив` }
-    }
-
-    // Воскрешаем игрока
-    this.room.revivePlayer(target.id)
-    
-    // Отправляем системное сообщение
-    this.room.addSystemMessage(`✨ Ведущий воскресил игрока ${target.name}`)
-
-    return { 
-      success: true, 
-      message: `Игрок ${target.name} воскрешен`,
-      broadcast: true 
-    }
-  }
-
-  // Команда поставить щит (только для ведущего)
-  processShieldCommand(sender, args) {
-    if (!this.isGameMaster(sender)) {
-      return { error: 'Только ведущий может использовать эту команду' }
-    }
-
-    if (args.length === 0) {
-      return { error: 'Укажите имя игрока. Используйте: /щит <игрок>' }
-    }
-
-    const targetName = args.join(' ')
-    const target = this.findPlayerByName(targetName)
-
-    if (!target) {
-      return { error: `Игрок "${targetName}" не найден` }
-    }
-
-    if (target.protected) {
-      return { error: `${target.name} уже защищен` }
-    }
-
-    // Ставим щит
-    target.protected = true
-    
-    // Отправляем системное сообщение
-    this.room.addSystemMessage(`🛡️ Ведущий поставил щит игроку ${target.name}`)
-
-    return { 
-      success: true, 
-      message: `Игрок ${target.name} защищен`,
-      broadcast: true 
-    }
-  }
-
-  // Команда снять щит (только для ведущего)
-  processUnshieldCommand(sender, args) {
-    if (!this.isGameMaster(sender)) {
-      return { error: 'Только ведущий может использовать эту команду' }
-    }
-
-    if (args.length === 0) {
-      return { error: 'Укажите имя игрока. Используйте: /снятьщит <игрок>' }
-    }
-
-    const targetName = args.join(' ')
-    const target = this.findPlayerByName(targetName)
-
-    if (!target) {
-      return { error: `Игрок "${targetName}" не найден` }
-    }
-
-    if (!target.protected) {
-      return { error: `${target.name} не защищен` }
-    }
-
-    // Снимаем щит
-    target.protected = false
-    
-    // Отправляем системное сообщение
-    this.room.addSystemMessage(`❌ Ведущий снял щит с игрока ${target.name}`)
-
-    return { 
-      success: true, 
-      message: `Щит снят с игрока ${target.name}`,
-      broadcast: true 
-    }
-  }
-
-  // Команда выгнать игрока (только для ведущего)
-  processKickCommand(sender, args) {
-    if (!this.isGameMaster(sender)) {
-      return { error: 'Только ведущий может использовать эту команду' }
-    }
-
-    if (args.length === 0) {
-      return { error: 'Укажите имя игрока. Используйте: /выгнать <игрок>' }
-    }
-
-    const targetName = args.join(' ')
-    const target = this.findPlayerByName(targetName)
-
-    if (!target) {
-      return { error: `Игрок "${targetName}" не найден` }
-    }
-
-    // Отправляем системное сообщение
-    this.room.addSystemMessage(`🚪 Ведущий исключил игрока ${target.name} из игры`)
-
-    // Удаляем игрока из комнаты
-    this.room.removePlayer(target.id)
-
-    return { 
-      success: true, 
-      message: `Игрок ${target.name} исключен из игры`,
-      broadcast: true 
-    }
+    return names[phase] || phase
   }
 }

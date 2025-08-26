@@ -6,14 +6,14 @@
       
       <!-- Левая часть: логотип + навигация -->
       <div class="header-left">
-        <div class="logo-section">
+        <a href="/" class="logo-section">
           <img src="/images/logo.png" alt="Нетипичка" class="logo-img" />
           <h1 class="logo-text">НЕТИПИЧКА</h1>
-        </div>
+        </a>
         
         <nav class="header-nav">
-          <button @click="showRoles = true" class="nav-button">Роли</button>
-          <button @click="showRules = true" class="nav-button">Правила</button>
+          <a @click="showRoles = true" class="nav-button">Роли</a>
+          <a @click="showRules = true" class="nav-button">Правила</a>
         </nav>
       </div>
       
@@ -21,24 +21,49 @@
       <div class="header-right">
         <div class="game-controls">
           <!-- Аудио контроли -->
-          <button @click="toggleSound" class="control-btn" :class="{ active: soundEnabled }">
-            <img src="/icons/mute.png" alt="Звук" />
+          <button @click="toggleSound" class="control-btn sound" :class="{ active: soundEnabled }">
           </button>
           
-          <button @click="toggleMicrophone" class="control-btn" :class="{ active: micEnabled }">
-            <img src="/icons/microphone.png" alt="Микрофон" />
-          </button>
+          <div class="microphone-container">
+            <button 
+              @click="toggleMicrophone" 
+              @mouseenter="showMicSettings = true"
+              @mouseleave="showMicSettings = false"
+              class="control-btn microphone" 
+              :class="{ 
+                active: vadEnabled && isListening, 
+                detecting: isDetecting && vadEnabled && isListening 
+              }"
+            >
+              <div v-if="isDetecting && vadEnabled && isListening" class="voice-indicator">
+                <div class="voice-waves">
+                  <div class="voice-wave"></div>
+                  <div class="voice-wave"></div>
+                  <div class="voice-wave"></div>
+                </div>
+              </div>
+            </button>
+            
+            <!-- Settings Modal on hover -->
+            <SettingsModal 
+              v-if="showMicSettings"
+              @close="showMicSettings = false"
+              @mouseenter="showMicSettings = true"
+              @mouseleave="showMicSettings = false"
+              class="hover-settings-modal"
+            />
+          </div>
           
           <div class="control-separator"></div>
           
           <!-- Статус подключения + код комнаты -->
-          <div @click="copyRoomLink" class="room-status" :class="{ connected: gameState.connected }">
+          <button @click="copyRoomLink" class="room-btn room-status" :class="{ connected: gameState.connected }">
             <div class="status-indicator"></div>
             <span class="room-code">{{ gameState.room.id }}</span>
-          </div>
+          </button>
           
           <!-- Кнопка покидания -->
-          <button @click="confirmLeaveGame" class="leave-btn">Покинуть</button>
+          <button @click="confirmLeaveGame" class="room-btn leave-btn">Покинуть игру</button>
         </div>
       </div>
       
@@ -101,7 +126,7 @@
                 >
                   
                   <!-- Аватар/Роль с когтями для оборотней -->
-                  <div class="player-avatar">
+                  <div class="player-avatar" :class="{ speaking: isSpeaking(player.id) }">
                     <!-- Картинка роли если видна -->
                     <img 
                       v-if="player.role && shouldShowRole(player)"
@@ -119,6 +144,7 @@
                     <div v-if="isWerewolfRole(player.role) && shouldShowRole(player)" class="werewolf-claws">
                       <img src="/icons/claws.png" alt="Оборотень" />
                     </div>
+                    
                   </div>
                   
                   <!-- Информация об игроке -->
@@ -290,10 +316,24 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useGame } from '~/composables/useGame'
 import { useUser } from '~/composables/useUser'
+import { useSocket } from '~/composables/useSocket'
+import { useVoiceActivity } from '~/composables/useVoiceActivity'
 import { getRole, getAllRoles } from '../../../shared/rolesRegistry.js'
+import MicrophoneSettings from '~/components/MicrophoneSettings.vue'
+import SettingsModal from '~/components/SettingsModal.vue'
 
 const route = useRoute()
 const router = useRouter()
+
+const { socket } = useSocket()
+const { 
+  isListening,
+  vadEnabled,
+  isDetecting,
+  toggleVAD,
+  handlePlayerVoiceActivity,
+  speakingPlayers
+} = useVoiceActivity()
 
 const { 
   gameState, 
@@ -302,6 +342,8 @@ const {
   getPhaseInfo,
   initSocketListeners,
   joinRoom,
+  loadRoomData,
+  loadChatHistory,
   votePlayer,
   adminAction: gameAdminAction,
   executeNightAction,
@@ -310,12 +352,17 @@ const {
 
 // Local state
 const soundEnabled = ref(true)
-const micEnabled = ref(false)
 const showCheatsheet = ref(false)
 const showRoleModal = ref(false)
 const showRules = ref(false)
 const showRoles = ref(false)
 const error = ref(null)
+
+// Состояние микрофона
+const showMicSettings = ref(false)
+
+// Состояние шепчущих игроков
+const whisperingPlayers = ref({})
 
 const roles = getAllRoles()
 
@@ -345,8 +392,8 @@ const toggleSound = () => {
   soundEnabled.value = !soundEnabled.value
 }
 
-const toggleMicrophone = () => {
-  micEnabled.value = !micEnabled.value
+const toggleMicrophone = async () => {
+  await toggleVAD()
 }
 
 const confirmLeaveGame = () => {
@@ -397,6 +444,34 @@ const getPlayersGridClass = () => {
   return 'grid-3x3'
 }
 
+const isWhispering = (playerId) => {
+  return whisperingPlayers.value[playerId] === true
+}
+
+const isSpeaking = (playerId) => {
+  console.log(`🔍 Checking if player ${playerId} is speaking. speakingPlayers:`, speakingPlayers.value, 'type:', typeof speakingPlayers.value)
+  const isCurrentlySpeaking = speakingPlayers.value.includes(playerId)
+  if (isCurrentlySpeaking) {
+    console.log(`🗣️ Player ${playerId} is speaking!`)
+  }
+  return isCurrentlySpeaking
+}
+
+// Обработка активности шепота
+const handleWhisperActivity = (data) => {
+  console.log('💬 Whisper activity received:', data)
+  if (data.playerId) {
+    console.log(`💬 Adding whisper indication for player ${data.playerId} (${data.playerName})`)
+    whisperingPlayers.value[data.playerId] = true
+    
+    // Убираем индикацию через 500ms
+    setTimeout(() => {
+      console.log(`💬 Removing whisper indication for player ${data.playerId}`)
+      delete whisperingPlayers.value[data.playerId]
+    }, 500)
+  }
+}
+
 const getPlayerCardClass = (player) => {
   const classes = []
   
@@ -405,7 +480,10 @@ const getPlayerCardClass = (player) => {
   if (!player.connected) classes.push('is-offline')
   if (player.role === 'game_master') classes.push('is-gamemaster')
   if (isWerewolfRole(player.role)) classes.push('is-werewolf')
+  if (isWhispering(player.id)) classes.push('whispering')
   
+  
+  console.log(`🏷️ Player ${player.name} classes:`, classes)
   return classes
 }
 
@@ -456,54 +534,224 @@ const nightAction = (type, targetId) => {
 
 // Lifecycle
 onMounted(async () => {
-  // Сначала инициализируем слушатели сокетов
-  initSocketListeners()
+  console.log('🎮 Game page mounted, room ID:', route.params.id)
   
   // Получаем ID комнаты из URL
   const roomId = route.params.id
   
-  if (roomId && !gameState.room.id) {
-    // Если есть комната в URL, но нет активной игры - пытаемся подключиться
-    const { username } = useUser()
-    
-    if (username.value) {
-      // Ждем подключения сокета если он еще не подключен
-      if (!gameState.connected) {
-        console.log('🔄 Waiting for socket connection...')
-        
-        // Ждем до 3 секунд подключения
-        let attempts = 0
-        const maxAttempts = 30 // 3 секунды по 100мс
-        
-        const waitForConnection = () => {
-          if (gameState.connected && attempts < maxAttempts) {
-            console.log('✅ Socket connected, joining room...')
-            joinRoom(roomId, username.value)
-          } else if (attempts < maxAttempts) {
-            attempts++
-            setTimeout(waitForConnection, 100)
-          } else {
-            console.error('❌ Socket connection timeout')
-            router.push('/')
-          }
-        }
-        
-        waitForConnection()
-      } else {
-        // Уже подключены - сразу подключаемся к комнате
-        joinRoom(roomId, username.value)
-      }
-    } else {
-      // Нет имени пользователя - перенаправляем на главную
-      router.push('/')
-    }
-  } else if (!roomId) {
-    // Нет ID комнаты в URL - перенаправляем на главную
+  if (!roomId) {
+    console.error('❌ No room ID in URL')
     router.push('/')
+    return
+  }
+
+  // Инициализируем слушатели сокетов для реальных обновлений
+  initSocketListeners()
+  
+  // Добавляем обработчик шепота
+  if (socket.value) {
+    socket.value.on('whisper-activity', handleWhisperActivity)
+    socket.value.on('voice-activity', (data) => {
+      console.log('🎤 Voice activity received in [id].vue:', data)
+      
+      // Преобразуем формат события для handlePlayerVoiceActivity
+      const eventData = {
+        playerId: data.playerId,
+        speaking: true // если событие пришло, значит игрок говорит
+      }
+      
+      console.log('🔧 Calling handlePlayerVoiceActivity with:', eventData)
+      handlePlayerVoiceActivity(eventData)
+      console.log('✅ handlePlayerVoiceActivity called')
+      
+      // Убираем игрока из speaking через короткое время
+      setTimeout(() => {
+        console.log('⏰ Removing player from speaking after timeout')
+        handlePlayerVoiceActivity({
+          playerId: data.playerId,
+          speaking: false
+        })
+      }, 1000) // убираем через 1 секунду
+    })
+  }
+  
+  try {
+    // Сначала загружаем данные комнаты через HTTP
+    console.log('🔄 Loading room data via HTTP...')
+    await loadRoomData(roomId)
+    console.log('✅ Room data loaded successfully')
+    
+    // Проверяем, нужно ли присоединиться как игрок
+    const { username } = useUser()
+    let playerId = null
+    
+    if (username.value && !gameState.player.id) {
+      console.log('🔄 Joining room as player...')
+      const joinResult = await joinRoom(roomId, username.value)
+      console.log('✅ Joined room successfully')
+      playerId = gameState.player.id
+      console.log('✅ Player ID after join:', playerId)
+    } else if (!username.value) {
+      console.log('📺 Viewing room as observer (no username)')
+      gameState.connected = false
+    } else {
+      console.log('👤 Already joined as player')
+      playerId = gameState.player.id
+    }
+
+    // Если все еще нет playerId, попробуем найти игрока по имени пользователя
+    if (!playerId && username.value) {
+      console.log('🔍 Looking for player by username:', username.value)
+      const existingPlayer = gameState.room.players.find(p => p.name === username.value)
+      if (existingPlayer) {
+        playerId = existingPlayer.id
+        console.log('✅ Found existing player with ID:', playerId)
+      }
+    }
+
+    // Загружаем историю чата с учетом прав доступа игрока
+    console.log('🔄 Loading chat history...')
+    console.log('🔄 About to load chat with playerId:', playerId)
+    console.log('🔄 gameState.player before chat load:', gameState.player)
+    await loadChatHistory(roomId, playerId)
+    console.log('✅ Chat history loaded successfully')
+    console.log('✅ gameState.player after chat load:', gameState.player)
+    
+  } catch (error) {
+    console.error('❌ Failed to load room:', error)
+    error.value = error.message
+    
+    // Если комната не найдена, перенаправляем на главную через 3 секунды
+    if (error.message.includes('не найдена') || error.message.includes('not found')) {
+      setTimeout(() => {
+        router.push('/')
+      }, 3000)
+    }
   }
 })
 
 onUnmounted(() => {
+  // Отписываемся от событий
+  if (socket.value) {
+    socket.value.off('whisper-activity', handleWhisperActivity)
+    socket.value.off('voice-activity', handlePlayerVoiceActivity)
+  }
   cleanup()
 })
 </script>
+
+<style scoped>
+/* Анимация шепота для карточек игроков */
+.player-card.whispering {
+  box-shadow: 0 0 15px rgba(168, 85, 247, 0.4);
+  border: 2px solid rgba(168, 85, 247, 0.6);
+  animation: whisper-pulse 0.5s ease-in-out;
+}
+
+@keyframes whisper-pulse {
+  0% {
+    box-shadow: 0 0 5px rgba(168, 85, 247, 0.2);
+    border-color: rgba(168, 85, 247, 0.3);
+    transform: scale(1);
+  }
+  50% {
+    box-shadow: 0 0 20px rgba(168, 85, 247, 0.6);
+    border-color: rgba(168, 85, 247, 0.8);
+    transform: scale(1.02);
+  }
+  100% {
+    box-shadow: 0 0 15px rgba(168, 85, 247, 0.4);
+    border-color: rgba(168, 85, 247, 0.6);
+    transform: scale(1);
+  }
+}
+
+/* Контейнер микрофона для настроек */
+.microphone-container {
+  position: relative;
+}
+
+/* Настройки на hover */
+.hover-settings-modal {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: 1000;
+  margin-top: 8px;
+  pointer-events: auto;
+
+  width: 300px;
+}
+
+.hover-settings-modal .modal-content {
+  position: relative;
+  min-width: 300px;
+  max-width: 400px;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+/* Позиционирование для аватара игрока */
+.player-avatar {
+  position: relative;
+}
+
+/* Кнопка микрофона с индикацией */
+.control-btn.detecting {
+  background: rgba(0, 255, 136, 0.2) !important;
+  border-color: rgba(0, 255, 136, 0.5) !important;
+  animation: mic-detecting 1s ease-in-out infinite;
+}
+
+@keyframes mic-detecting {
+  0%, 100% {
+    box-shadow: 0 0 10px rgba(0, 255, 136, 0.3);
+  }
+  50% {
+    box-shadow: 0 0 20px rgba(0, 255, 136, 0.6);
+  }
+}
+
+/* Индикатор голоса на кнопке микрофона */
+.voice-indicator {
+  position: absolute;
+  top: 50%;
+  right: 4px;
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+.voice-waves {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+}
+
+.voice-wave {
+  width: 2px;
+  height: 8px;
+  background: rgba(0, 255, 136, 0.8);
+  border-radius: 1px;
+  animation: voice-wave 1s ease-in-out infinite;
+}
+
+.voice-wave:nth-child(2) {
+  animation-delay: 0.1s;
+}
+
+.voice-wave:nth-child(3) {
+  animation-delay: 0.2s;
+}
+
+@keyframes voice-wave {
+  0%, 100% {
+    height: 6px;
+    opacity: 0.6;
+  }
+  50% {
+    height: 12px;
+    opacity: 1;
+  }
+}
+
+</style>

@@ -89,6 +89,35 @@ export const ROLES_REGISTRY = {
     }
   },
   
+  hunter: {
+    id: 'hunter',
+    name: 'Охотник',
+    description: 'Если его убивают, он убивает игрока на которого указывает.',
+    team: 'village',
+    color: 'blue',
+    hasNightAction: false,
+    nightOrder: 0,
+    implemented: true,
+    phaseHints: {
+      day: 'Выберите цель - если вас убьют, она тоже умрет'
+    }
+  },
+  
+  insomniac: {
+    id: 'insomniac',
+    name: 'Бессонница',
+    description: 'В конце ночи узнает свою текущую роль.',
+    team: 'village',
+    color: 'blue',
+    hasNightAction: true,
+    nightOrder: 20,
+    implemented: true,
+    phaseHints: {
+      night: 'В конце ночи вы узнаете свою роль',
+      day: 'Используйте знание своей роли'
+    }
+  },
+  
   // === КОМАНДА ОБОРОТНЕЙ ===
   werewolf: {
     id: 'werewolf',
@@ -108,7 +137,7 @@ export const ROLES_REGISTRY = {
   mystic_wolf: {
     id: 'mystic_wolf',
     name: 'Мистический волк',
-    description: 'Узнает оборотней, затем выбирает: голосовать ИЛИ посмотреть карту.',
+    description: 'Узнает оборотней, затем выбирает: голосовать ИЛИ посмотреть роль игрока.',
     team: 'werewolf',
     color: 'red',
     hasNightAction: true,
@@ -132,6 +161,21 @@ export const ROLES_REGISTRY = {
     phaseHints: {
       night: 'Вы узнаете оборотней',
       day: 'Помогайте оборотням, не выдавая себя'
+    }
+  },
+  
+  dream_wolf: {
+    id: 'dream_wolf',
+    name: 'Волк-сновидец',
+    description: 'Оборотни его знают, он их - нет. Не видит ночной чат.',
+    team: 'werewolf',
+    color: 'red',
+    hasNightAction: true,
+    nightOrder: 18,
+    implemented: true,
+    phaseHints: {
+      night: 'Вы спите и ничего не делаете',
+      day: 'Ведите себя как обычный житель'
     }
   },
   
