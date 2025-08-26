@@ -5,6 +5,7 @@
 import { ref, computed, reactive, onMounted, onUnmounted, watch } from 'vue'
 import { useSocket } from './useSocket.js'
 import { useAPI } from './useAPI.js'
+import { useTimer } from './useTimer.js'
 import { useRouter } from 'vue-router'
 
 // Глобальное состояние игры (singleton)
@@ -53,13 +54,6 @@ const gameState = reactive({
     myVote: null
   },
   
-  // Таймер
-  timer: {
-    active: false,
-    duration: 0,
-    remaining: 0,
-    interval: null
-  },
   
   // Подключение
   connected: false
@@ -68,6 +62,7 @@ const gameState = reactive({
 export const useGame = () => {
   const { socket, isConnected, emit, on, getSocketId } = useSocket()
   const { getRoomData, joinRoom: apiJoinRoom, getChatHistory, manageRole, managePhase, nightAction } = useAPI()
+  const timer = useTimer()
   const router = useRouter()
   const loading = ref(false)
   
@@ -83,10 +78,31 @@ export const useGame = () => {
   })
   
   const canChat = computed(() => {
-    if (gameState.room.phase === 'setup') return true
-    if (gameState.room.phase === 'voting') return false
-    if (gameState.room.phase === 'night' && !gameState.room.chatPermissions.werewolfChat) return false
-    return gameState.room.chatPermissions.canChat
+    const permissions = gameState.room.chatPermissions
+    
+    // Если чат полностью отключен (например, в voting), то нельзя писать никому
+    if (!permissions.canChat) {
+      return false
+    }
+    
+    // Если включен режим werewolfChat (ночная фаза), проверяем роль игрока
+    if (permissions.werewolfChat) {
+      const playerRole = currentPlayer.value?.role || gameState.player.role
+      if (!playerRole) {
+        return false
+      }
+      
+      // Определяем оборотней по ролям (как на сервере в GameRoom.js)
+      const werewolfRoles = [
+        'werewolf', 'werewolf_2', 'werewolf_3',
+        'mystic_wolf', 'alpha_wolf', 'dream_wolf'
+      ]
+      
+      return werewolfRoles.includes(playerRole)
+    }
+    
+    // В остальных случаях используем базовое право canChat
+    return permissions.canChat
   })
   
   // Методы для работы с сокетами
@@ -222,12 +238,39 @@ export const useGame = () => {
     return safeEmit('send-message', { text })
   }
   
+  // Показать ошибку как системное сообщение
+  const showChatError = (message) => {
+    const errorMessage = {
+      id: `error_${Date.now()}`,
+      type: 'error',
+      senderId: 'system',
+      senderName: 'Система',
+      text: message,
+      timestamp: Date.now(),
+      isOwn: false
+    }
+    
+    // Добавляем ошибку в чат
+    gameState.chat.push(errorMessage)
+    
+    // Удаляем ошибку через 5 секунд
+    setTimeout(() => {
+      const errorIndex = gameState.chat.findIndex(msg => msg.id === errorMessage.id)
+      if (errorIndex !== -1) {
+        gameState.chat.splice(errorIndex, 1)
+      }
+    }, 5000)
+  }
+  
   const executeNightAction = async (action) => {
     try {
-      const result = await nightAction(gameState.room.id, gameState.player.id, action)
+      const playerId = gameState.player.id || getSocketId()
+      const result = await nightAction(gameState.room.id, playerId, action)
       
       if (result.success) {
         console.log('✅ Night action executed successfully:', result)
+        // Скрываем интерфейс ночного действия после успешного выполнения
+        gameState.nightAction.active = false
         return { success: true, message: result.message || 'Действие выполнено' }
       } else {
         console.error('❌ Night action failed:', result.error)
@@ -310,15 +353,6 @@ export const useGame = () => {
       console.log('🔄 Current gameState.player.id:', gameState.player.id)
       
       const chatData = await getChatHistory(roomId, playerId)
-      console.log('✅ Chat history loaded:', chatData.messages.length, 'messages')
-      console.log('✅ API returned playerId:', chatData.playerId)
-      
-      // Проверим несколько сообщений на наличие isOwn флага
-      chatData.messages.forEach((msg, index) => {
-        if (index < 3) {
-          console.log(`📝 Message ${index}: senderId=${msg.senderId}, isOwn=${msg.isOwn}, type=${msg.type}`)
-        }
-      })
       
       // Если gameState.player.id пуст, но мы знаем playerId из API - обновляем для корректного отображения  
       if (!gameState.player.id && chatData.playerId) {
@@ -339,40 +373,7 @@ export const useGame = () => {
     }
   }
   
-  // Методы таймера
-  const startTimer = (duration) => {
-    if (gameState.timer.interval) {
-      clearInterval(gameState.timer.interval)
-    }
-    
-    gameState.timer.active = true
-    gameState.timer.duration = duration
-    gameState.timer.remaining = duration
-    
-    gameState.timer.interval = setInterval(() => {
-      gameState.timer.remaining--
-      
-      if (gameState.timer.remaining <= 0) {
-        clearInterval(gameState.timer.interval)
-        gameState.timer.active = false
-      }
-    }, 1000)
-  }
   
-  const stopTimer = () => {
-    if (gameState.timer.interval) {
-      clearInterval(gameState.timer.interval)
-    }
-    gameState.timer.active = false
-    gameState.timer.remaining = 0
-  }
-  
-  // Форматирование времени
-  const formatTime = (seconds) => {
-    const mins = Math.floor(seconds / 60)
-    const secs = seconds % 60
-    return `${mins}:${secs.toString().padStart(2, '0')}`
-  }
   
   // Получение информации о фазе
   const getPhaseInfo = () => {
@@ -449,32 +450,60 @@ export const useGame = () => {
         if (data.room) {
           Object.assign(gameState.room, data.room)
           console.log('✅ Room state updated:', gameState.room)
+          
+          // Проверяем таймер в данных комнаты
+          console.log('🔍 Checking for timer in room data:', data.room.timer)
+          if (data.room.timer && data.room.timer.endTime) {
+            console.log('⏰ Found timer in room data, syncing...', data.room.timer)
+            timer.setEndTime(data.room.timer.endTime)
+          } else {
+            console.log('❌ No timer found in game-updated, keeping current timer')
+            // Не сбрасываем таймер при game-updated если его нет - он может быть установлен через phase-changed
+          }
         }
       })
       
       // Смена фазы
       on('phase-changed', (data) => {
+        console.log('🔄 Phase changed:', data)
         gameState.room.phase = data.phase
         gameState.voting.myVote = null
         
-        if (data.timer) {
-          startTimer(data.timer)
+        // Очищаем состояние ночных действий при смене фазы (кроме night)
+        if (data.phase !== 'night') {
+          gameState.nightAction.active = false
+          gameState.nightAction.role = null
+          gameState.nightAction.result = null
+        }
+        
+        // Синхронизируем таймер с сервером
+        console.log('⏰ Phase timer data:', data.timer, 'End time:', data.timerEndTime)
+        if (data.timerEndTime) {
+          console.log('✅ Starting phase timer, ends at:', new Date(data.timerEndTime))
+          timer.setEndTime(data.timerEndTime)
         } else {
-          stopTimer()
+          console.log('❌ No phase timer, deactivating')
+          timer.setEndTime(null)
         }
       })
       
       // Ночные действия
       on('night-action-turn', (data) => {
+        console.log('🌙 Night action turn received:', data)
         gameState.nightAction.active = true
         gameState.nightAction.role = data.role
         gameState.nightAction.timeLimit = data.timeLimit
         gameState.nightAction.data = null
         gameState.nightAction.result = null // Очищаем предыдущий результат
-        
-        if (data.timeLimit) {
-          startTimer(data.timeLimit)
-        }
+        console.log('🌙 Night action state updated:', {
+          active: gameState.nightAction.active,
+          role: gameState.nightAction.role
+        })
+      })
+      
+      on('night-action-timer', (data) => {
+        console.log('⏰ Night action timer update:', data)
+        timer.setEndTime(data.endTime)
       })
       
       on('night-action-result', (data) => {
@@ -539,6 +568,9 @@ export const useGame = () => {
         if (data.code === 'ROOM_NOT_FOUND') {
           console.error('❌ Room not found, redirecting to home...')
           router.push('/')
+        } else {
+          // Показываем ошибку в чате
+          showChatError(data.message || 'Произошла ошибка')
         }
       })
     }
@@ -549,7 +581,7 @@ export const useGame = () => {
   
   // Очистка при размонтировании
   const cleanup = () => {
-    stopTimer()
+    // Таймер очистится автоматически через onUnmounted в useTimer
   }
   
   onMounted(() => {
@@ -587,16 +619,21 @@ export const useGame = () => {
     startGame,
     selectRole,
     sendMessage,
+    showChatError,
     executeNightAction,
     votePlayer,
     adminAction,
     
     // Утилиты
-    formatTime,
+    formatTime: timer.formatTime,
     getPhaseInfo,
     initSocketListeners,
     loadRoomData,
     loadChatHistory,
-    cleanup
+    cleanup,
+    
+    // Таймер
+    timer,
+    setTimerEndTime: timer.setEndTime
   }
 }

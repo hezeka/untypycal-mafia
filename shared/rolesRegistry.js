@@ -155,11 +155,11 @@ export const ROLES_REGISTRY = {
     description: 'Узнает оборотней (они его не знают). Побеждает с оборотнями.',
     team: 'werewolf',
     color: 'red',
-    hasNightAction: true,
-    nightOrder: 4,
+    hasNightAction: false,
+    nightOrder: 0,
     implemented: true,
     phaseHints: {
-      night: 'Вы узнаете оборотней',
+      night: 'Вы видите оборотней в списке игроков',
       day: 'Помогайте оборотням, не выдавая себя'
     }
   },

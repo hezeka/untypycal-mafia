@@ -1,11 +1,13 @@
-import { GAME_PHASES, PHASE_DURATIONS } from '../utils/constants.js'
+import { GAME_PHASES, PHASE_DURATIONS, MESSAGE_TYPES } from '../utils/constants.js'
 import { getNightRoles, executeRoleAction, getRoleInfo } from '../roles/rolesList.js'
+import { getAllRoles } from '../../shared/rolesRegistry.js'
 
 export class GameEngine {
   constructor(room) {
     this.room = room
     this.currentPhase = GAME_PHASES.SETUP
     this.phaseTimer = null
+    this.phaseStartTime = null
     this.nightActionIndex = 0
     this.nightRoles = []
     this.killedPlayers = []
@@ -88,7 +90,6 @@ export class GameEngine {
   // Вспомогательный метод для получения данных роли
   getRoleData(roleId) {
     try {
-      const { getAllRoles } = require('../../../shared/rolesRegistry.js')
       const allRoles = getAllRoles()
       return allRoles[roleId]
     } catch (error) {
@@ -100,6 +101,13 @@ export class GameEngine {
   async setPhase(newPhase) {
     this.currentPhase = newPhase
     this.room.gameState = newPhase
+    this.phaseStartTime = Date.now()
+    
+    const phaseKey = newPhase.toUpperCase()
+    const duration = PHASE_DURATIONS[phaseKey]
+    const endTime = duration ? this.phaseStartTime + (duration * 1000) : null
+    
+    console.log('🔄 Setting phase:', newPhase, 'PhaseKey:', phaseKey, 'Duration:', duration, 'End time:', endTime ? new Date(endTime) : null)
     
     // Обновляем права чата
     this.updateChatPermissions()
@@ -123,7 +131,8 @@ export class GameEngine {
     
     this.room.broadcast('phase-changed', {
       phase: newPhase,
-      timer: PHASE_DURATIONS[newPhase] || 0
+      timer: duration || 0,
+      timerEndTime: endTime
     })
     
     // Обновляем состояние комнаты (включая права чата)
@@ -167,6 +176,9 @@ export class GameEngine {
             // Игра уже закончена в endGame(), ничего не делаем
             console.log('🏆 Game ended, no phase transition needed')
           } else {
+            // Увеличиваем счетчик дней, пережитых игроками
+            this.room.daysSurvived++
+            console.log(`📅 Day ${this.room.daysSurvived} completed`)
             await this.setPhase(GAME_PHASES.NIGHT)
           }
         }
@@ -205,12 +217,23 @@ export class GameEngine {
       // Очищаем список выполненных действий для новой роли
       this.completedActions.clear()
       
+      // Обновляем таймер для клиента
+      this.phaseStartTime = Date.now()
+      const endTime = this.phaseStartTime + (30 * 1000) // 30 секунд
+      
       // Уведомляем игроков об их ходе
       players.forEach(player => {
         this.room.sendToPlayer(player.id, 'night-action-turn', {
           role: currentRole.id,
           timeLimit: 30
         })
+      })
+      
+      // Обновляем таймер для всех клиентов (используем отдельный event для ночных действий)
+      this.room.broadcast('night-action-timer', {
+        role: currentRole.id,
+        timeLimit: 30,
+        endTime: endTime
       })
       
       // Устанавливаем таймер на 30 секунд
@@ -327,7 +350,7 @@ export class GameEngine {
     }
     
     messages.forEach(msg => {
-      this.room.addSystemMessage(msg, 'game-event')
+      this.room.addSystemMessage(msg, MESSAGE_TYPES.SYSTEM)
     })
     
     // Обновляем состояние комнаты для всех игроков
@@ -425,11 +448,18 @@ export class GameEngine {
           
           const roleInfo = getRoleInfo(player.role)
           const roleName = roleInfo?.name || player.role
-          this.room.addSystemMessage(`💀 ${player.name} (${roleName}) был исключен голосованием`, 'voting-result')
+          
+          // Увеличиваем счетчик убитых мирных, если роль принадлежит деревне
+          if (roleInfo && roleInfo.team === 'village') {
+            this.room.civiliansKilled++
+            console.log(`💀 Civilian ${player.name} (${roleName}) killed, total civilians killed: ${this.room.civiliansKilled}`)
+          }
+          
+          this.room.addSystemMessage(`💀 ${player.name} (${roleName}) был исключен голосованием`, MESSAGE_TYPES.SYSTEM)
         }
       })
     } else {
-      this.room.addSystemMessage('Никто не был исключен', 'voting-result')
+      this.room.addSystemMessage('Никто не был исключен', MESSAGE_TYPES.SYSTEM)
     }
     
     // Обрабатываем месть охотников
@@ -475,7 +505,7 @@ export class GameEngine {
       message += voteParts.join(', ')
     }
     
-    this.room.addSystemMessage(message, 'voting-result')
+    this.room.addSystemMessage(message, MESSAGE_TYPES.SYSTEM)
   }
   
   processHunterRetaliation(huntersKilled, votingResult) {
@@ -489,15 +519,22 @@ export class GameEngine {
           target.alive = false
           const targetRoleInfo = getRoleInfo(target.role)
           const targetRoleName = targetRoleInfo?.name || target.role
+          
+          // Увеличиваем счетчик убитых мирных, если роль принадлежит деревне
+          if (targetRoleInfo && targetRoleInfo.team === 'village') {
+            this.room.civiliansKilled++
+            console.log(`💀 Civilian ${target.name} (${targetRoleName}) killed by hunter, total civilians killed: ${this.room.civiliansKilled}`)
+          }
+          
           this.room.addSystemMessage(
             `💀 ${hunter.name} (Охотник) забирает с собой ${target.name} (${targetRoleName})!`, 
-            'voting-result'
+            MESSAGE_TYPES.SYSTEM
           )
         }
       } else {
         this.room.addSystemMessage(
           `💀 ${hunter.name} (Охотник) умирает, но не выбрал цель для мести`, 
-          'voting-result'
+          MESSAGE_TYPES.SYSTEM
         )
       }
     })
@@ -564,7 +601,7 @@ export class GameEngine {
     // Устанавливаем фазу завершения игры
     this.room.gameState = GAME_PHASES.ENDED
     
-    this.room.addSystemMessage(`🏆 Игра окончена! Победила команда: ${this.getTeamName(winnerTeam)}`, 'game-end')
+    this.room.addSystemMessage(`🏆 Игра окончена! Победила команда: ${this.getTeamName(winnerTeam)}`, MESSAGE_TYPES.SYSTEM)
     
     // Обновляем состояние для всех игроков
     this.room.broadcast('game-updated', { room: this.room.getClientData() })
@@ -636,11 +673,36 @@ export class GameEngine {
         // Игра уже закончена в endGame(), ничего не делаем
         console.log('🏆 Game ended, no phase transition needed')
       } else {
+        // Увеличиваем счетчик дней, пережитых игроками
+        this.room.daysSurvived++
+        console.log(`📅 Day ${this.room.daysSurvived} completed`)
         await this.setPhase(GAME_PHASES.NIGHT)
       }
     }, 2000)
     
     return { success: true, message: 'Голосование принудительно завершено' }
+  }
+
+  // Получить информацию о таймере для клиента
+  getTimerInfo() {
+    const phaseKey = this.currentPhase.toUpperCase()
+    const duration = PHASE_DURATIONS[phaseKey]
+    console.log('🔍 getTimerInfo - Phase:', this.currentPhase, 'PhaseKey:', phaseKey, 'Duration:', duration, 'Start time:', this.phaseStartTime)
+    
+    if (duration && this.phaseStartTime) {
+      const endTime = this.phaseStartTime + (duration * 1000)
+      const result = {
+        active: true,
+        duration: duration,
+        endTime: endTime,
+        phase: this.currentPhase
+      }
+      console.log('✅ Returning timer info:', result)
+      return result
+    }
+    
+    console.log('❌ No timer info available')
+    return null
   }
 
   destroy() {

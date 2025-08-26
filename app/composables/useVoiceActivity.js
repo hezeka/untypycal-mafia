@@ -111,7 +111,6 @@ export const useVoiceActivity = () => {
    * Throttled отправка голосовой активности
    */
   const throttledEmitVoiceActivity = throttle((isSpeaking) => {
-    console.log(`🎤 Emitting voice activity: speaking=${isSpeaking}`)
     emit('voice-activity', { speaking: isSpeaking })
   }, 150)
   
@@ -159,25 +158,19 @@ export const useVoiceActivity = () => {
    */
   const handlePlayerVoiceActivity = (data) => {
     const { playerId, speaking } = data
-    console.log(`🎯 handlePlayerVoiceActivity: playerId=${playerId}, speaking=${speaking}`)
-    console.log(`📋 speakingPlayers before:`, speakingPlayers.value)
     
     if (speaking) {
       // Добавляем игрока в список говорящих
       if (!speakingPlayers.value.includes(playerId)) {
         speakingPlayers.value.push(playerId)
-        console.log(`➕ Added player ${playerId} to speakingPlayers`)
       }
     } else {
       // Убираем игрока из списка говорящих
       const index = speakingPlayers.value.indexOf(playerId)
       if (index > -1) {
         speakingPlayers.value.splice(index, 1)
-        console.log(`➖ Removed player ${playerId} from speakingPlayers`)
       }
     }
-    
-    console.log(`📋 speakingPlayers after:`, speakingPlayers.value)
   }
   
   /**

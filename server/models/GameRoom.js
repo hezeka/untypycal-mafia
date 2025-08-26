@@ -21,6 +21,8 @@ export class GameRoom {
     this.gameEngine = null
     this.gameResult = null
     this.votingRounds = 0
+    this.daysSurvived = 0
+    this.civiliansKilled = 0
     
     // Чат
     this.chat = []
@@ -186,10 +188,15 @@ export class GameRoom {
       throw new Error('Выберите достаточно ролей')
     }
     
+    // Очищаем чат перед началом игры
+    this.chat = []
+    
     this.gameEngine = new GameEngine(this)
     await this.gameEngine.startGame()
     
-    this.addSystemMessage('Игра началась! Удачи!', MESSAGE_TYPES.GAME_EVENT)
+    // Добавляем системное сообщение с информацией о центральных картах
+    const centerCardsCount = this.centerCards.length
+    this.addSystemMessage(`🎮 Игра началась! Роли распределены случайно. В центре ${centerCardsCount} карт.`, MESSAGE_TYPES.SYSTEM)
   }
 
   // ✅ ДОБАВЛЕНИЕ СООБЩЕНИЯ С ПРАВИЛЬНЫМИ ТИПАМИ
@@ -203,7 +210,7 @@ export class GameRoom {
       id: Date.now(),
       senderId,
       senderName: sender.name,
-      senderRole: this.shouldShowRole(senderId) ? sender.role : null,
+      senderRole: sender.role, // Всегда указываем роль отправителя
       text: sanitizeHtml(text),
       type,
       recipientId,
@@ -273,17 +280,8 @@ export class GameRoom {
     return werewolfRoles.includes(roleId)
   }
 
-  // ✅ ДОЛЖНА ЛИ БЫТЬ ВИДНА РОЛЬ
-  shouldShowRole(playerId) {
-    const player = this.getPlayer(playerId)
-    if (!player) return false
-
-    // В setup фазе роли не видны
-    if (this.gameState === GAME_PHASES.SETUP) return false
-    
-    // Свою роль видишь всегда (кроме setup)
-    return true
-  }
+  // ✅ УСТАРЕВШАЯ ФУНКЦИЯ - УДАЛЕНА
+  // Используйте shouldShowPlayerRole(targetPlayer, viewerPlayer) вместо этой функции
 
   // ✅ ПРАВА НА ПРОСМОТР РОЛЕЙ ДРУГИХ ИГРОКОВ
   shouldShowPlayerRole(targetPlayer, viewerPlayer) {
@@ -300,6 +298,11 @@ export class GameRoom {
 
     // Оборотни видят других оборотней (после setup)
     if (this.isWerewolf(viewerPlayer.role) && this.isWerewolf(targetPlayer.role)) {
+      return true
+    }
+
+    // Миньон видит оборотней (но они его не видят)
+    if (viewerPlayer.role === 'minion' && this.isWerewolf(targetPlayer.role)) {
       return true
     }
 
@@ -487,6 +490,9 @@ export class GameRoom {
       votingActive: this.votingActive,
       gameResult: this.gameResult,
       votingRounds: this.votingRounds,
+      daysSurvived: this.daysSurvived,
+      civiliansKilled: this.civiliansKilled,
+      timer: this.gameEngine ? this.gameEngine.getTimerInfo() : null,
       players: Array.from(this.players.values()).map(p => ({
         id: p.id,
         name: p.name,

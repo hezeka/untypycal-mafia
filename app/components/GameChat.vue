@@ -1,12 +1,9 @@
 <template>
-  <div class="game-chat">
+  <div class="game-chat" :class="{ 'chat-disabled': !canChat }">
     <div class="chat-header">
-      <h3>Игровой чат</h3>
-      <div class="chat-status">
-        <span v-if="!canChat" class="status-disabled">Чат отключен</span>
-        <span v-else-if="isNightChat" class="status-night">Ночной чат оборотней</span>
-        <span v-else class="status-enabled">Общий чат</span>
-      </div>
+        Игровой чат
+        <div class="chat-status" :class="!canChat ? 'status-disabled' : isNightChat ? 'status-night' : ''">
+        </div>
     </div>
 
     <div class="chat-messages" ref="messagesContainer">
@@ -19,11 +16,13 @@
         <div class="message-header">
           <div class="message-top">
             <span class="message-sender">{{ getSenderDisplay(message) }}</span>
-            <span v-if="message.senderRole && shouldShowRole(message)" class="message-role">
+            <span v-if="message.senderRole" class="message-role">
                 {{ getRoleName(message.senderRole) }}
             </span>
             <span v-else-if="message.type == 'whisper'" class="message-role">Шепот</span>
+            <span v-else-if="message.type == 'error'" class="message-role">Ошибка</span>
             <span v-else-if="message.isOwn == true" class="message-role">(Вы)</span>
+            <span v-else-if="message.type == 'system'" class="message-role">Оповещение</span>
           </div>
           <span class="message-time">{{ formatTime(message.timestamp) }}</span>
         </div>
@@ -36,7 +35,7 @@
         <span v-if="gameState.room.phase === 'voting'">
           Во время голосования можно только шептать ведущему: /ш ведущий текст
         </span>
-        <span v-else-if="gameState.room.phase === 'night' && !isWerewolf">
+        <span v-else-if="gameState.room.phase === 'night'">
           В ночную фазу могут писать только оборотни
         </span>
         <span v-else>
@@ -53,23 +52,20 @@
             /help - показать команды
           </div>
         </div>
+
+        <div class="help-list" @click="showCommands = !showCommands"><span style="opacity: .4;">{{ showCommands ? '▴' : '▸' }}</span> Подсказки по командам</div>
         
         <div class="input-row">
-          <input 
-            v-model="messageText"
-            @keypress.enter="sendMessage"
-            @focus="showCommands = false"
-            type="text"
-            placeholder="Введите сообщение..."
-            maxlength="200"
-            :disabled="!canChat"
-          />
-          <button @click="sendMessage" :disabled="!canSendMessage" class="send-btn">
-            Отправить
-          </button>
-          <button @click="showCommands = !showCommands" class="help-btn">
-            ?
-          </button>
+            <input 
+                v-model="messageText"
+                @keypress.enter="sendMessage"
+                @focus="showCommands = false"
+                type="text"
+                placeholder="Введите сообщение..."
+                maxlength="200"
+                :disabled="!canChat"
+            />
+            <button @click="sendMessage" :disabled="!canChat" class="send-btn"></button>
         </div>
       </div>
     </div>
@@ -81,7 +77,12 @@ import { ref, computed, nextTick, watch } from 'vue'
 import { useGame } from '~/composables/useGame'
 import { getAllRoles } from '../../shared/rolesRegistry.js'
 
-const { gameState, canChat, isWerewolf, sendMessage: sendGameMessage } = useGame()
+const { gameState, canChat, sendMessage: sendGameMessage } = useGame()
+
+// Функция для установки текста в инпут (для команд шепота)
+const setInputText = (text) => {
+  messageText.value = text
+}
 
 const messageText = ref('')
 const messagesContainer = ref(null)
@@ -126,18 +127,6 @@ const getSenderDisplay = (message) => {
   return message.senderName
 }
 
-const shouldShowRole = (message) => {
-  if (message.senderId === 'system') return false
-  if (!message.senderRole) return false
-  
-  // В ночном чате оборотни видят роли друг друга
-  if (isNightChat.value && isWerewolf.value) return true
-  
-  // game_master видит все роли
-  if (gameState.player.role === 'game_master') return true
-  
-  return false
-}
 
 const getRoleName = (roleId) => {
   return roles[roleId]?.name || roleId
@@ -150,7 +139,9 @@ const getMessageClass = (message) => {
     classes.push('message-whisper')
   } else if (message.type === 'system') {
     classes.push('message-system')
-  } else if (message.type === 'game-event') {
+  } else if (message.type === 'error') {
+    classes.push('message-error')
+  } else if (message.type === 'game_event') {
     classes.push('message-game-event')
   }
   
@@ -159,9 +150,6 @@ const getMessageClass = (message) => {
                 message.senderId === gameState.player.id ||
                 (message.senderName === gameState.player.name && message.senderId !== 'system')
   
-  if (message.senderId !== 'system') {
-    console.log(`🎨 Message styling: sender=${message.senderName}, player=${gameState.player.name}, isOwn=${message.isOwn}, final=${isOwn}`)
-  }
   
   // Используем enriched данные из API или fallback к сравнению имени
   if (isOwn) {
@@ -190,4 +178,13 @@ const scrollToBottom = () => {
 
 // Отслеживаем новые сообщения
 watch(() => gameState.chat.length, scrollToBottom)
+
+// Дополнительно отслеживаем появление ошибок для немедленной прокрутки
+watch(() => gameState.chat.filter(msg => msg.type === 'error'), scrollToBottom, { deep: true })
+
+// Экспортируем функции для использования родительским компонентом
+defineExpose({
+  setInputText,
+  messageText
+})
 </script>

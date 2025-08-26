@@ -248,14 +248,15 @@ const handleSendMessage = async (socket, data) => {
     }
     
     // Проверяем специфичные права для ночи (только оборотни)
-    if (room.gameState === GAME_PHASES.NIGHT && !room.chatPermissions.werewolfChat) {
+    if (room.gameState === GAME_PHASES.NIGHT && room.chatPermissions.werewolfChat) {
       if (!room.isWerewolf(player.role)) {
         return sendError(socket, ERROR_CODES.PERMISSION_DENIED, 'Ночью могут говорить только оборотни')
       }
     }
     
-    // Создаем обычное сообщение
-    const message = room.addMessage(socket.id, cleanText, 'public')
+    // Получаем отправителя
+    const sender = room.getPlayer(socket.id)
+    if (!sender) return sendError(socket, ERROR_CODES.PLAYER_NOT_FOUND)
     
     // Определяем получателей
     let recipients = []
@@ -264,22 +265,39 @@ const handleSendMessage = async (socket, data) => {
       // Ночью - только оборотни видят сообщения оборотней
       recipients = Array.from(room.players.values())
         .filter(p => room.isWerewolf(p.role) || p.role === 'game_master')
-        .map(p => p.id)
     } else if (room.chatPermissions.canSeeAll) {
       // Обычные фазы - все живые + game_master
       recipients = Array.from(room.players.values())
         .filter(p => p.alive || p.role === 'game_master')
-        .map(p => p.id)
     }
     
-    // Отправляем сообщение получателям
-    recipients.forEach(playerId => {
-      const socket = room.sockets.get(playerId)
+    // Создаем базовое сообщение для истории чата
+    const baseMessage = {
+      id: Date.now(),
+      senderId: sender.id,
+      senderName: sender.name,
+      senderRole: sender.role, // Всегда сохраняем роль в истории
+      text: sanitizeHtml(cleanText),
+      type: 'public',
+      timestamp: Date.now()
+    }
+    
+    // Добавляем в историю чата
+    room.chat.push(baseMessage)
+    
+    // Отправляем персонализированные сообщения получателям
+    recipients.forEach(recipient => {
+      const socket = room.sockets.get(recipient.id)
       if (socket) {
         try {
-          socket.emit(SOCKET_EVENTS.NEW_MESSAGE, { message })
+          // Создаем персонализированное сообщение для каждого получателя
+          const personalizedMessage = {
+            ...baseMessage,
+            senderRole: room.shouldShowPlayerRole(sender, recipient) ? sender.role : null
+          }
+          socket.emit(SOCKET_EVENTS.NEW_MESSAGE, { message: personalizedMessage })
         } catch (error) {
-          logger.error(`Failed to send message to ${playerId}:`, error)
+          logger.error(`Failed to send message to ${recipient.id}:`, error)
         }
       }
     })
@@ -431,15 +449,15 @@ const handleAdminAction = (socket, data) => {
     switch (action) {
       case 'kill':
         target.alive = false
-        room.addSystemMessage(`${target.name} был убит администратором`)
+        room.addSystemMessage(`${target.name} был убит администратором`, MESSAGE_TYPES.SYSTEM)
         break
       case 'revive':
         target.alive = true
-        room.addSystemMessage(`${target.name} был воскрешен администратором`)
+        room.addSystemMessage(`${target.name} был воскрешен администратором`, MESSAGE_TYPES.SYSTEM)
         break
       case 'kick':
         room.removePlayer(targetId)
-        room.addSystemMessage(`${target.name} был исключен из игры`)
+        room.addSystemMessage(`${target.name} был исключен из игры`, MESSAGE_TYPES.SYSTEM)
         break
       case 'next-phase':
         if (room.gameEngine) {
@@ -646,6 +664,14 @@ app.get('/api/rooms/:roomId/chat', (req, res) => {
       console.log(`🔧 Marking message as own: "${message.text.substring(0, 30)}" from ${message.senderName}`)
     }
     
+    // Всегда указываем роль отправителя (если она не указана в истории)
+    if (message.senderId !== 'system' && !enrichedMessage.senderRole) {
+      const messageSender = room.getPlayer(message.senderId)
+      if (messageSender) {
+        enrichedMessage.senderRole = messageSender.role
+      }
+    }
+    
     return enrichedMessage
   })
   
@@ -803,6 +829,35 @@ app.post('/api/rooms/:roomId/night-action', async (req, res) => {
   }
   
   try {
+    // Преобразуем targetName в targetId для обратной совместимости
+    if (action.targetName && !action.targetId) {
+      const targetPlayer = Array.from(room.players.values()).find(p => p.name === action.targetName)
+      if (targetPlayer) {
+        action.targetId = targetPlayer.id
+      } else {
+        return res.status(400).json({ error: 'Игрок с таким именем не найден' })
+      }
+    }
+    
+    // Аналогично для двух целей (смутьян)
+    if (action.target1Name && !action.target1Id) {
+      const target1 = Array.from(room.players.values()).find(p => p.name === action.target1Name)
+      if (target1) {
+        action.target1Id = target1.id
+      } else {
+        return res.status(400).json({ error: 'Первый игрок не найден' })
+      }
+    }
+    
+    if (action.target2Name && !action.target2Id) {
+      const target2 = Array.from(room.players.values()).find(p => p.name === action.target2Name)
+      if (target2) {
+        action.target2Id = target2.id
+      } else {
+        return res.status(400).json({ error: 'Второй игрок не найден' })
+      }
+    }
+
     const result = await room.gameEngine.executeNightAction(playerId, action)
     
     if (result.error) {

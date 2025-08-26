@@ -4,30 +4,18 @@ export class MinionRole extends BaseRole {
   constructor() {
     super('minion', {
       name: 'Миньон',
-      description: 'Ночью узнает всех оборотней (оборотни его не знают). Побеждает с оборотнями.',
+      description: 'Видит роли оборотней в списке игроков (они его не знают). Побеждает с оборотнями.',
       team: 'werewolf',
       color: 'red',
-      hasNightAction: true,
-      nightOrder: 4,
+      hasNightAction: false,
+      nightOrder: 0,
       implemented: true,
       phaseHints: {
-        night: 'Вы узнаете оборотней, но они вас не знают',
+        night: 'Вы видите роли оборотней в списке игроков',
         day: 'Помогайте оборотням, не выдавая себя'
       }
     })
   }
   
-  async executeNightAction(gameEngine, player, action) {
-    const room = gameEngine.room
-    
-    const werewolves = Array.from(room.players.values())
-      .filter(p => p.alive && room.isWerewolf(p.role))
-      .map(p => ({ id: p.id, name: p.name, role: p.role }))
-    
-    return {
-      success: true,
-      message: werewolves.length > 0 ? 'Вы знаете оборотней' : 'Оборотней нет',
-      data: { werewolves }
-    }
-  }
+  // Миньон не выполняет ночных действий - только видит роли оборотней
 }

@@ -1,6 +1,6 @@
 <template>
   <div class="game-setup">
-    <div class="setup-header">
+    <div class="phase-header">
       <div class="phase-info">
         <div class="phase-icon setup"></div>
         <div class="phase-description">
@@ -26,6 +26,7 @@
           >
             <span class="player-name">{{ player.name }}</span>
             <span v-if="player.isHost" class="player-badge">Ведущий</span>
+            <span v-else-if="player.isMe" class="player-badge">Вы</span>
           </div>
         </div>
         <div class="roles-counter">

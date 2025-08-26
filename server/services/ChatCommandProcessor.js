@@ -170,15 +170,37 @@ export class ChatCommandProcessor {
     // Добавляем в чат
     this.room.chat.push(whisperMessage)
 
-    // Отправляем обоим участникам
+    // Отправляем обоим участникам с проверкой прав
     const recipients = [sender.id, host.id]
     
     recipients.forEach(playerId => {
       const socket = this.room.sockets.get(playerId)
-      if (socket) {
-        socket.emit('new-message', { message: whisperMessage })
+      const recipient = this.room.getPlayer(playerId)
+      
+      if (socket && recipient) {
+        // Проверяем права: отправитель или ведущий
+        const canSee = recipient.name === sender.name ||
+                      recipient.name === host.name ||
+                      recipient.role === 'game_master'
+        
+        if (canSee) {
+          socket.emit('new-message', { message: whisperMessage })
+        }
       }
     })
+
+    // Отправляем событие о шепоте для визуальной индикации (днем и во время знакомства)
+    const isDayPhase = this.room.gameState === GAME_PHASES.DAY
+    const isIntroductionPhase = this.room.gameState === GAME_PHASES.INTRODUCTION
+    
+    if (isDayPhase || isIntroductionPhase) {
+      // Отправляем всем в комнате событие о том, что игрок шепчет ведущему
+      this.room.broadcast('whisper-activity', {
+        playerId: sender.id,
+        playerName: sender.name
+      })
+      
+    }
 
     return { success: true }
   }
@@ -210,13 +232,34 @@ export class ChatCommandProcessor {
     // Добавляем в чат
     this.room.chat.push(whisperMessage)
 
-    // Отправляем всем получателям
+    // Отправляем всем получателям с дополнительной проверкой прав
     recipients.forEach(playerId => {
       const socket = this.room.sockets.get(playerId)
-      if (socket) {
-        socket.emit('new-message', { message: whisperMessage })
+      const recipient = this.room.getPlayer(playerId)
+      
+      if (socket && recipient) {
+        // Проверяем, что игрок действительно должен получить групповое сообщение
+        const groupRecipients = this.getGroupRecipients(groupName, sender)
+        const canSee = groupRecipients.includes(playerId) || recipient.role === 'game_master'
+        
+        if (canSee) {
+          socket.emit('new-message', { message: whisperMessage })
+        }
       }
     })
+
+    // Отправляем событие о шепоте для визуальной индикации групповых сообщений
+    const isDayPhase = this.room.gameState === GAME_PHASES.DAY
+    const isIntroductionPhase = this.room.gameState === GAME_PHASES.INTRODUCTION
+    
+    if (isDayPhase || isIntroductionPhase) {
+      // Отправляем всем в комнате событие о том, что игрок шепчет группе
+      this.room.broadcast('whisper-activity', {
+        playerId: sender.id,
+        playerName: sender.name
+      })
+      
+    }
 
     return { success: true }
   }
@@ -265,11 +308,20 @@ export class ChatCommandProcessor {
       recipients.add(host.id)
     }
 
-    // Отправляем сообщение
+    // Отправляем сообщение - проверяем права каждого получателя
     recipients.forEach(playerId => {
       const socket = this.room.sockets.get(playerId)
-      if (socket) {
-        socket.emit('new-message', { message: whisperMessage })
+      const recipient = this.room.getPlayer(playerId)
+      
+      if (socket && recipient) {
+        // Дополнительная проверка: игрок действительно может видеть это сообщение
+        const canSee = recipient.role === 'game_master' ||  // game_master видит все
+                      recipient.name === sender.name ||     // отправитель
+                      recipient.name === targetPlayer.name  // получатель
+        
+        if (canSee) {
+          socket.emit('new-message', { message: whisperMessage })
+        }
       }
     })
 
@@ -284,8 +336,6 @@ export class ChatCommandProcessor {
         playerId: sender.id,
         playerName: sender.name
       })
-      
-      console.log(`💬 Whisper activity sent for ${sender.name} (${sender.id})`)
     }
 
     return { success: true }

@@ -15,7 +15,7 @@ export const PHASE_DURATIONS = {
   INTRODUCTION: 180,    // 3 минуты
   NIGHT: 30,           // 30 секунд на действие
   DAY: 300,            // 5 минут
-  VOTING: 120          // 2 минуты
+  VOTING: 20          // 20 секунд
 }
 
 // ✅ ТИПЫ СООБЩЕНИЙ ЧАТА

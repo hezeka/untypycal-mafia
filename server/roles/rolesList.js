@@ -81,12 +81,18 @@ const getRoleHandler = (roleId) => {
 
 // === ОБРАБОТЧИКИ РОЛЕЙ ===
 
+// Утилита для поиска игрока по имени
+const findPlayerByName = (room, playerName) => {
+  return Array.from(room.players.values()).find(p => p.name === playerName)
+}
+
 const handleWerewolf = async (gameEngine, player, action) => {
-  const { type, targetId } = action
+  const { type, targetId, targetName } = action
   const room = gameEngine.room
   
-  if (type === 'vote_kill' && targetId) {
-    const target = room.getPlayer(targetId)
+  if (type === 'vote_kill' && (targetId || targetName)) {
+    // Поддерживаем как старый способ (targetId), так и новый (targetName)
+    const target = targetId ? room.getPlayer(targetId) : findPlayerByName(room, targetName)
     if (!target || !target.alive || target.role === 'game_master') {
       return { error: 'Недопустимая цель' }
     }
@@ -95,12 +101,12 @@ const handleWerewolf = async (gameEngine, player, action) => {
       gameEngine.werewolfVotes = new Map()
     }
     
-    gameEngine.werewolfVotes.set(player.id, targetId)
+    gameEngine.werewolfVotes.set(player.id, target.id)
     
     return {
       success: true,
       message: `Вы проголосовали за ${target.name}`,
-      data: { voted: targetId }
+      data: { voted: target.id }
     }
   }
   
@@ -117,11 +123,11 @@ const handleWerewolf = async (gameEngine, player, action) => {
 }
 
 const handleSeer = async (gameEngine, player, action) => {
-  const { type, targetId, centerCards } = action
+  const { type, targetId, targetName, centerCards } = action
   const room = gameEngine.room
   
-  if (type === 'look_player' && targetId) {
-    const target = room.getPlayer(targetId)
+  if (type === 'look_player' && (targetId || targetName)) {
+    const target = targetId ? room.getPlayer(targetId) : findPlayerByName(room, targetName)
     if (!target || target.id === player.id) {
       return { error: 'Недопустимая цель' }
     }

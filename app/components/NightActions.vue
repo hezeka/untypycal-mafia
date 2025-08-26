@@ -1,73 +1,21 @@
 <template>
   <div class="night-actions">
+    <!-- Debug info -->
+    <!-- <div style="color: red; font-size: 12px;">
+      DEBUG: active={{ gameState.nightAction.active }}, role={{ gameState.nightAction.role }}, phase={{ gameState.room.phase }}
+    </div> -->
+    
     <!-- Активная панель действий - только когда наша очередь -->
     <div v-if="gameState.nightAction.active" class="night-panel">
       <h3>{{ getRoleName(gameState.nightAction.role) }}</h3>
       <p>{{ getHint() }}</p>
       
-      <!-- Провидец и Мистический волк: выбор между игроком и центральными картами -->
-      <div v-if="(gameState.nightAction.role === 'seer' || gameState.nightAction.role === 'mystic_wolf') && gameState.nightAction.active" class="action-buttons">
+      <!-- Центральные карты для провидца -->
+      <div v-if="gameState.nightAction.role === 'seer'" class="action-buttons">
         <div class="action-group">
-          <h4>Посмотреть роль игрока:</h4>
-          <button 
-            v-for="player in availableTargets"
-            :key="player.id"
-            @click="seerLookPlayer(player.id)"
-            class="target-btn"
-          >
-            {{ player.name }}
-          </button>
-        </div>
-        
-        <div v-if="gameState.nightAction.role === 'seer'" class="action-group">
-          <h4>Или посмотреть центральные карты:</h4>
+          <h4>Посмотреть центральные карты:</h4>
           <button @click="seerLookCenter" class="center-btn">
             Посмотреть 2 центральные карты
-          </button>
-        </div>
-        
-        <!-- Дополнительная опция для мистического волка -->
-        <div v-if="gameState.nightAction.role === 'mystic_wolf'" class="action-group">
-          <h4>Или проголосовать за убийство:</h4>
-          <button 
-            v-for="player in availableTargets"
-            :key="'vote-' + player.id"
-            @click="mysticWolfVote(player.id)"
-            class="vote-btn"
-          >
-            Убить {{ player.name }}
-          </button>
-        </div>
-        
-        <button @click="skipAction" class="skip-btn">Пропустить</button>
-      </div>
-      
-      <!-- Смутьян: выбрать двух игроков -->
-      <div v-else-if="gameState.nightAction.role === 'troublemaker' && gameState.nightAction.active" class="action-buttons">
-        <h4>Выберите двух игроков для обмена ролями:</h4>
-        <div class="two-target-selection">
-          <div class="target-group">
-            <label>Первый игрок:</label>
-            <select v-model="selectedTarget1">
-              <option value="">-- Выберите --</option>
-              <option v-for="player in availableTargets" :key="player.id" :value="player.id">
-                {{ player.name }}
-              </option>
-            </select>
-          </div>
-          
-          <div class="target-group">
-            <label>Второй игрок:</label>
-            <select v-model="selectedTarget2">
-              <option value="">-- Выберите --</option>
-              <option v-for="player in availableTargets" :key="player.id" :value="player.id">
-                {{ player.name }}
-              </option>
-            </select>
-          </div>
-          
-          <button @click="troublemakerSwap" :disabled="!selectedTarget1 || !selectedTarget2 || selectedTarget1 === selectedTarget2" class="action-btn">
-            Поменять роли
           </button>
         </div>
         
@@ -75,7 +23,7 @@
       </div>
       
       <!-- Пьяница: выбрать центральную карту -->
-      <div v-else-if="gameState.nightAction.role === 'drunk' && gameState.nightAction.active" class="action-buttons">
+      <div v-else-if="gameState.nightAction.role === 'drunk'" class="action-buttons">
         <h4>Выберите центральную карту для обмена:</h4>
         <button v-for="index in 3" :key="index" @click="drunkSwap(index - 1)" class="center-btn">
           Карта {{ index }}
@@ -84,17 +32,9 @@
         <button @click="skipAction" class="skip-btn">Пропустить</button>
       </div>
       
-      <!-- Стандартные роли: выбор одного игрока -->
-      <div v-else-if="gameState.nightAction.active" class="action-buttons">
-        <button 
-          v-for="player in availableTargets"
-          :key="player.id"
-          @click="selectTarget(player.id)"
-          class="target-btn"
-        >
-          {{ player.name }}
-        </button>
-        
+      <!-- Остальные роли - только кнопка пропуска -->
+      <div v-else class="action-buttons">
+        <p class="hint-text">Выберите игроков на поле или пропустите действие</p>
         <button @click="skipAction" class="skip-btn">Пропустить</button>
       </div>
       
@@ -147,45 +87,17 @@ import { getAllRoles } from '../../../shared/rolesRegistry.js'
 const { gameState, executeNightAction } = useGame()
 const roles = getAllRoles()
 const result = ref(null)
-const selectedTarget1 = ref('')
-const selectedTarget2 = ref('')
-
-const availableTargets = computed(() => {
-  return gameState.room.players.filter(p => 
-    p.alive && !p.isMe && p.role !== 'game_master'
-  )
-})
 
 const getRoleName = (roleId) => roles[roleId]?.name || roleId
 const getHint = () => roles[gameState.nightAction.role]?.phaseHints?.night || ''
 
 // Действия для провидца
-const seerLookPlayer = async (targetId) => {
-  const actionResult = await executeNightAction({ type: 'look_player', targetId })
-  result.value = actionResult
-}
 
 const seerLookCenter = async () => {
   const actionResult = await executeNightAction({ type: 'look_center', centerCards: [0, 1] })
   result.value = actionResult
 }
 
-// Действие для мистического волка - голосование
-const mysticWolfVote = async (targetId) => {
-  const actionResult = await executeNightAction({ type: 'vote_kill', targetId })
-  result.value = actionResult
-}
-
-// Действия для смутьяна
-const troublemakerSwap = async () => {
-  const actionResult = await executeNightAction({ 
-    target1Id: selectedTarget1.value, 
-    target2Id: selectedTarget2.value 
-  })
-  result.value = actionResult
-  selectedTarget1.value = ''
-  selectedTarget2.value = ''
-}
 
 // Действия для пьяницы
 const drunkSwap = async (centerIndex) => {
@@ -193,38 +105,6 @@ const drunkSwap = async (centerIndex) => {
   result.value = actionResult
 }
 
-// Стандартное действие для других ролей
-const selectTarget = async (targetId) => {
-  const role = gameState.nightAction.role
-  let action
-  
-  // Определяем тип действия по роли
-  switch (role) {
-    case 'werewolf':
-    case 'werewolf_2':
-    case 'werewolf_3':
-    case 'mystic_wolf':
-      action = { type: 'vote_kill', targetId }
-      break
-    case 'robber':
-      action = { targetId } // Грабитель просто указывает цель
-      break
-    case 'bodyguard':
-      action = { targetId } // Охранник защищает
-      break
-    case 'doppelganger':
-      action = { targetId } // Двойник копирует
-      break
-    case 'minion':
-      action = {} // Миньон не выбирает, просто узнает оборотней
-      break
-    default:
-      action = { targetId }
-  }
-  
-  const actionResult = await executeNightAction(action)
-  result.value = actionResult
-}
 
 const skipAction = async () => {
   const actionResult = await executeNightAction({ type: 'skip' })
@@ -402,5 +282,12 @@ const skipAction = async () => {
   color: #9ca3af;
   padding: 2rem;
   font-style: italic;
+}
+
+.hint-text {
+  color: #d1d5db;
+  font-style: italic;
+  text-align: center;
+  margin-bottom: 1rem;
 }
 </style>
