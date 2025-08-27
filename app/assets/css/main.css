@@ -1153,6 +1153,8 @@ body {
 /* === НАСТРОЙКА ИГРЫ === */
 
 .game-setup {
+  height: 100%;
+  overflow: auto;
 }
 
 .game-area {
@@ -1225,9 +1227,9 @@ body {
   grid-template-columns: 250px 2fr;
   gap: 16px;
   overflow: auto;
-  max-height: 100%;
   flex-grow: 1;
   margin-top: -16px;
+  flex-shrink: 1;
 }
 
 .roles-section {
@@ -1725,6 +1727,13 @@ body {
   }
 }
 
+@media (max-width: 1440px) {
+  
+  .setup-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 @media (max-width: 768px) {
   .game-page {
     height: auto;
@@ -1763,6 +1772,10 @@ body {
 }
 
 @media (max-width: 480px) {
+  .game-header {
+    flex-direction: column;
+  }
+
   .main-content {
     padding: 1rem;
   }
