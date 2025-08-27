@@ -72,7 +72,8 @@ export default defineNuxtConfig({
     server: {
       hmr: {
         port: 3001
-      }
+      },
+      allowedHosts: ['mafia.waifucards.app']
     }
   },
   
