@@ -28,6 +28,7 @@ export const useSocket = () => {
     console.log(`🔌 Connecting to socket server: ${serverUrl}`)
     
     socketInstance = io(serverUrl, {
+      path: '/socket.io/',
       transports: ['websocket', 'polling'],
       timeout: 20000,
       reconnection: true,
