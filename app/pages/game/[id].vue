@@ -607,7 +607,7 @@ const showMyRoleInfo = () => {
 
 const openWhisperTo = (player) => {
   if (gameChatRef.value && gameChatRef.value.setInputText) {
-    const currentText = gameChatRef.value.messageText.value || ''
+    const currentText = gameChatRef.value.messageText || ''
     const trimmedText = currentText.trim()
     
     let whisperCommand
