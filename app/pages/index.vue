@@ -295,7 +295,8 @@ const joinRoom = async () => {
     const roomCode = joinRoomCode.value.toUpperCase().trim()
     await joinGameRoom(roomCode, username.value.trim())
     
-    // Переход будет выполнен автоматически через socket listener
+    // Выполняем переход на игровую страницу
+    router.push(`/game/${roomCode}`)
   } catch (err) {
     error.value = err.message || 'Ошибка подключения к комнате'
   }

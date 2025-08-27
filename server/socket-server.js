@@ -89,6 +89,11 @@ const shouldShowResultInChat = (result, roleId) => {
 const app = express()
 const server = createServer(app)
 
+// Trust proxy for production (behind nginx)
+if (process.env.NODE_ENV === 'production') {
+  app.set('trust proxy', 1)
+}
+
 // JSON body parsing
 app.use(express.json())
 app.use(express.urlencoded({ extended: true }))

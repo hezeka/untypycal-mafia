@@ -444,6 +444,18 @@ export const useGame = () => {
         router.push(`/game/${data.room.id}`)
       })
       
+      // Присоединение к комнате через Socket.IO
+      on('join-success', (data) => {
+        console.log('✅ Joined room:', data.room.id)
+        loading.value = false
+        Object.assign(gameState.room, data.room)
+        Object.assign(gameState.player, data.player)
+        gameState.connected = true
+        
+        // Автоматический переход на игровую страницу
+        router.push(`/game/${data.room.id}`)
+      })
+      
       // Обновления игры
       on('game-updated', (data) => {
         console.log('🔄 Game updated:', data)
