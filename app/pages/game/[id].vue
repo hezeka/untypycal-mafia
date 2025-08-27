@@ -120,155 +120,65 @@
             <!-- [Сетка игроков GRID 2x3 или 3x2] -->
             <div class="players-section">
               <div class="players-grid">
-                
-                <div 
+
+                <div class="player-card"
                   v-for="player in gameState.room.players" 
                   :key="player.id"
-                  class="player-card"
                   :class="getPlayerCardClass(player)"
                 >
-                  
-                  <!-- Аватар/Роль с когтями для оборотней -->
-                  <div class="player-avatar" :class="{ speaking: isSpeaking(player.id) }">
-                    <!-- Картинка роли если видна -->
-                    <img 
-                      v-if="player.role && shouldShowRole(player)"
-                      :src="`/roles/compressed/${player.role}.webp`"
-                      :alt="getRoleName(player.role)"
-                      class="role-image"
-                      @error="$event.target.src = `/roles/${player.role}.png`"
-                    />
-                    <!-- Обычный аватар -->
-                    <div v-else class="default-avatar">
-                      {{ player.name[0]?.toUpperCase() }}
+                  <div class="player-top">
+                    <div class="player-avatar" :class="{ speaking: isSpeaking(player.id) }">
+                      <div class="player-avatar_role" v-if="player.role && shouldShowRole(player)">
+                        <img  :src="`/roles/compressed/${player.role}.webp`"
+                              :alt="getRoleName(player.role)"
+                              class="role-image"
+                              @error="$event.target.src = `/roles/${player.role}.png`">
+                      </div>
+                      <div v-else class="player-avatar_default">
+                        {{ player.name[0]?.toUpperCase() }}
+                      </div>
                     </div>
-                    
-                    <!-- Иконка когтей для оборотней -->
-                    <div v-if="isWerewolfRole(player.role) && shouldShowRole(player)" class="werewolf-claws">
-                      <img src="/icons/claws.png" alt="Оборотень" />
+                    <div class="player-info">
+                      <div class="player-username">{{ player.name }}</div>
+                      <div class="player-role" v-if="player.role && shouldShowRole(player)">{{ getRoleName(player.role) }}</div>
                     </div>
-                    
+                    <div class="claws" v-if="isWerewolfRole(player.role) && shouldShowRole(player)"></div>
                   </div>
                   
-                  <!-- Информация об игроке -->
-                  <div class="player-info">
-                    <div class="player-name">{{ player.name }}</div>
-                    
-                    <!-- Название роли под ником если раскрыта -->
-                    <div v-if="player.role && shouldShowRole(player)" class="player-role">
-                      {{ getRoleName(player.role) }}
-                    </div>
-                    
-                    <!-- Статусы игрока -->
-                    <div class="player-status">
-                      <span v-if="!player.alive" class="status-dead">Мертв</span>
-                      <span v-if="!player.connected" class="status-offline">Оффлайн</span>
-                      <span v-if="player.isHost" class="status-host">Ведущий</span>
+                  <!-- Универсальная система кнопок действий -->
+                  <div class="player-handlers">
+                    <div 
+                      v-for="action in getPlayerActions(player)" 
+                      :key="action.type"
+                      class="player-handler_btn"
+                      :class="[action.class, action.extraClass]"
+                      :title="action.title"
+                      @click="handlePlayerAction(action, player)"
+                    >
+                      {{ action.class === 'wide' ? action.text : '' }}
                     </div>
                   </div>
-                  
-                  <!-- Кнопки управления под игроками -->
-                  <div class="player-actions" :class="{ 'night-active': gameState.room.phase === 'night' && gameState.nightAction.active }">
-                    
-                    <!-- Своя карточка: [О вашей роли] на всю ширину -->
-                    <template v-if="player.isMe">
-                      <button @click="showMyRoleInfo" class="action-btn role-info-btn">
-                        О вашей роли
-                      </button>
-                    </template>
-                    
-                    <!-- Другие игроки -->
-                    <template v-else>
-                      
-                      <!-- [ЛС] для всех -->
-                      <button @click="openWhisperTo(player)" class="action-btn whisper-btn">
-                        ЛС
-                      </button>
-                      
-                      <!-- Кнопки ведущего: [ЛС | Защитить | Убить/Воскресить | Выгнать] -->
-                      <template v-if="canAdminControl">
-                        <button @click="adminAction('protect', player.id)" class="action-btn admin-btn">
-                          Защитить
-                        </button>
-                        <button 
-                          @click="adminAction(player.alive ? 'kill' : 'revive', player.id)" 
-                          class="action-btn admin-btn"
-                        >
-                          {{ player.alive ? 'Убить' : 'Воскресить' }}
-                        </button>
-                        <button @click="adminAction('kick', player.id)" class="action-btn admin-btn danger">
-                          Выгнать
-                        </button>
-                      </template>
-                      
-                      <!-- Ночные действия - только во время очереди игрока -->
-                      <template v-if="gameState.room.phase === 'night' && gameState.nightAction.active">
-                        
-                        <!-- Провидец и Мистический волк: выбор между игроком и центральными картами -->
-                        <template v-if="(gameState.nightAction.role === 'seer' || gameState.nightAction.role === 'mystic_wolf') && canNightActionTarget(player)">
-                          <button 
-                            @click="nightAction('look_player', player.name)"
-                            class="action-btn night-action-btn look"
-                          >
-                            👁️
-                          </button>
-                          <button 
-                            v-if="gameState.nightAction.role === 'mystic_wolf'"
-                            @click="nightAction('vote_kill', player.name)"
-                            class="action-btn night-action-btn kill"
-                          >
-                            ☠️
-                          </button>
-                        </template>
-                        
-                        <!-- Смутьян: выбор двух игроков -->
-                        <template v-else-if="gameState.nightAction.role === 'troublemaker' && canNightActionTarget(player)">
-                          <button 
-                            @click="selectTroublemakerTarget(player.name)"
-                            class="action-btn night-action-btn swap"
-                            :class="{ 
-                              selected: selectedTarget1 === player.name || selectedTarget2 === player.name
-                            }"
-                          >
-                            {{ getTargetButtonText(player.name) }}
-                          </button>
-                        </template>
-                        
-                        <!-- Пьяница: не может выбирать игроков -->
-                        <template v-else-if="gameState.nightAction.role === 'drunk'">
-                          <!-- Ничего не показываем, только центральные карты -->
-                        </template>
-                        
-                        <!-- Стандартные роли: выбор одного игрока -->
-                        <template v-else-if="canNightActionTarget(player)">
-                          <button 
-                            @click="nightAction('select_target', player.name)"
-                            class="action-btn night-action-btn standard"
-                          >
-                            {{ getNightActionButtonEmoji() }}
-                          </button>
-                        </template>
-                        
-                      </template>
-                      
-                      <!-- Голосование -->
-                      <template v-if="gameState.room.phase === 'voting' && canVoteFor(player)">
-                        <button 
-                          @click="voteForPlayer(player.id)" 
-                          class="action-btn vote-btn"
-                          :class="{ voted: gameState.voting.myVote === player.id }"
-                        >
-                          {{ gameState.voting.myVote === player.id ? '✓' : 'Голос' }}
-                        </button>
-                      </template>
-                      
-                    </template>
-                  </div>
-                  
                 </div>
+                
                 
               </div>
             </div>
+            
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
             
             <!-- [Подсказка о текущей фазе] + Кнопки ведущего -->
             <div class="phase-controls">
@@ -279,33 +189,8 @@
                     <!-- Когда очередь игрока -->
                     <template v-if="gameState.nightAction.active">
                       <div class="night-hint-active">
-                        <h4>{{ getRoleName(gameState.nightAction.role) }}</h4>
-                        <p>{{ getNightHint() }}</p>
-                        
-                        <!-- Дополнительные кнопки для центральных карт -->
-                        <div v-if="showCenterCardButtons()" class="center-actions">
-                          <!-- Провидец: центральные карты -->
-                          <template v-if="gameState.nightAction.role === 'seer'">
-                            <button @click="seerLookCenter" class="center-action-btn">
-                              👁️ Посмотреть центральные карты
-                            </button>
-                          </template>
-                          
-                          <!-- Пьяница: выбор центральной карты -->
-                          <template v-if="gameState.nightAction.role === 'drunk'">
-                            <div class="drunk-actions">
-                              <p>Выберите центральную карту:</p>
-                              <button v-for="index in 3" :key="index" @click="drunkSwap(index - 1)" class="center-action-btn">
-                                Карта {{ index }}
-                              </button>
-                            </div>
-                          </template>
-                        </div>
-                        
-                        <!-- Кнопка пропуска -->
-                        <button @click="skipNightAction" class="skip-action-btn">
-                          Пропустить
-                        </button>
+                        <!-- <h4>{{ getRoleName(gameState.nightAction.role) }}</h4> -->
+                        <p style="color: #fd5f5f">{{ getNightHint() }}</p>
                       </div>
                     </template>
                     
@@ -321,7 +206,30 @@
                   </template>
                 </div>
               </div>
-              <div class="game-stats">
+              <!-- Дополнительные кнопки для центральных карт -->
+              <div v-if="showCenterCardButtons()" class="center-actions">
+                <!-- Провидец: центральные карты -->
+                <template v-if="gameState.nightAction.role === 'seer'">
+                  <button @click="seerLookCenter" class="center-action-btn">
+                    👁️ Посмотреть центральные карты
+                  </button>
+                </template>
+                
+                <!-- Пьяница: выбор центральной карты -->
+                <template v-if="gameState.nightAction.role === 'drunk'">
+                  <div class="drunk-actions">
+                    <p>Выберите центральную карту:</p>
+                    <button v-for="index in 3" :key="index" @click="drunkSwap(index - 1)" class="center-action-btn">
+                      Карта {{ index }}
+                    </button>
+                  </div>
+                </template>
+              </div>
+              <!-- Кнопка пропуска -->
+              <button v-else-if="gameState.nightAction.active" @click="skipNightAction" class="skip-action-btn">
+                Пропустить
+              </button>
+              <div v-else class="game-stats">
                 <span>Дней пережито: {{ gameState.room.daysSurvived || 0 }}</span>
                 <div class="v-spacer"></div>
                 <span>Погибло мирных: {{ gameState.room.civiliansKilled || 0 }}</span>
@@ -399,11 +307,19 @@
       {{ error }}
     </div>
 
+    <!-- Уведомления о шёпоте -->
+    <!-- Debug: {{ whisperNotifications.length }} notifications -->
+    <div v-for="notification in whisperNotifications" :key="notification.id" class="whisper-notification">
+      {{ notification.message }}
+    </div>
+
+    <!-- Убрали тестовую кнопку -->
+
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted, reactive } from 'vue'
+import { ref, computed, onMounted, onUnmounted, reactive, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useGame } from '~/composables/useGame'
 import { useUser } from '~/composables/useUser'
@@ -449,6 +365,13 @@ const showRoleModal = ref(false)
 const showRules = ref(false)
 const showRoles = ref(false)
 const error = ref(null)
+const whisperNotifications = ref([])
+const notificationTimeouts = new Map() // Хранилище для таймеров
+
+// Отладка реактивности уведомлений
+watch(whisperNotifications, (newVal) => {
+  console.log('👁️ whisperNotifications changed:', newVal)
+}, { deep: true })
 
 // Refs
 const gameChatRef = ref(null)
@@ -456,8 +379,7 @@ const gameChatRef = ref(null)
 // Состояние микрофона
 const showMicSettings = ref(false)
 
-// Состояние шепчущих игроков - используем reactive для отслеживания изменений объекта
-const whisperingPlayers = reactive({})
+// Удалили старую систему шепота - теперь используем направленные уведомления
 
 const roles = getAllRoles()
 
@@ -551,24 +473,52 @@ const getPlayersGridClass = () => {
   return 'grid-3x3'
 }
 
-const isWhispering = (playerId) => {
-  return whisperingPlayers[playerId] === true
-}
+// Удален метод isWhispering - больше не нужен
 
 const isSpeaking = (playerId) => {
   const isCurrentlySpeaking = speakingPlayers.value.includes(playerId)
   return isCurrentlySpeaking
 }
 
-// Обработка активности шепота
-const handleWhisperActivity = (data) => {
-  if (data.playerId) {
-    whisperingPlayers[data.playerId] = true
+// Обработка направленного шепота
+const handleWhisperDirection = (data) => {
+  console.log('👁️ [WHISPER] Processing whisper direction:', data)
+  console.log('👁️ [WHISPER] Current notifications before:', whisperNotifications.value)
+  
+  try {
+    const directionText = data.direction === 'right' ? 'справа' : 'слева'
+    const message = `Вы услышали шёпот ${directionText} от вас`
     
-    // Убираем индикацию через 500ms
+    // Простая очистка массива
+    whisperNotifications.value.length = 0
+    
+    // Создаем простое уведомление
+    const notification = {
+      id: Date.now(),
+      message,
+      timestamp: Date.now()
+    }
+    
+    console.log('👁️ [WHISPER] Created notification:', notification)
+    
+    // Добавляем уведомление
+    whisperNotifications.value.push(notification)
+    
+    console.log('👁️ [WHISPER] Notifications after push:', whisperNotifications.value)
+    console.log('👁️ [WHISPER] Array length:', whisperNotifications.value.length)
+    
+    // Простой таймер удаления
     setTimeout(() => {
-      whisperingPlayers[data.playerId] = false
-    }, 500)
+      console.log('👁️ [WHISPER] Timeout triggered, removing notification')
+      const index = whisperNotifications.value.findIndex(n => n.id === notification.id)
+      if (index !== -1) {
+        whisperNotifications.value.splice(index, 1)
+        console.log('👁️ [WHISPER] Notification removed, remaining:', whisperNotifications.value.length)
+      }
+    }, 3000)
+    
+  } catch (error) {
+    console.error('👁️ [WHISPER] Error in handleWhisperDirection:', error)
   }
 }
 
@@ -578,9 +528,9 @@ const getPlayerCardClass = (player) => {
   if (player.isMe) classes.push('is-me')
   if (!player.alive) classes.push('is-dead')
   if (!player.connected) classes.push('is-offline')
+  if (player.isHost) classes.push('is-host')
   if (player.role === 'game_master') classes.push('is-gamemaster')
   if (isWerewolfRole(player.role)) classes.push('is-werewolf')
-  if (isWhispering(player.id)) classes.push('whispering')
   
   return classes
 }
@@ -763,6 +713,181 @@ const skipNightAction = async () => {
   await executeNightAction({ type: 'skip' })
 }
 
+// Тестовая функция для отладки
+const testNotification = () => {
+  console.log('🔥 [TEST] Testing notification manually')
+  handleWhisperDirection({ direction: 'left' })
+}
+
+// Система кнопок действий для игроков
+const getPlayerActions = (player) => {
+  if (player.isMe) {
+    return [{ 
+      type: 'role_info', 
+      text: 'Это вы', 
+      title: 'Информация о вашей роли',
+      class: 'wide',
+      condition: true,
+      action: () => alert('Заглушка')
+    }]
+  }
+
+  const actions = []
+  const currentPhase = gameState.room.phase
+  const myRole = currentPlayer.value?.role
+  
+  // Сообщение (всегда доступно для других игроков)
+  actions.push({
+    type: 'whisper',
+    class: 'msg',
+    title: 'Отправить личное сообщение',
+    condition: true,
+    action: () => openWhisperTo(player)
+  })
+  
+  // Админские функции
+  if (canAdminControl.value) {
+    // actions.push({
+    //   type: 'defend',
+    //   class: 'defend',
+    //   title: 'Защитить игрока',
+    //   condition: true,
+    //   action: () => adminAction('protect', player.id)
+    // })
+    
+    // Убить/Воскресить в зависимости от состояния
+    actions.push({
+      type: player.alive ? 'kill' : 'revive',
+      class: player.alive ? 'kill' : 'revive',
+      title: player.alive ? 'Убить игрока' : 'Воскресить игрока',
+      condition: true,
+      action: () => adminAction(player.alive ? 'kill' : 'revive', player.id)
+    })
+    
+  }
+  
+  // Голосование
+  if (currentPhase === 'voting' && canVoteFor(player)) {
+    const hasVoted = gameState.voting.myVote !== null
+    const votedForThisPlayer = gameState.voting.myVote === player.id
+    
+    actions.push({
+      type: 'vote',
+      class: 'vote',
+      title: votedForThisPlayer ? 'Вы проголосовали за этого игрока' : 
+             (hasVoted ? 'Вы уже проголосовали' : 'Проголосовать за исключение'),
+      condition: true,
+      action: () => voteForPlayer(player.id),
+      extraClass: votedForThisPlayer ? 'voted' : (hasVoted ? 'off' : '')
+    })
+  }
+  
+  // Ночные действия - только во время активной ночной фазы
+  if (currentPhase === 'night' && gameState.nightAction.active && canNightActionTarget(player)) {
+    const nightActionCompleted = gameState.nightAction.result !== null
+    // Провидец и Мистический волк - осмотр игрока
+    if (myRole === 'seer' || myRole === 'mystic_wolf') {
+      actions.push({
+        type: 'inspect',
+        class: 'inspect',
+        title: nightActionCompleted ? 'Вы уже совершили действие' : 'Посмотреть роль игрока',
+        condition: true,
+        extraClass: nightActionCompleted ? 'off' : '',
+        action: () => nightAction('look_player', player.name)
+      })
+      
+      // Мистический волк дополнительно может голосовать за убийство
+      if (myRole === 'mystic_wolf') {
+        actions.push({
+          type: 'vote_kill',
+          class: 'vote-kill',
+          title: nightActionCompleted ? 'Вы уже совершили действие' : 'Проголосовать за убийство',
+          condition: true,
+          extraClass: nightActionCompleted ? 'off' : '',
+          action: () => nightAction('vote_kill', player.name)
+        })
+      }
+    }
+    
+    // Смутьян - выбор двух игроков
+    else if (myRole === 'troublemaker') {
+      const isSelected = selectedTarget1.value === player.name || selectedTarget2.value === player.name
+      let extraClass = ''
+      let title = ''
+      
+      if (nightActionCompleted) {
+        extraClass = 'off'
+        title = 'Вы уже совершили действие'
+      } else if (isSelected) {
+        extraClass = 'selected'
+        title = selectedTarget1.value === player.name ? 'Выбран как первая цель' : 'Выбран как вторая цель'
+      } else {
+        title = 'Выбрать для обмена ролями'
+      }
+      
+      actions.push({
+        type: 'troublemake',
+        class: 'troublemake',
+        title: title,
+        condition: true,
+        extraClass: extraClass,
+        action: () => selectTroublemakerTarget(player.name)
+      })
+    }
+    
+    // Стандартные роли - выбор одного игрока  
+    else if (myRole !== 'drunk') {
+      // Определяем класс кнопки в зависимости от роли
+      let buttonClass = 'night-action'
+      let title = ''
+      
+      if (myRole === 'bodyguard') {
+        buttonClass = 'shield'
+        title = nightActionCompleted ? 'Вы уже совершили действие' : 'Защитить игрока'
+      } else if (myRole === 'robber') {
+        title = nightActionCompleted ? 'Вы уже совершили действие' : 'Поменяться ролями'
+      } else {
+        title = nightActionCompleted ? 'Вы уже совершили действие' : 'Выполнить ночное действие'
+      }
+      
+      actions.push({
+        type: 'night_action',
+        class: buttonClass,
+        title: title,
+        condition: true,
+        extraClass: nightActionCompleted ? 'off' : '',
+        action: () => nightAction('select_target', player.name)
+      })
+    }
+  }
+  
+  // Предупреждение/Кик (только для ведущего)
+  if (canAdminControl.value) {
+    actions.push({
+      type: 'warn',
+      class: 'warn',
+      title: 'Выгнать игрока из комнаты',
+      condition: true,
+      action: () => adminAction('kick', player.id)
+    })
+  }
+  
+  return actions.filter(action => action.condition)
+}
+
+// Универсальный обработчик действий
+const handlePlayerAction = (action, player) => {
+  // Не выполняем действие для отключенных кнопок
+  if (action.extraClass === 'off') {
+    console.log('🚫 Action blocked - button is off')
+    return
+  }
+  
+  if (action.action) {
+    action.action()
+  }
+}
+
 // Lifecycle
 onMounted(async () => {
   console.log('🎮 Game page mounted, room ID:', route.params.id)
@@ -779,9 +904,12 @@ onMounted(async () => {
   // Инициализируем слушатели сокетов для реальных обновлений
   initSocketListeners()
   
-  // Добавляем обработчик шепота
+  // Добавляем обработчики шепота
   if (socket.value) {
-    socket.value.on('whisper-activity', handleWhisperActivity)
+    socket.value.on('whisper-direction', (data) => {
+      console.log('👁️ Received whisper-direction event:', data)
+      handleWhisperDirection(data)
+    })
     socket.value.on('voice-activity', (data) => {
       console.log('🎤 Voice activity received in [id].vue:', data)
       
@@ -876,7 +1004,7 @@ onMounted(async () => {
 onUnmounted(() => {
   // Отписываемся от событий
   if (socket.value) {
-    socket.value.off('whisper-activity', handleWhisperActivity)
+    socket.value.off('whisper-direction', handleWhisperDirection)
     socket.value.off('voice-activity', handlePlayerVoiceActivity)
   }
   cleanup()
@@ -884,30 +1012,7 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
-/* Анимация шепота для карточек игроков */
-.player-card.whispering {
-  box-shadow: 0 0 15px rgba(168, 85, 247, 0.4);
-  border: 2px solid rgba(168, 85, 247, 0.6);
-  animation: whisper-pulse 0.5s ease-in-out;
-}
-
-@keyframes whisper-pulse {
-  0% {
-    box-shadow: 0 0 5px rgba(168, 85, 247, 0.2);
-    border-color: rgba(168, 85, 247, 0.3);
-    transform: scale(1);
-  }
-  50% {
-    box-shadow: 0 0 20px rgba(168, 85, 247, 0.6);
-    border-color: rgba(168, 85, 247, 0.8);
-    transform: scale(1.02);
-  }
-  100% {
-    box-shadow: 0 0 15px rgba(168, 85, 247, 0.4);
-    border-color: rgba(168, 85, 247, 0.6);
-    transform: scale(1);
-  }
-}
+/* Удалили старые стили анимации шепота */
 
 /* Контейнер микрофона для настроек */
 .microphone-container {
@@ -1109,7 +1214,7 @@ onUnmounted(() => {
 }
 
 .skip-action-btn {
-  background: #6b7280;
+  background: #91a7d48c;
   color: white;
   border: none;
   padding: 0.5rem 1rem;
@@ -1166,6 +1271,49 @@ onUnmounted(() => {
 
 .server-result li {
   margin-bottom: 0.25rem;
+}
+
+/* Уведомления о шепоте */
+.whisper-notification {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: rgba(156, 39, 176, 0.95);
+  color: white;
+  padding: 1rem 2rem;
+  border-radius: 8px;
+  font-weight: 600;
+  font-size: 1.1rem;
+  z-index: 9999;
+  box-shadow: 0 4px 20px rgba(156, 39, 176, 0.4);
+  border: 2px solid rgba(255, 255, 255, 0.2);
+  min-width: 300px;
+  text-align: center;
+  pointer-events: none;
+}
+
+.whisper-notification + .whisper-notification {
+  margin-top: 60px;
+}
+
+@keyframes whisper-notification-appear {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.8);
+  }
+  10% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+  90% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.8);
+  }
 }
 
 </style>

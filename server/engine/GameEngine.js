@@ -697,7 +697,7 @@ export class GameEngine {
         endTime: endTime,
         phase: this.currentPhase
       }
-      console.log('✅ Returning timer info:', result)
+      // console.log('✅ Returning timer info:', result)
       return result
     }
     

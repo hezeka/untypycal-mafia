@@ -194,12 +194,8 @@ export class ChatCommandProcessor {
     const isIntroductionPhase = this.room.gameState === GAME_PHASES.INTRODUCTION
     
     if (isDayPhase || isIntroductionPhase) {
-      // Отправляем всем в комнате событие о том, что игрок шепчет ведущему
-      this.room.broadcast('whisper-activity', {
-        playerId: sender.id,
-        playerName: sender.name
-      })
-      
+      // Отправляем персонализированные события о направлении шепота
+      this.sendDirectionalWhisperEvents(sender)
     }
 
     return { success: true }
@@ -253,12 +249,8 @@ export class ChatCommandProcessor {
     const isIntroductionPhase = this.room.gameState === GAME_PHASES.INTRODUCTION
     
     if (isDayPhase || isIntroductionPhase) {
-      // Отправляем всем в комнате событие о том, что игрок шепчет группе
-      this.room.broadcast('whisper-activity', {
-        playerId: sender.id,
-        playerName: sender.name
-      })
-      
+      // Отправляем персонализированные события о направлении шепота
+      this.sendDirectionalWhisperEvents(sender)
     }
 
     return { success: true }
@@ -325,17 +317,13 @@ export class ChatCommandProcessor {
       }
     })
 
-    // Отправляем событие о шепоте для визуальной индикации (днем, во время знакомства и не ведущему)
-    const isHost = targetPlayer.isHost || targetPlayer.role === 'game_master'
+    // Отправляем событие о шепоте для визуальной индикации (днем и во время знакомства)
     const isDayPhase = this.room.gameState === GAME_PHASES.DAY
     const isIntroductionPhase = this.room.gameState === GAME_PHASES.INTRODUCTION
     
-    if (!isHost && (isDayPhase || isIntroductionPhase)) {
-      // Отправляем всем в комнате событие о том, что игрок шепчет
-      this.room.broadcast('whisper-activity', {
-        playerId: sender.id,
-        playerName: sender.name
-      })
+    if (isDayPhase || isIntroductionPhase) {
+      // Отправляем персонализированные события о направлении шепота
+      this.sendDirectionalWhisperEvents(sender)
     }
 
     return { success: true }
@@ -624,6 +612,38 @@ export class ChatCommandProcessor {
     }
 
     return { success: true }
+  }
+
+  // Отправка направленных событий шепота
+  sendDirectionalWhisperEvents(sender) {
+    const sortedPlayers = this.room.getSortedPlayers()
+    const senderIndex = sortedPlayers.findIndex(p => p.id === sender.id)
+    
+    if (senderIndex === -1) return
+    
+    // Отправляем всем игрокам (кроме самого отправителя) событие с направлением
+    sortedPlayers.forEach((listener, listenerIndex) => {
+      // Пропускаем самого отправителя и game_master
+      if (listener.id === sender.id || listener.role === 'game_master') return
+      
+      // Определяем направление относительно слушателя
+      let direction
+      if (senderIndex > listenerIndex) {
+        direction = 'right' // Шепот справа
+      } else if (senderIndex < listenerIndex) {
+        direction = 'left' // Шепот слева
+      } else {
+        return // Это тот же игрок
+      }
+      
+      // Отправляем событие конкретному игроку (без имени отправителя для безопасности)
+      const socket = this.room.sockets.get(listener.id)
+      if (socket) {
+        socket.emit('whisper-direction', {
+          direction: direction
+        })
+      }
+    })
   }
 
   // Получение отображаемого имени фазы

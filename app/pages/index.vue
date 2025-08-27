@@ -1,34 +1,74 @@
 <template>
   <div class="main-page">
-    
-    <!-- Шапка: [Логотип "Нетипичка" | Навигация (Роли, Правила) | Панель пользователя] -->
-    <header class="main-header">
-      <div class="header-content">
-        
-        <!-- Логотип и название -->
-        <div class="logo-section">
-          <img src="/images/logo.png" alt="Нетипичка" class="logo-img" />
-          <h1 class="logo-text">НЕТИПИЧКА</h1>
+
+    <div class="container">
+      <header class="game-header main-header">
+      
+        <!-- Левая часть: логотип + навигация -->
+        <div class="header-left">
+          <a href="/" class="logo-section">
+            <img src="/images/logo.png" alt="Нетипичка" class="logo-img" />
+            <h1 class="logo-text">НЕТИПИЧКА</h1>
+          </a>
+          
+          <nav class="header-nav">
+            <a @click="showRoles = true" class="nav-button">Роли</a>
+            <a @click="showRules = true" class="nav-button">Правила</a>
+          </nav>
         </div>
         
-        <!-- Навигация -->
-        <nav class="main-nav">
-          <button @click="showRoles = true" class="nav-button">Роли</button>
-          <button @click="showRules = true" class="nav-button">Правила</button>
-        </nav>
-        
-        <!-- Панель пользователя: Никнейм + кнопка смены -->
-        <div class="user-panel">
-          <div class="user-info">
-            <span class="username">{{ username || 'Гость' }}</span>
-            <button @click="showUsernameModal = true" class="change-username-btn">
-              {{ username ? 'Сменить' : 'Установить' }}
+        <!-- Правая часть: [Мьют звука | Мьют микро | разделитель | статус + код | Покинуть] -->
+        <div class="header-right">
+          <div class="game-controls">
+            <!-- Аудио контроли -->
+            <button @click="toggleSound" class="control-btn sound" :class="{ active: soundEnabled }">
             </button>
+            
+            <div class="microphone-container">
+              <button 
+                @click="toggleMicrophone" 
+                @mouseenter="showMicSettings = true"
+                @mouseleave="showMicSettings = false"
+                class="control-btn microphone" 
+                :class="{ 
+                  active: vadEnabled && isListening, 
+                  detecting: isDetecting && vadEnabled && isListening 
+                }"
+              >
+                <div v-if="isDetecting && vadEnabled && isListening" class="voice-indicator">
+                  <div class="voice-waves">
+                    <div class="voice-wave"></div>
+                    <div class="voice-wave"></div>
+                    <div class="voice-wave"></div>
+                  </div>
+                </div>
+              </button>
+              
+              <!-- Settings Modal on hover -->
+              <SettingsModal 
+                v-if="showMicSettings"
+                @close="showMicSettings = false"
+                @mouseenter="showMicSettings = true"
+                @mouseleave="showMicSettings = false"
+                class="hover-settings-modal"
+              />
+            </div>
+            
+            <div class="control-separator"></div>
+            
+            <div class="user-panel">
+              <div class="user-info">
+                <span class="username">{{ username || 'Гость' }}</span>
+                <button @click="showUsernameModal = true" class="change-username-btn">
+                  {{ username ? 'Сменить' : 'Установить' }}
+                </button>
+              </div>
+            </div>
           </div>
         </div>
         
-      </div>
-    </header>
+      </header>
+    </div>
 
     <!-- Основной контент -->
     <main class="main-content">

@@ -15,6 +15,7 @@ export class GameRoom {
     this.players = new Map()
     this.selectedRoles = []
     this.centerCards = []
+    this.nextPlayerId = 1  // Последовательные ID для порядка
     
     // Игровое состояние
     this.gameState = GAME_PHASES.SETUP
@@ -134,7 +135,8 @@ export class GameRoom {
       alive: true,
       connected: true,
       isHost,
-      joinedAt: Date.now()
+      joinedAt: Date.now(),
+      sequentialId: this.nextPlayerId++  // Присваиваем порядковый номер
     }
     
     this.players.set(playerId, player)
@@ -151,6 +153,11 @@ export class GameRoom {
   
   getPlayer(playerId) {
     return this.players.get(playerId)
+  }
+
+  // Получить игроков в порядке присоединения
+  getSortedPlayers() {
+    return Array.from(this.players.values()).sort((a, b) => a.sequentialId - b.sequentialId)
   }
   
   addRole(roleId) {
@@ -433,6 +440,8 @@ export class GameRoom {
           console.log(`📢 Broadcasting system message to ${playerId}: "${data.message.text.substring(0, 50)}..."`)
         }
         
+        // Удалили логирование whisper-activity - больше не используется
+        
         socket.emit(event, personalizedData)
       } catch (error) {
         console.error(`❌ Failed to send ${event} to ${playerId}:`, error)
@@ -493,14 +502,15 @@ export class GameRoom {
       daysSurvived: this.daysSurvived,
       civiliansKilled: this.civiliansKilled,
       timer: this.gameEngine ? this.gameEngine.getTimerInfo() : null,
-      players: Array.from(this.players.values()).map(p => ({
+      players: this.getSortedPlayers().map(p => ({
         id: p.id,
         name: p.name,
         role: this.shouldShowPlayerRole(p, player) ? p.role : null,
         alive: p.alive,
         connected: p.connected,
         isHost: p.isHost,
-        isMe: p.id === playerId
+        isMe: p.id === playerId,
+        sequentialId: p.sequentialId
       }))
     }
   }
