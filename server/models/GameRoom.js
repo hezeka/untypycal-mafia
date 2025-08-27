@@ -388,13 +388,20 @@ export class GameRoom {
     
     // Находим игроков с максимальным количеством голосов
     const maxVotes = Math.max(0, ...voteCounts.values())
-    const eliminated = []
+    let eliminated = []
     
     if (maxVotes > 0) {
+      const playersWithMaxVotes = []
       for (const [playerId, votes] of voteCounts) {
         if (votes === maxVotes) {
-          eliminated.push(playerId)
+          playersWithMaxVotes.push(playerId)
         }
+      }
+      
+      // Если только один игрок получил максимальное количество голосов - он исключается
+      // Если несколько игроков имеют одинаковое максимальное количество голосов (ничья) - никто не исключается
+      if (playersWithMaxVotes.length === 1) {
+        eliminated = playersWithMaxVotes
       }
     }
     

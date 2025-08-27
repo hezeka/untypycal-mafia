@@ -575,7 +575,9 @@ const openWhisperTo = (player) => {
 }
 
 const canVoteFor = (player) => {
-  return player.alive && !player.isMe && player.role !== 'game_master'
+  // Мертвые игроки не могут голосовать, также нельзя голосовать за себя и game_master
+  const currentPlayerAlive = currentPlayer.value?.alive !== false
+  return currentPlayerAlive && player.alive && !player.isMe && player.role !== 'game_master'
 }
 
 const canKillPlayer = (player) => {
