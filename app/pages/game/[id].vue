@@ -416,7 +416,7 @@ import SettingsModal from '~/components/SettingsModal.vue'
 const route = useRoute()
 const router = useRouter()
 
-const { socket } = useSocket()
+const { socket, isConnected } = useSocket()
 const { 
   isListening,
   vadEnabled,
@@ -815,11 +815,27 @@ onMounted(async () => {
     let playerId = null
     
     if (username.value && !gameState.player.id) {
-      console.log('🔄 Joining room as player...')
-      const joinResult = await joinRoom(roomId, username.value)
-      console.log('✅ Joined room successfully')
-      playerId = gameState.player.id
-      console.log('✅ Player ID after join:', playerId)
+      console.log('🔄 Waiting for socket connection before joining...')
+      
+      // Ждем подключения сокета с таймаутом
+      let attempts = 0
+      const maxAttempts = 50 // 5 секунд
+      
+      while (!isConnected.value && attempts < maxAttempts) {
+        await new Promise(resolve => setTimeout(resolve, 100))
+        attempts++
+      }
+      
+      if (isConnected.value) {
+        console.log('🔄 Socket connected, joining room as player...')
+        const joinResult = await joinRoom(roomId, username.value)
+        console.log('✅ Joined room successfully')
+        playerId = gameState.player.id
+        console.log('✅ Player ID after join:', playerId)
+      } else {
+        console.warn('⚠️ Socket connection timeout, joining as observer via HTTP API')
+        gameState.connected = false
+      }
     } else if (!username.value) {
       console.log('📺 Viewing room as observer (no username)')
       gameState.connected = false
