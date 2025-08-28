@@ -979,6 +979,118 @@ app.post('/api/rooms/:roomId/night-action', async (req, res) => {
   }
 })
 
+// Сброс комнаты (новая игра)
+app.post('/api/rooms/:roomId/reset', async (req, res) => {
+  const { roomId } = req.params
+  const room = rooms.get(roomId)
+  
+  if (!room) {
+    return res.status(404).json({ error: 'Комната не найдена' })
+  }
+  
+  try {
+    // Сбрасываем состояние комнаты
+    room.resetGame()
+    
+    // Уведомляем всех клиентов о сбросе
+    room.broadcast('room-reset', {
+      message: 'Игра сброшена, начинается новая игра'
+    })
+    
+    res.json({
+      success: true,
+      message: 'Комната успешно сброшена'
+    })
+    
+  } catch (error) {
+    logger.error('Room reset error:', error)
+    res.status(500).json({ error: error.message })
+  }
+})
+
+// Покинуть комнату
+app.post('/api/rooms/:roomId/leave', async (req, res) => {
+  const { roomId } = req.params
+  const { playerId } = req.body
+  
+  if (!playerId) {
+    return res.status(400).json({ error: 'Укажите playerId' })
+  }
+  
+  const room = rooms.get(roomId)
+  if (!room) {
+    return res.status(404).json({ error: 'Комната не найдена' })
+  }
+  
+  try {
+    const player = room.getPlayer(playerId)
+    if (!player) {
+      return res.status(404).json({ error: 'Игрок не найден' })
+    }
+    
+    // Если это ведущий - удаляем комнату
+    if (room.hostId === playerId) {
+      room.broadcast('room-deleted', {
+        message: 'Ведущий покинул игру, комната удалена'
+      })
+      rooms.delete(roomId)
+      
+      return res.json({
+        success: true,
+        message: 'Комната удалена'
+      })
+    }
+    
+    // Удаляем игрока из комнаты
+    room.removePlayer(playerId)
+    
+    // Уведомляем остальных игроков
+    room.broadcast('player-left', {
+      playerId: playerId,
+      playerName: player.name,
+      message: `${player.name} покинул игру`
+    })
+    
+    res.json({
+      success: true,
+      message: 'Успешно покинули комнату'
+    })
+    
+  } catch (error) {
+    logger.error('Leave room error:', error)
+    res.status(500).json({ error: error.message })
+  }
+})
+
+// Удалить комнату
+app.delete('/api/rooms/:roomId', async (req, res) => {
+  const { roomId } = req.params
+  const room = rooms.get(roomId)
+  
+  if (!room) {
+    return res.status(404).json({ error: 'Комната не найдена' })
+  }
+  
+  try {
+    // Уведомляем всех игроков об удалении
+    room.broadcast('room-deleted', {
+      message: 'Комната была удалена'
+    })
+    
+    // Удаляем комнату
+    rooms.delete(roomId)
+    
+    res.json({
+      success: true,
+      message: 'Комната успешно удалена'
+    })
+    
+  } catch (error) {
+    logger.error('Delete room error:', error)
+    res.status(500).json({ error: error.message })
+  }
+})
+
 // Запуск сервера
 const PORT = process.env.SOCKET_PORT || 3001
 

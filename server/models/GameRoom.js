@@ -297,6 +297,9 @@ export class GameRoom {
     // В setup фазе роли не показываются
     if (this.gameState === GAME_PHASES.SETUP) return false
 
+    // В фазе ended все роли показываются всем
+    if (this.gameState === GAME_PHASES.ENDED) return true
+
     // Свою роль видишь всегда
     if (targetPlayer.id === viewerPlayer.id) return true
 
@@ -520,6 +523,51 @@ export class GameRoom {
         sequentialId: p.sequentialId
       }))
     }
+  }
+  
+  resetGame() {
+    // Сбрасываем игровое состояние
+    this.gameState = 'setup'
+    this.selectedRoles = []
+    this.centerCards = []
+    this.votingActive = false
+    this.votes.clear()
+    this.gameResult = null
+    this.votingRounds = 0
+    this.daysSurvived = 0
+    this.civiliansKilled = 0
+    this.chat = []
+    
+    // Сбрасываем состояние игроков
+    for (const player of this.players.values()) {
+      player.role = null
+      player.alive = true
+      if (player.role !== 'game_master') {
+        player.messageCount = 0
+        player.whisperCount = 0
+      }
+    }
+    
+    // Сбрасываем игровой движок
+    if (this.gameEngine) {
+      this.gameEngine.destroy()
+      this.gameEngine = null
+    }
+    
+    console.log(`🔄 Room ${this.id} has been reset`)
+  }
+  
+  removePlayer(playerId) {
+    const player = this.getPlayer(playerId)
+    if (!player) return false
+    
+    // Удаляем игрока
+    this.players.delete(playerId)
+    this.sockets.delete(playerId)
+    this.votes.delete(playerId)
+    
+    console.log(`👋 Player ${player.name} removed from room ${this.id}`)
+    return true
   }
   
   destroy() {

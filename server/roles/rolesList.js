@@ -41,11 +41,37 @@ export const executeRoleAction = async (gameEngine, player, action) => {
   
   // Проверяем, заблокирован ли игрок Путаной
   if (gameEngine.blockedPlayers && gameEngine.blockedPlayers.has(player.id)) {
-    return {
+    // Отправляем шёпот о блокировке
+    const whisperMessage = {
+      id: `blocked-${Date.now()}`,
+      type: 'whisper',
+      text: 'Ночью вас обольстила путана, вы пропустили свою очередь',
+      timestamp: Date.now(),
+      senderId: 'system',
+      senderName: 'Система',
+      recipientId: player.id,
+      recipientName: player.name,
+      isOwn: false
+    }
+    
+    gameEngine.room.chat.push(whisperMessage)
+    gameEngine.room.sendToPlayer(player.id, 'new-message', { message: whisperMessage })
+    
+    // Автоматически выполняем пропуск хода
+    const skipResult = {
       success: true,
       message: 'Ночью вас обольстила путана, вы пропустили свою очередь',
-      data: { blocked: true, blocker: 'prostitute' }
+      data: { blocked: true, blocker: 'prostitute', skipped: true }
     }
+    
+    // Помечаем игрока как выполнившего действие (пропуск)
+    gameEngine.completedActions.add(player.id)
+    console.log(`🚫 Player ${player.name} (${player.role}) was blocked and auto-skipped`)
+    
+    // Проверяем, все ли игроки с этой ролью завершили действие
+    gameEngine.checkAllPlayersCompleted()
+    
+    return skipResult
   }
   
   // Универсальная обработка пропуска действия
@@ -395,11 +421,7 @@ const handleProstitute = async (gameEngine, player, action) => {
   }
   gameEngine.blockedPlayers.add(targetId)
   
-  // Отправляем уведомление заблокированному игроку
-  room.sendToPlayer(targetId, 'action-blocked', {
-    message: 'Ночью вас обольстила путана, вы пропустили свою очередь',
-    blocker: 'Путана'
-  })
+  // Уведомление будет отправлено когда игрок попытается действовать
   
   return {
     success: true,

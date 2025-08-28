@@ -82,6 +82,28 @@ export const useAPI = () => {
         method: 'POST',
         body: JSON.stringify({ playerId, action })
       })
+    },
+
+    // Обнулить комнату (новая игра)
+    resetRoom: async (roomId) => {
+      return await apiCall(`/api/rooms/${roomId}/reset`, {
+        method: 'POST'
+      })
+    },
+
+    // Покинуть комнату
+    leaveRoom: async (roomId, playerId) => {
+      return await apiCall(`/api/rooms/${roomId}/leave`, {
+        method: 'POST',
+        body: JSON.stringify({ playerId })
+      })
+    },
+
+    // Удалить комнату
+    deleteRoom: async (roomId) => {
+      return await apiCall(`/api/rooms/${roomId}`, {
+        method: 'DELETE'
+      })
     }
   }
 }

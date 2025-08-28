@@ -830,9 +830,19 @@ body {
   background-image: url('/icons/pm.png');
 }
 
+.player-handler_btn.message {
+  background-color: #00e9b31e;
+  background-image: url('/icons/cthulhu.png');
+}
+
 .player-handler_btn.defend, .player-handler_btn.shield {
   background-color: rgba(0, 194, 255, 0.05);
   background-image: url('/icons/shield.png');
+}
+
+.player-handler_btn.block {
+  background-color: rgba(255, 45, 45, 0.13);
+  background-image: url('/icons/block.png');
 }
 
 .player-handler_btn.kill {
@@ -854,30 +864,38 @@ body {
   background-image: url('/icons/vote.png');
 }
 
-.player-handler_btn.vote.off {
-  background-color: rgba(255, 255, 255, 0.05);
-  background-image: url('/icons/vote.png');
-  opacity: 0.5;
-  cursor: not-allowed;
-  pointer-events: none;
-}
-
-.player-handler_btn.vote.voted {
-  background-color: rgba(0, 255, 25, 0.1);
-  background-image: url('/icons/vote.png');
-  box-shadow: inset 0 0 0 1px rgba(21, 183, 59, 0.1);
-  cursor: not-allowed;
-  pointer-events: none;
-}
-
 .player-handler_btn.vote-kill {
   background-color: rgba(255, 129, 129, 0.05);
   background-image: url('/icons/vote-kill.png');
 }
 
-.player-handler_btn.inspect {
+.player-handler_btn.inspect, .player-handler_btn.check {
   background-color: rgba(183, 0, 255, 0.1);
   background-image: url('/icons/reveal.png');
+}
+
+.player-handler_btn.swap, .player-handler_btn.troublemake {
+  background-color: #ff8d0b10;
+  background-image: url('/icons/swap.png');
+}
+
+.player-handler_btn.off {
+  filter: grayscale(.8);
+  opacity: 0.5;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.player-handler_btn.active {
+  filter: saturate(1.4);
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.player-handler_btn.selected {
+  filter: saturate(1.4);
+  cursor: not-allowed;
+  pointer-events: none;
 }
 
 .player-actions {

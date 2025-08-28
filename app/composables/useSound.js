@@ -6,14 +6,13 @@ import { ref, onMounted } from 'vue'
 
 // Глобальное состояние звуков (singleton)
 const soundEnabled = ref(true)
-const volume = ref(0.7)
+const volume = ref(0.2)
 const audioCache = new Map()
 
 // Конфигурация звуков
 const SOUNDS = {
   // Фазы игры
   'game-start': '/sounds/game-start.mp3',
-  'game-end': '/sounds/game-end.mp3',
   'phase-change': '/sounds/phase-change.mp3',
   'night': '/sounds/night.mp3',
   'day': '/sounds/day.mp3',
@@ -24,10 +23,10 @@ const SOUNDS = {
   'whisper': '/sounds/whisper.mp3',
   'notification': '/sounds/notification.mp3',
   
-  // Действия
-  'click': '/sounds/click.mp3',
-  'error': '/sounds/error.mp3',
-  'success': '/sounds/success.mp3'
+  // Специальные события
+  'night-turn': '/sounds/notification.mp3', // Используем notification для ночной очереди
+  'voting-start': '/sounds/voting.mp3',      // Используем voting для начала голосования
+  'night-action': '/sounds/notification.mp3', // Клик по ночным кнопкам
 }
 
 export const useSound = () => {

@@ -230,6 +230,14 @@
                   </div>
                 </template>
               </div>
+              <!-- Кнопка результатов когда игра окончена -->
+              <button v-if="gameState.room.phase === 'ended'" @click="showGameResults = true" class="results-btn">
+                Результаты
+              </button>
+              <!-- Кнопка воздержания во время голосования -->
+              <button v-else-if="gameState.room.phase === 'voting'" @click="abstainVote" class="abstain-btn">
+                Воздержаться
+              </button>
               <!-- Кнопка пропуска -->
               <button v-else-if="gameState.nightAction.active" @click="skipNightAction" class="skip-action-btn">
                 Пропустить
@@ -271,12 +279,7 @@
               </div>
             </div>
             
-            <!-- Результаты игры -->
-            <GameResults 
-              v-if="gameState.room.phase === 'ended'" 
-              @new-game="handleNewGame"
-              @leave="handleLeaveGame"
-            />
+            <!-- Центральная область остается пустой в фазе ended -->
             
           </div>
           
@@ -307,6 +310,14 @@
       @close="showRoles = false"
     />
     
+    <!-- Модальное окно результатов игры -->
+    <GameResults 
+      v-if="gameState.room.phase === 'ended' && showGameResults" 
+      @close="showGameResults = false"
+      @new-game="handleNewGame"
+      @leave="handleLeaveGame"
+    />
+    
     <!-- Уведомления -->
     <div v-if="error" @click="error = null" class="error-notification">
       {{ error }}
@@ -331,6 +342,7 @@ import { useUser } from '~/composables/useUser'
 import { useSocket } from '~/composables/useSocket'
 import { useAPI } from '~/composables/useAPI'
 import { useVoiceActivity } from '~/composables/useVoiceActivity'
+import { useSound } from '~/composables/useSound'
 import { getRole, getAllRoles } from '../../../shared/rolesRegistry.js'
 import MicrophoneSettings from '~/components/MicrophoneSettings.vue'
 import SettingsModal from '~/components/SettingsModal.vue'
@@ -365,12 +377,15 @@ const {
   cleanup
 } = useGame()
 
+const { playSound } = useSound()
+
 // Local state
 const soundEnabled = ref(true)
 const showCheatsheet = ref(false)
 const showRoleModal = ref(false)
 const showRules = ref(false)
 const showRoles = ref(false)
+const showGameResults = ref(false)
 const error = ref(null)
 const whisperNotifications = ref([])
 const notificationTimeouts = new Map() // Хранилище для таймеров
@@ -379,6 +394,54 @@ const notificationTimeouts = new Map() // Хранилище для таймер
 watch(whisperNotifications, (newVal) => {
   console.log('👁️ whisperNotifications changed:', newVal)
 }, { deep: true })
+
+// Отслеживаем смену фаз для звуковых эффектов
+watch(() => gameState.room.phase, (newPhase, oldPhase) => {
+  if (oldPhase && newPhase !== oldPhase) {
+    console.log(`🎵 Phase changed: ${oldPhase} → ${newPhase}`)
+    
+    // Воспроизводим соответствующий звук
+    switch (newPhase) {
+      case 'introduction':
+        playSound('game-start')
+        break
+      case 'night':
+        playSound('night', 0.1)
+        break
+      case 'day':
+        playSound('day', 0.1)
+        break
+      case 'voting':
+        playSound('voting-start')
+        break
+      case 'ended':
+        playSound('notification')
+        showGameResults.value = true // Автоматически показываем результаты
+        break
+      default:
+        // playSound('phase-change')
+    }
+  }
+})
+
+// Отслеживаем начало ночной очереди игрока
+watch(() => gameState.nightAction.active, (isActive, wasActive) => {
+  if (isActive && !wasActive) {
+    console.log('🎵 Your night turn started')
+    playSound('night-turn')
+  }
+})
+
+// Отслеживаем начало голосования (дополнительно к смене фазы)
+watch(() => gameState.room.phase === 'voting', (isVoting, wasVoting) => {
+  if (isVoting && !wasVoting) {
+    console.log('🎵 Voting started')
+    // Даем небольшую задержку после звука смены фазы
+    setTimeout(() => {
+      playSound('voting-start', 0.3) // Чуть тише
+    }, 1000)
+  }
+})
 
 // Refs
 const gameChatRef = ref(null)
@@ -433,13 +496,45 @@ const confirmLeaveGame = () => {
   }
 }
 
-const handleLeaveGame = () => {
-  router.push('/')
+const handleLeaveGame = async () => {
+  try {
+    const api = useAPI()
+    const isHost = currentPlayer.value?.isHost
+    
+    if (isHost) {
+      // Если ведущий покидает игру - удаляем комнату
+      await api.deleteRoom(route.params.id)
+    } else {
+      // Обычный игрок просто покидает комнату
+      await api.leaveRoom(route.params.id, currentPlayer.value?.id)
+    }
+    
+    // Отключаемся от сокета и переходим на главную
+    if (socket.value) {
+      socket.value.disconnect()
+    }
+    
+    router.push('/')
+  } catch (error) {
+    console.error('Failed to leave game:', error)
+    // Всё равно переходим на главную в случае ошибки
+    router.push('/')
+  }
 }
 
-const handleNewGame = () => {
-  // TODO: Логика создания новой игры
-  router.push('/')
+const handleNewGame = async () => {
+  const canStart = currentPlayer.value?.isHost || currentPlayer.value?.role === 'game_master'
+  if (!canStart) return
+  
+  try {
+    const api = useAPI()
+    await api.resetRoom(route.params.id)
+    
+    // Перезагружаем страницу чтобы вернуться к настройке ролей
+    window.location.reload()
+  } catch (error) {
+    console.error('Failed to start new game:', error)
+  }
 }
 
 // Player methods
@@ -599,6 +694,10 @@ const voteForPlayer = (targetId) => {
   votePlayer(targetId)
 }
 
+const abstainVote = () => {
+  votePlayer(null) // null означает воздержание
+}
+
 const adminAction = (action, targetId) => {
   gameAdminAction(action, targetId)
 }
@@ -653,15 +752,62 @@ const nightAction = async (type, targetName) => {
       break
   }
   
+  // Воспроизводим звук клика перед выполнением действия
+  playSound('night-action')
+  
   await executeNightAction(action)
 }
 
 // Night action helper methods
 const canNightActionTarget = (player) => {
-  return player.alive && !player.isMe && player.role !== 'game_master'
+  const myRole = currentPlayer.value?.role
+  const currentPhase = gameState.room.phase
+  
+  // Проверяем, что это ночная фаза, у нас есть активное действие
+  if (currentPhase !== 'night' || !gameState.nightAction.active) {
+    return false
+  }
+  
+  // Проверяем, что это наша очередь
+  if (gameState.nightAction.role !== myRole) {
+    return false
+  }
+  
+  // Волк-сновидец не имеет ночных действий с игроками
+  if (myRole === 'dream_wolf') {
+    return false
+  }
+  
+  // Базовые ограничения: игрок должен быть живым, не быть нами, не быть ведущим
+  if (!player.alive || player.isMe || player.role === 'game_master') {
+    return false
+  }
+  
+  // Специфичные для роли ограничения
+  switch (myRole) {
+    case 'werewolf':
+    case 'werewolf_2': 
+    case 'werewolf_3':
+    case 'mystic_wolf':
+      // Оборотни не могут убивать других оборотней
+      return !isWerewolfRole(player.role)
+      
+    case 'bodyguard':
+    case 'robber':
+    case 'doppelganger':
+    case 'prostitute':
+    case 'cthulhu':
+      // Эти роли могут выбрать любого живого игрока (кроме себя)
+      return true
+      
+    default:
+      return true
+  }
 }
 
 const selectTroublemakerTarget = (targetName) => {
+  playSound('night-action')
+  
   if (!selectedTarget1.value) {
     selectedTarget1.value = targetName
   } else if (!selectedTarget2.value && targetName !== selectedTarget1.value) {
@@ -706,6 +852,8 @@ const getNightActionButtonEmoji = () => {
       return '👥'
     case 'seer':
       return '👁️'
+    case 'prostitute':
+      return '🚫'
     default:
       return '✨'
   }
@@ -723,14 +871,17 @@ const showCenterCardButtons = () => {
 }
 
 const seerLookCenter = async () => {
+  playSound('night-action')
   await executeNightAction({ type: 'look_center', centerCards: [0, 1] })
 }
 
 const drunkSwap = async (centerIndex) => {
+  playSound('night-action')
   await executeNightAction({ centerIndex })
 }
 
 const skipNightAction = async () => {
+  playSound('night-action')
   await executeNightAction({ type: 'skip' })
 }
 
@@ -799,7 +950,7 @@ const getPlayerActions = (player) => {
              (hasVoted ? 'Вы уже проголосовали' : 'Проголосовать за исключение'),
       condition: true,
       action: () => voteForPlayer(player.id),
-      extraClass: votedForThisPlayer ? 'voted' : (hasVoted ? 'off' : '')
+      extraClass: votedForThisPlayer ? 'active' : (hasVoted ? 'off' : '')
     })
   }
   
@@ -813,7 +964,7 @@ const getPlayerActions = (player) => {
         class: 'inspect',
         title: nightActionCompleted ? 'Вы уже совершили действие' : 'Посмотреть роль игрока',
         condition: true,
-        extraClass: nightActionCompleted ? 'off' : '',
+        extraClass: nightActionCompleted ? 'active' : '',
         action: () => nightAction('look_player', player.name)
       })
       
@@ -824,7 +975,7 @@ const getPlayerActions = (player) => {
           class: 'vote-kill',
           title: nightActionCompleted ? 'Вы уже совершили действие' : 'Проголосовать за убийство',
           condition: true,
-          extraClass: nightActionCompleted ? 'off' : '',
+          extraClass: nightActionCompleted ? 'active' : '',
           action: () => nightAction('vote_kill', player.name)
         })
       }
@@ -837,7 +988,7 @@ const getPlayerActions = (player) => {
       let title = ''
       
       if (nightActionCompleted) {
-        extraClass = 'off'
+        extraClass = 'active'
         title = 'Вы уже совершили действие'
       } else if (isSelected) {
         extraClass = 'selected'
@@ -857,7 +1008,7 @@ const getPlayerActions = (player) => {
     }
     
     // Стандартные роли - выбор одного игрока  
-    else if (myRole !== 'drunk') {
+    else if (myRole !== 'drunk' && myRole !== 'dream_wolf') {
       // Определяем класс кнопки в зависимости от роли
       let buttonClass = 'night-action'
       let title = ''
@@ -866,8 +1017,25 @@ const getPlayerActions = (player) => {
         buttonClass = 'shield'
         title = nightActionCompleted ? 'Вы уже совершили действие' : 'Защитить игрока'
       } else if (myRole === 'robber') {
+        buttonClass = 'swap'
         title = nightActionCompleted ? 'Вы уже совершили действие' : 'Поменяться ролями'
+      } else if (myRole === 'prostitute') {
+        buttonClass = 'block'
+        title = nightActionCompleted ? 'Вы уже совершили действие' : 'Отключить способность'
+      } else if (myRole === 'doppelganger') {
+        buttonClass = 'copy'
+        title = nightActionCompleted ? 'Вы уже совершили действие' : 'Скопировать роль'
+      } else if (myRole === 'cthulhu') {
+        buttonClass = 'message'
+        title = nightActionCompleted ? 'Вы уже совершили действие' : 'Отправить анонимное сообщение'
+      } else if (myRole === 'insomniac') {
+        buttonClass = 'check'
+        title = nightActionCompleted ? 'Вы уже совершили действие' : 'Проверить свою роль'
+      } else if (myRole === 'minion') {
+        buttonClass = 'reveal'
+        title = nightActionCompleted ? 'Вы уже совершили действие' : 'Найти оборотней'
       } else {
+        buttonClass = 'night-action'
         title = nightActionCompleted ? 'Вы уже совершили действие' : 'Выполнить ночное действие'
       }
       
@@ -876,7 +1044,7 @@ const getPlayerActions = (player) => {
         class: buttonClass,
         title: title,
         condition: true,
-        extraClass: nightActionCompleted ? 'off' : '',
+        extraClass: nightActionCompleted ? 'active' : '',
         action: () => nightAction('select_target', player.name)
       })
     }
@@ -1161,6 +1329,30 @@ onUnmounted(() => {
   background: #6366f1 !important;
 }
 
+.night-action-btn.shield {
+  background: #10b981 !important;
+}
+
+.night-action-btn.block {
+  background: #ef4444 !important;
+}
+
+.night-action-btn.copy {
+  background: #8b5cf6 !important;
+}
+
+.night-action-btn.message {
+  background: #6366f1 !important;
+}
+
+.night-action-btn.check {
+  background: #06b6d4 !important;
+}
+
+.night-action-btn.reveal {
+  background: #f59e0b !important;
+}
+
 .night-action-btn:hover {
   transform: scale(1.1);
   box-shadow: 0 0 12px rgba(79, 70, 229, 0.6);
@@ -1247,6 +1439,36 @@ onUnmounted(() => {
 
 .skip-action-btn:hover {
   background: #4b5563;
+}
+
+.results-btn {
+  background: #059669;
+  color: white;
+  border: none;
+  padding: 0.5rem 1rem;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: 500;
+  transition: background 0.2s;
+}
+
+.results-btn:hover {
+  background: #047857;
+}
+
+.abstain-btn {
+  background: #f59e0b;
+  color: white;
+  border: none;
+  padding: 0.5rem 1rem;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: 500;
+  transition: background 0.2s;
+}
+
+.abstain-btn:hover {
+  background: #d97706;
 }
 
 .admin-btn {

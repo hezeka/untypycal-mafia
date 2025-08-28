@@ -271,6 +271,15 @@ export const useGame = () => {
         console.log('✅ Night action executed successfully:', result)
         // Скрываем интерфейс ночного действия после успешного выполнения
         gameState.nightAction.active = false
+        
+        // Обновляем результат ночного действия для отображения
+        gameState.nightAction.result = {
+          success: true,
+          message: result.message,
+          data: result.data || {},
+          blocked: result.data?.blocked || false
+        }
+        
         return { success: true, message: result.message || 'Действие выполнено' }
       } else {
         console.error('❌ Night action failed:', result.error)
@@ -612,28 +621,7 @@ export const useGame = () => {
         }
       })
       
-      // Блокировка ночного действия Путаной
-      on('action-blocked', (data) => {
-        // Показываем сообщение заблокированному игроку
-        const blockedMessage = {
-          id: `action-blocked-${Date.now()}`,
-          type: 'system',
-          text: data.message,
-          timestamp: Date.now(),
-          senderId: 'prostitute',
-          senderName: data.blocker,
-          isSpecial: true
-        }
-        gameState.chat.push(blockedMessage)
-        
-        // Деактивируем интерфейс ночного действия
-        gameState.nightAction.active = false
-        gameState.nightAction.result = {
-          success: true,
-          message: data.message,
-          blocked: true
-        }
-      })
+      // Блокировка ночного действия теперь приходит как шёпот через new-message
       
       // Ошибки
       on('error', (data) => {

@@ -75,9 +75,11 @@
 <script setup>
 import { ref, computed, nextTick, watch } from 'vue'
 import { useGame } from '~/composables/useGame'
+import { useSound } from '~/composables/useSound'
 import { getAllRoles } from '../../shared/rolesRegistry.js'
 
 const { gameState, canChat, sendMessage: sendGameMessage } = useGame()
+const { playSound } = useSound()
 
 // Функция для установки текста в инпут (для команд шепота)
 const setInputText = (text) => {
@@ -176,8 +178,34 @@ const scrollToBottom = () => {
   })
 }
 
-// Отслеживаем новые сообщения
-watch(() => gameState.chat.length, scrollToBottom)
+// Отслеживаем новые сообщения и воспроизводим звуки
+watch(() => gameState.chat.length, (newLength, oldLength) => {
+  scrollToBottom()
+  
+  // Если добавилось новое сообщение
+  if (newLength > oldLength && gameState.chat.length > 0) {
+    const lastMessage = gameState.chat[gameState.chat.length - 1]
+    
+    // Не воспроизводим звук для собственных сообщений
+    const isOwnMessage = lastMessage.isOwn || 
+                        lastMessage.senderId === gameState.player.id ||
+                        (lastMessage.senderName === gameState.player.name && lastMessage.senderId !== 'system')
+    
+    if (!isOwnMessage) {
+      // Определяем тип звука в зависимости от типа сообщения
+      if (lastMessage.type === 'whisper') {
+        playSound('whisper')
+      } else if (lastMessage.type === 'system' || lastMessage.type === 'game_event') {
+        playSound('notification')
+      } else if (lastMessage.type === 'error') {
+        // Для ошибок не играем звук или играем тихий звук
+      } else {
+        // Обычное сообщение
+        playSound('message')
+      }
+    }
+  }
+})
 
 // Дополнительно отслеживаем появление ошибок для немедленной прокрутки
 watch(() => gameState.chat.filter(msg => msg.type === 'error'), scrollToBottom, { deep: true })

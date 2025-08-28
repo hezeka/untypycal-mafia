@@ -313,6 +313,7 @@ export const getTeamNames = () => ({
   village: 'Деревня',
   werewolf: 'Оборотни', 
   tanner: 'Неудачник',
+  cthulhu: 'Ктулху',
   special: 'Особые'
 })
 

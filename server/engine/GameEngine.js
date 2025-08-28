@@ -204,6 +204,7 @@ export class GameEngine {
   startNightPhase() {
     this.killedPlayers = []
     this.protectedPlayers = []
+    this.blockedPlayers = new Set() // Очищаем заблокированных игроков
     this.nightActionIndex = 0
     this.completedActions = new Set() // Отслеживание выполненных действий
     this.currentPhaseTimer = null
@@ -309,13 +310,17 @@ export class GameEngine {
     try {
       const result = await executeRoleAction(this, player, action)
       
-      // Если действие успешно, отмечаем игрока как выполнившего действие
+      // Если действие успешно (включая заблокированные с auto-skip), отмечаем игрока как выполнившего действие
       if (result && !result.error) {
-        this.completedActions.add(playerId)
-        console.log(`✅ Player ${player.name} (${player.role}) completed action`)
-        
-        // Проверяем, все ли игроки с этой ролью завершили действие
-        this.checkAllPlayersCompleted()
+        // Заблокированные действия уже помечаются как выполненные в executeRoleAction
+        if (!result.data?.blocked) {
+          this.completedActions.add(playerId)
+          console.log(`✅ Player ${player.name} (${player.role}) completed action`)
+          
+          // Проверяем, все ли игроки с этой ролью завершили действие
+          this.checkAllPlayersCompleted()
+        }
+        // Для заблокированных действий логика выполнения уже обработана в executeRoleAction
       }
       
       return result
