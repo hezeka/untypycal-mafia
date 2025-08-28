@@ -88,11 +88,11 @@
               <span class="stat-label">игроков</span>
             </div>
             <div class="stat-item">
-              <span class="stat-number">20-30</span>
+              <span class="stat-number">10-20</span>
               <span class="stat-label">минут</span>
             </div>
             <div class="stat-item">
-              <span class="stat-number">27+</span>
+              <span class="stat-number">20+</span>
               <span class="stat-label">ролей</span>
             </div>
           </div>
