@@ -2,7 +2,7 @@
   <div class="main-page">
     <div style="border-bottom: 1px solid rgba(131, 131, 131, 0.06);">
       <div class="container">
-        <header class="game-header main-header" style="border: none;">
+        <header class="game-header main-header" style="border: none; flex-direction: row !important;">
         
           <!-- Левая часть: логотип + навигация -->
           <div class="header-left">
