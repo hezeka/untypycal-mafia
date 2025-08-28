@@ -76,7 +76,7 @@
                 <img 
                   :src="`/roles/compressed/${roleId}.webp`" 
                   :alt="role.name"
-                  @error="$event.target.src = `/roles/${roleId}.png`"
+                  @error="handleImageError($event, roleId)"
                   class="role-image"
                 />
                 <div v-if="getRoleCount(roleId) > 0" class="role-count">{{ getRoleCount(roleId) }}</div>
@@ -159,6 +159,16 @@ const canStart = computed(() => {
 const isRoleSelected = (roleId) => gameState.room.selectedRoles.includes(roleId)
 const getRoleCount = (roleId) => gameState.room.selectedRoles.filter(id => id === roleId).length
 const getTeamName = (teamId) => teamNames[teamId] || teamId
+
+const handleImageError = (event, roleId) => {
+  // Сначала пробуем несжатую версию
+  if (event.target.src.includes('compressed')) {
+    event.target.src = `/roles/${roleId}.png`
+  } else {
+    // Если и несжатая не загрузилась, показываем card-back
+    event.target.src = '/roles/card-back.png'
+  }
+}
 
 const toggleRole = async (roleId) => {
   if (roleLoading.value.has(roleId)) return

@@ -194,6 +194,33 @@ const handleJoinRoom = (socket, data) => {
       player: player 
     })
     
+    // Если игрок подключился во время ночной фазы, отправляем информацию о текущем ночном действии
+    if (room.gameState === GAME_PHASES.NIGHT && room.gameEngine) {
+      const playerRole = player.role
+      const nightRoles = room.gameEngine.nightRoles || []
+      const currentNightActionIndex = room.gameEngine.nightActionIndex || 0
+      
+      if (currentNightActionIndex < nightRoles.length) {
+        const currentRole = nightRoles[currentNightActionIndex]
+        if (currentRole && playerRole === currentRole.id && player.alive) {
+          // Отправляем событие о ночном ходе
+          socket.emit('night-action-turn', {
+            role: currentRole.id,
+            timeLimit: 30
+          })
+          
+          // Отправляем информацию о таймере
+          const phaseStartTime = room.gameEngine.phaseStartTime || Date.now()
+          const endTime = phaseStartTime + (30 * 1000)
+          socket.emit('night-action-timer', {
+            role: currentRole.id,
+            timeLimit: 30,
+            endTime: endTime
+          })
+        }
+      }
+    }
+    
     // Уведомляем остальных
     room.broadcast(SOCKET_EVENTS.GAME_UPDATED, { room: room.getClientData() })
     
@@ -687,6 +714,54 @@ app.get('/api/rooms/:roomId/chat', (req, res) => {
   })
 })
 
+// Получение информации о ролях в комнате
+app.get('/api/rooms/:roomId/roles', async (req, res) => {
+  const { roomId } = req.params
+  const room = rooms.get(roomId)
+  
+  if (!room) {
+    return res.status(404).json({ error: 'Комната не найдена' })
+  }
+  
+  try {
+    const { getAllRoles } = await import('../utils/gameHelpers.js')
+    const allRoles = getAllRoles()
+    
+    const selectedRoleData = room.selectedRoles.map(roleId => {
+      const roleInfo = allRoles[roleId]
+      return {
+        id: roleId,
+        name: roleInfo?.name || roleId,
+        description: roleInfo?.description || 'Описание отсутствует',
+        team: roleInfo?.team || 'unknown',
+        hasNightAction: roleInfo?.hasNightAction || false,
+        nightOrder: roleInfo?.nightOrder || 999,
+        implemented: roleInfo?.implemented || false,
+        phaseHints: roleInfo?.phaseHints || {},
+        image: `/roles/${roleId}.webp` // Путь к изображению роли
+      }
+    }).sort((a, b) => {
+      // Сортируем по команде, затем по порядку ночи
+      const teamOrder = { village: 1, werewolf: 2, special: 3, tanner: 4 }
+      if (a.team !== b.team) {
+        return (teamOrder[a.team] || 999) - (teamOrder[b.team] || 999)
+      }
+      return a.nightOrder - b.nightOrder
+    })
+    
+    res.json({
+      success: true,
+      roles: selectedRoleData,
+      totalRoles: selectedRoleData.length,
+      centerCards: room.centerCards?.length || 0
+    })
+    
+  } catch (error) {
+    logger.error('Get roles error:', error)
+    res.status(500).json({ error: 'Ошибка получения ролей' })
+  }
+})
+
 // Управление ролями в комнате
 app.post('/api/rooms/:roomId/roles', (req, res) => {
   const { roomId } = req.params
@@ -783,6 +858,15 @@ app.put('/api/rooms/:roomId/phase', async (req, res) => {
         if (room.gameEngine) {
           room.gameEngine.forceEndVoting()
           result.message = 'Голосование завершено принудительно'
+        }
+        break
+        
+      case 'extend-phase':
+        if (room.gameEngine) {
+          const extensionResult = room.gameEngine.extendPhase(1)
+          result = { ...result, ...extensionResult }
+        } else {
+          return res.status(400).json({ error: 'Игра не начата' })
         }
         break
         
@@ -911,5 +995,21 @@ process.on('SIGTERM', () => {
     process.exit(0)
   })
 })
+
+// ✅ ФУНКЦИЯ ДЛЯ ПОЛУЧЕНИЯ ПУБЛИЧНЫХ КОМНАТ (для команды чата)
+export function getPublicRooms() {
+  return Array.from(rooms.values())
+    .filter(room => !room.isPrivate)
+    .map(room => ({
+      id: room.id,
+      name: `Комната ${room.id}`,
+      hostName: room.getPlayer(room.hostId)?.name || 'Неизвестно',
+      phase: room.gameState,
+      totalPlayers: room.players.size,
+      alivePlayers: Array.from(room.players.values()).filter(p => p.alive).length,
+      daysSurvived: room.daysSurvived || 0,
+      votingRounds: room.votingRounds || 0
+    }))
+}
 
 export { io, rooms }

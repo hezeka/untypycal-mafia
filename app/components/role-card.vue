@@ -5,7 +5,7 @@
     @click="!readonly && $emit('toggle', roleId)"
   >
     <div class="role-image">
-      <img :src="`/roles/compressed/${roleId}.webp`" :alt="role.name" />
+      <img :src="`/roles/compressed/${roleId}.webp`" :alt="role.name" @error="handleImageError" />
       <div v-if="selected" class="selected-overlay">
         <div class="check-icon">✓</div>
       </div>
@@ -44,6 +44,16 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['toggle'])
+
+const handleImageError = (event) => {
+  // Сначала пробуем несжатую версию
+  if (event.target.src.includes('compressed')) {
+    event.target.src = `/roles/${props.roleId}.png`
+  } else {
+    // Если и несжатая не загрузилась, показываем card-back
+    event.target.src = '/roles/card-back.png'
+  }
+}
 
 const getTeamName = (team) => {
   const teams = {

@@ -571,6 +571,70 @@ export const useGame = () => {
         gameState.room.votingActive = false
       })
       
+      // Анонимные сообщения от Ктулху
+      on('cthulhu-message', (data) => {
+        // Показываем специальное уведомление игроку
+        const cthulhuMessage = {
+          id: `cthulhu-${Date.now()}`,
+          type: 'cthulhu',
+          from: data.from,
+          message: data.message,
+          timestamp: Date.now(),
+          isSpecial: true
+        }
+        
+        // Добавляем в чат как специальное сообщение
+        gameState.chat.push({
+          id: cthulhuMessage.id,
+          type: 'system',
+          text: `🐙 ${data.from}: "${data.message}"`,
+          timestamp: cthulhuMessage.timestamp,
+          senderId: 'cthulhu',
+          senderName: data.from,
+          isSpecial: true
+        })
+      })
+      
+      // Прогресс выживания Ктулху
+      on('cthulhu-survival', (data) => {
+        // Показываем прогресс только самому Ктулху
+        if (gameState.player.role === 'cthulhu') {
+          const progressMessage = {
+            id: `cthulhu-progress-${Date.now()}`,
+            type: 'system',
+            text: `🐙 Вы пережили ${data.survivedCount} из ${data.totalNeeded} голосований`,
+            timestamp: Date.now(),
+            senderId: 'system',
+            senderName: 'Система',
+            isSpecial: true
+          }
+          gameState.chat.push(progressMessage)
+        }
+      })
+      
+      // Блокировка ночного действия Путаной
+      on('action-blocked', (data) => {
+        // Показываем сообщение заблокированному игроку
+        const blockedMessage = {
+          id: `action-blocked-${Date.now()}`,
+          type: 'system',
+          text: data.message,
+          timestamp: Date.now(),
+          senderId: 'prostitute',
+          senderName: data.blocker,
+          isSpecial: true
+        }
+        gameState.chat.push(blockedMessage)
+        
+        // Деактивируем интерфейс ночного действия
+        gameState.nightAction.active = false
+        gameState.nightAction.result = {
+          success: true,
+          message: data.message,
+          blocked: true
+        }
+      })
+      
       // Ошибки
       on('error', (data) => {
         console.error('🚨 Socket error:', data)

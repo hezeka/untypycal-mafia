@@ -93,6 +93,11 @@
                     {{ phaseInfo.name }}
                     <span v-if="canAdminControl && gameState.room.phase !== 'setup'">
                       <button
+                        @click="extendPhase" 
+                        class="admin-btn extend-btn"
+                        title="Продлить фазу на 1 минуту"
+                      >+1 мин</button>
+                      <button
                         @click="gameState.room.phase === 'voting' ? adminAction('force-vote') : adminAction('next-phase')" 
                         class="admin-btn phase-btn"
                       >Скип</button>
@@ -297,10 +302,10 @@
       @close="showRules = false"
     />
     
-    <!-- <RolesModal 
+    <RolesLibraryModal
       v-if="showRoles"
       @close="showRoles = false"
-    /> -->
+    />
     
     <!-- Уведомления -->
     <div v-if="error" @click="error = null" class="error-notification">
@@ -324,10 +329,12 @@ import { useRoute, useRouter } from 'vue-router'
 import { useGame } from '~/composables/useGame'
 import { useUser } from '~/composables/useUser'
 import { useSocket } from '~/composables/useSocket'
+import { useAPI } from '~/composables/useAPI'
 import { useVoiceActivity } from '~/composables/useVoiceActivity'
 import { getRole, getAllRoles } from '../../../shared/rolesRegistry.js'
 import MicrophoneSettings from '~/components/MicrophoneSettings.vue'
 import SettingsModal from '~/components/SettingsModal.vue'
+import RolesLibraryModal from '~/components/RolesLibraryModal.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -594,6 +601,18 @@ const voteForPlayer = (targetId) => {
 
 const adminAction = (action, targetId) => {
   gameAdminAction(action, targetId)
+}
+
+const extendPhase = async () => {
+  try {
+    const api = useAPI()
+    const data = await api.managePhase(route.params.id, 'extend-phase', currentPlayer.value?.id)
+    console.log('Phase extended:', data.message)
+    
+  } catch (err) {
+    console.error('Error extending phase:', err)
+    error.value = err.message
+  }
 }
 
 const nightAction = async (type, targetName) => {
@@ -1228,6 +1247,39 @@ onUnmounted(() => {
 
 .skip-action-btn:hover {
   background: #4b5563;
+}
+
+.admin-btn {
+  background: #6b7280;
+  color: white;
+  border: none;
+  padding: 0.375rem 0.75rem;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.875rem;
+  font-weight: 500;
+  transition: background 0.2s;
+  margin-left: 0.5rem;
+}
+
+.admin-btn:hover {
+  background: #4b5563;
+}
+
+.admin-btn.extend-btn {
+  background: #059669;
+}
+
+.admin-btn.extend-btn:hover {
+  background: #047857;
+}
+
+.admin-btn.phase-btn {
+  background: #dc2626;
+}
+
+.admin-btn.phase-btn:hover {
+  background: #b91c1c;
 }
 
 /* Результаты ночных действий */

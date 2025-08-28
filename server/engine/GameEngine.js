@@ -164,9 +164,19 @@ export class GameEngine {
         break
       case GAME_PHASES.NIGHT:
         await this.setPhase(GAME_PHASES.DAY)
+        // Проверяем условия победы после ночи (оборотни могли убить всех жителей)
+        if (this.checkWinConditions()) {
+          console.log('🏆 Game ended after night phase')
+          return
+        }
         break
       case GAME_PHASES.DAY:
         await this.setPhase(GAME_PHASES.VOTING)
+        // Проверяем условия победы после дневной фазы
+        if (this.checkWinConditions()) {
+          console.log('🏆 Game ended after day phase')
+          return
+        }
         break
       case GAME_PHASES.VOTING:
         // Проверяем, не было ли голосование уже обработано досрочно
@@ -179,6 +189,11 @@ export class GameEngine {
             // Увеличиваем счетчик дней, пережитых игроками
             this.room.daysSurvived++
             console.log(`📅 Day ${this.room.daysSurvived} completed`)
+            // Сразу обновляем статистику для клиентов
+            this.room.broadcast('statistics-updated', { 
+              civiliansKilled: this.room.civiliansKilled,
+              daysSurvived: this.room.daysSurvived 
+            })
             await this.setPhase(GAME_PHASES.NIGHT)
           }
         }
@@ -355,6 +370,12 @@ export class GameEngine {
     
     // Обновляем состояние комнаты для всех игроков
     this.room.broadcast('game-updated', { room: this.room.getClientData() })
+    
+    // Проверяем условия победы после объявления результатов ночи
+    if (this.checkWinConditions()) {
+      console.log('🏆 Game ended after night results announcement')
+      return
+    }
   }
   
   // Добавление сообщения в пул для отправки днём
@@ -453,6 +474,11 @@ export class GameEngine {
           if (roleInfo && roleInfo.team === 'village') {
             this.room.civiliansKilled++
             console.log(`💀 Civilian ${player.name} (${roleName}) killed, total civilians killed: ${this.room.civiliansKilled}`)
+            // Сразу обновляем статистику для клиентов
+            this.room.broadcast('statistics-updated', { 
+              civiliansKilled: this.room.civiliansKilled,
+              daysSurvived: this.room.daysSurvived 
+            })
           }
           
           this.room.addSystemMessage(`💀 ${player.name} (${roleName}) был исключен голосованием`, MESSAGE_TYPES.SYSTEM)
@@ -464,6 +490,9 @@ export class GameEngine {
     
     // Обрабатываем месть охотников
     this.processHunterRetaliation(huntersKilled, result)
+    
+    // Обрабатываем выживание Ктулху
+    this.processCthulhuSurvival(result)
     
     // Показываем результаты голосования
     this.room.broadcast('voting-ended', result)
@@ -524,6 +553,11 @@ export class GameEngine {
           if (targetRoleInfo && targetRoleInfo.team === 'village') {
             this.room.civiliansKilled++
             console.log(`💀 Civilian ${target.name} (${targetRoleName}) killed by hunter, total civilians killed: ${this.room.civiliansKilled}`)
+            // Сразу обновляем статистику для клиентов
+            this.room.broadcast('statistics-updated', { 
+              civiliansKilled: this.room.civiliansKilled,
+              daysSurvived: this.room.daysSurvived 
+            })
           }
           
           this.room.addSystemMessage(
@@ -540,6 +574,41 @@ export class GameEngine {
     })
   }
 
+  processCthulhuSurvival(votingResult) {
+    const aliveCthulhuPlayers = Array.from(this.room.players.values()).filter(p => {
+      if (p.role === 'game_master' || !p.alive) return false
+      const role = getRoleInfo(p.role)
+      return role && role.id === 'cthulhu'
+    })
+    
+    // Проверяем каждого живого Ктулху
+    aliveCthulhuPlayers.forEach(cthulhuPlayer => {
+      // Если Ктулху НЕ был исключен в этом голосовании, он выжил еще одно голосование
+      if (!votingResult.eliminated.includes(cthulhuPlayer.id)) {
+        // Получаем экземпляр роли для увеличения счетчика
+        if (!this.cthulhuSurvivalCounts) {
+          this.cthulhuSurvivalCounts = new Map()
+        }
+        
+        const currentCount = this.cthulhuSurvivalCounts.get(cthulhuPlayer.id) || 0
+        const newCount = currentCount + 1
+        this.cthulhuSurvivalCounts.set(cthulhuPlayer.id, newCount)
+        
+        console.log(`🐙 Cthulhu ${cthulhuPlayer.name} survived voting ${newCount}/3`)
+        
+        // Отправляем уведомление Ктулху о прогрессе
+        this.room.sendToPlayer(cthulhuPlayer.id, 'cthulhu-survival', {
+          survivedCount: newCount,
+          totalNeeded: 3
+        })
+        
+        if (newCount >= 3) {
+          console.log(`🏆 CTHULHU WINS: ${cthulhuPlayer.name} survived 3 votings!`)
+        }
+      }
+    })
+  }
+
   checkWinConditions() {
     const alivePlayers = Array.from(this.room.players.values()).filter(p => p.alive)
     const deadPlayers = Array.from(this.room.players.values()).filter(p => !p.alive)
@@ -548,7 +617,19 @@ export class GameEngine {
     console.log('🏆 Alive players:', alivePlayers.map(p => `${p.name} (${p.role})`))
     console.log('🏆 Dead players:', deadPlayers.map(p => `${p.name} (${p.role})`))
     
-    // 1. Неудачник убит - он побеждает
+    // 1. Проверяем победу Ктулху (приоритет над остальными)
+    if (this.cthulhuSurvivalCounts) {
+      for (const [playerId, survivalCount] of this.cthulhuSurvivalCounts.entries()) {
+        const player = this.room.getPlayer(playerId)
+        if (player && player.alive && survivalCount >= 3) {
+          console.log(`🏆 WIN: Cthulhu ${player.name} survived 3 votings - Cthulhu wins!`)
+          this.endGame('cthulhu', [playerId])
+          return true
+        }
+      }
+    }
+    
+    // 2. Неудачник убит - он побеждает
     const tannerKilled = deadPlayers.find(p => p.role === 'tanner')
     if (tannerKilled) {
       console.log('🏆 WIN: Tanner killed - Tanner wins!')
@@ -603,6 +684,9 @@ export class GameEngine {
     
     this.room.addSystemMessage(`🏆 Игра окончена! Победила команда: ${this.getTeamName(winnerTeam)}`, MESSAGE_TYPES.SYSTEM)
     
+    // Раскрываем роли всех игроков
+    this.revealAllRoles()
+    
     // Обновляем состояние для всех игроков
     this.room.broadcast('game-updated', { room: this.room.getClientData() })
     
@@ -617,11 +701,42 @@ export class GameEngine {
     }
   }
 
+  revealAllRoles() {
+    const allPlayers = Array.from(this.room.players.values()).filter(p => p.role !== 'game_master')
+    
+    if (allPlayers.length === 0) return
+    
+    const roleMessages = []
+    
+    allPlayers.forEach(player => {
+      const roleInfo = getRoleInfo(player.role)
+      const roleName = roleInfo?.name || player.role
+      const statusIcon = player.alive ? '🟢' : '💀'
+      roleMessages.push(`${statusIcon} ${player.name} - ${roleName}`)
+    })
+    
+    this.room.addSystemMessage('🎭 Роли игроков:', MESSAGE_TYPES.SYSTEM)
+    roleMessages.forEach(msg => {
+      this.room.addSystemMessage(msg, MESSAGE_TYPES.SYSTEM)
+    })
+    
+    // Показываем центральные карты, если они есть
+    if (this.room.centerCards && this.room.centerCards.length > 0) {
+      this.room.addSystemMessage('🃏 Центральные карты:', MESSAGE_TYPES.SYSTEM)
+      this.room.centerCards.forEach((roleId, index) => {
+        const roleInfo = getRoleInfo(roleId)
+        const roleName = roleInfo?.name || roleId
+        this.room.addSystemMessage(`Карта ${index + 1}: ${roleName}`, MESSAGE_TYPES.SYSTEM)
+      })
+    }
+  }
+
   getTeamName(team) {
     const names = {
       village: 'Деревня',
       werewolf: 'Оборотни',
-      tanner: 'Неудачник'
+      tanner: 'Неудачник',
+      cthulhu: 'Ктулху'
     }
     return names[team] || team
   }
@@ -659,6 +774,46 @@ export class GameEngine {
     }
   }
 
+  extendPhase(minutes = 1) {
+    if (!this.phaseTimer) {
+      throw new Error('Нет активного таймера фазы')
+    }
+    
+    const extensionMs = minutes * 60 * 1000
+    const currentEndTime = this.phaseStartTime + (PHASE_DURATIONS[this.currentPhase] * 1000)
+    const newEndTime = currentEndTime + extensionMs
+    
+    // Останавливаем текущий таймер
+    clearTimeout(this.phaseTimer)
+    
+    // Вычисляем новое время до окончания фазы
+    const remainingTime = newEndTime - Date.now()
+    
+    if (remainingTime > 0) {
+      // Запускаем новый таймер
+      this.phaseTimer = setTimeout(async () => {
+        await this.nextPhase()
+      }, remainingTime)
+      
+      console.log(`⏰ Phase ${this.currentPhase} extended by ${minutes} minute(s)`)
+      
+      // Уведомляем клиентов о новом времени окончания
+      this.room.broadcast('phase-extended', {
+        phase: this.currentPhase,
+        extensionMinutes: minutes,
+        newEndTime: newEndTime
+      })
+      
+      return { 
+        success: true, 
+        message: `Фаза продлена на ${minutes} минут`,
+        newEndTime: newEndTime
+      }
+    } else {
+      throw new Error('Время фазы уже истекло')
+    }
+  }
+
   forceEndVoting() {
     if (this.room.gameState !== GAME_PHASES.VOTING || !this.room.votingActive) {
       throw new Error('Голосование не активно')
@@ -676,6 +831,11 @@ export class GameEngine {
         // Увеличиваем счетчик дней, пережитых игроками
         this.room.daysSurvived++
         console.log(`📅 Day ${this.room.daysSurvived} completed`)
+        // Сразу обновляем статистику для клиентов
+        this.room.broadcast('statistics-updated', { 
+          civiliansKilled: this.room.civiliansKilled,
+          daysSurvived: this.room.daysSurvived 
+        })
         await this.setPhase(GAME_PHASES.NIGHT)
       }
     }, 2000)

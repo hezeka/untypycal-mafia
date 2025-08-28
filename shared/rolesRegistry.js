@@ -14,6 +14,21 @@ export const ROLES_REGISTRY = {
     }
   },
   
+  bodyguard: {
+    id: 'bodyguard',
+    name: 'Страж',
+    description: 'Ночью ставит щит на игрока (защита от убийства).',
+    team: 'village',
+    color: 'blue',
+    hasNightAction: true,
+    nightOrder: 1,
+    implemented: true,
+    phaseHints: {
+      night: 'Выберите игрока для защиты',
+      day: 'Ваша защита могла спасти жизнь'
+    }
+  },
+  
   seer: {
     id: 'seer', 
     name: 'Провидец',
@@ -21,7 +36,7 @@ export const ROLES_REGISTRY = {
     team: 'village',
     color: 'blue',
     hasNightAction: true,
-    nightOrder: 6,
+    nightOrder: 5,
     implemented: true,
     phaseHints: {
       night: 'Выберите: посмотреть роль игрока ИЛИ две центральные карты',
@@ -36,7 +51,7 @@ export const ROLES_REGISTRY = {
     team: 'village',
     color: 'blue',
     hasNightAction: true,
-    nightOrder: 7,
+    nightOrder: 6,
     implemented: true,
     phaseHints: {
       night: 'Выберите игрока для обмена ролями',
@@ -51,7 +66,7 @@ export const ROLES_REGISTRY = {
     team: 'village', 
     color: 'blue',
     hasNightAction: true,
-    nightOrder: 8,
+    nightOrder: 7,
     implemented: true,
     phaseHints: {
       night: 'Выберите двух игроков для обмена ролями',
@@ -66,26 +81,11 @@ export const ROLES_REGISTRY = {
     team: 'village',
     color: 'blue', 
     hasNightAction: true,
-    nightOrder: 9,
+    nightOrder: 8,
     implemented: true,
     phaseHints: {
       night: 'Выберите центральную карту для обмена',
       day: 'Вы не знаете свою новую роль'
-    }
-  },
-  
-  bodyguard: {
-    id: 'bodyguard',
-    name: 'Страж',
-    description: 'Ночью ставит щит на игрока (защита от убийства).',
-    team: 'village',
-    color: 'blue',
-    hasNightAction: true,
-    nightOrder: 19,
-    implemented: true,
-    phaseHints: {
-      night: 'Выберите игрока для защиты',
-      day: 'Ваша защита могла спасти жизнь'
     }
   },
   
@@ -110,7 +110,7 @@ export const ROLES_REGISTRY = {
     team: 'village',
     color: 'blue',
     hasNightAction: true,
-    nightOrder: 20,
+    nightOrder: 9,
     implemented: true,
     phaseHints: {
       night: 'В конце ночи вы узнаете свою роль',
@@ -126,7 +126,7 @@ export const ROLES_REGISTRY = {
     team: 'werewolf',
     color: 'red',
     hasNightAction: true,
-    nightOrder: 3,
+    nightOrder: 4,
     implemented: true,
     phaseHints: {
       night: 'Найдите других оборотней и выберите жертву',
@@ -141,7 +141,7 @@ export const ROLES_REGISTRY = {
     team: 'werewolf',
     color: 'red',
     hasNightAction: true,
-    nightOrder: 11,
+    nightOrder: 4,
     implemented: true,
     phaseHints: {
       night: 'Найдите оборотней, затем выберите действие',
@@ -171,7 +171,7 @@ export const ROLES_REGISTRY = {
     team: 'werewolf',
     color: 'red',
     hasNightAction: true,
-    nightOrder: 18,
+    nightOrder: 10,
     implemented: true,
     phaseHints: {
       night: 'Вы спите и ничего не делаете',
@@ -210,6 +210,36 @@ export const ROLES_REGISTRY = {
     }
   },
   
+  prostitute: {
+    id: 'prostitute',
+    name: 'Путана',
+    description: 'Ночью может отключить ночную способность одного игрока.',
+    team: 'village',
+    color: 'blue',
+    hasNightAction: true,
+    nightOrder: 3,
+    implemented: true,
+    phaseHints: {
+      night: 'Выберите игрока, чтобы отключить его ночную способность',
+      day: 'Вы могли помешать кому-то действовать ночью'
+    }
+  },
+  
+  cthulhu: {
+    id: 'cthulhu',
+    name: 'Ктулху',
+    description: 'Ночью отправляет анонимное сообщение игроку. Побеждает если переживет 3 голосования.',
+    team: 'special',
+    color: 'purple',
+    hasNightAction: true,
+    nightOrder: 11,
+    implemented: true,
+    phaseHints: {
+      night: 'Выберите игрока и отправьте ему анонимное сообщение',
+      day: 'Переживите голосование. Нужно выжить 3 раза для победы'
+    }
+  },
+  
   // === ДОПОЛНИТЕЛЬНЫЕ ОБОРОТНИ ===
   werewolf_2: {
     id: 'werewolf_2',
@@ -218,7 +248,7 @@ export const ROLES_REGISTRY = {
     team: 'werewolf',
     color: 'red',
     hasNightAction: true,
-    nightOrder: 3,
+    nightOrder: 4,
     implemented: true,
     phaseHints: {
       night: 'Найдите других оборотней и выберите жертву',
@@ -233,11 +263,40 @@ export const ROLES_REGISTRY = {
     team: 'werewolf',
     color: 'red',
     hasNightAction: true,
-    nightOrder: 3,
+    nightOrder: 4,
     implemented: true,
     phaseHints: {
       night: 'Найдите других оборотней и выберите жертву',
       day: 'Притворяйтесь жителем и направляйте подозрения'
+    }
+  },
+  
+  // === ДОПОЛНИТЕЛЬНЫЕ ЖИТЕЛИ ===
+  villager_2: {
+    id: 'villager_2',
+    name: 'Житель',
+    description: 'Обычный житель без особых способностей.',
+    team: 'village',
+    color: 'blue',
+    hasNightAction: false,
+    nightOrder: 0,
+    implemented: true,
+    phaseHints: {
+      day: 'Найдите оборотней по их поведению и противоречиям'
+    }
+  },
+  
+  villager_3: {
+    id: 'villager_3',
+    name: 'Житель',
+    description: 'Обычный житель без особых способностей.',
+    team: 'village',
+    color: 'blue',
+    hasNightAction: false,
+    nightOrder: 0,
+    implemented: true,
+    phaseHints: {
+      day: 'Найдите оборотней по их поведению и противоречиям'
     }
   }
 }

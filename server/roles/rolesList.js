@@ -39,6 +39,15 @@ export const executeRoleAction = async (gameEngine, player, action) => {
     return { error: 'У этой роли нет ночных действий' }
   }
   
+  // Проверяем, заблокирован ли игрок Путаной
+  if (gameEngine.blockedPlayers && gameEngine.blockedPlayers.has(player.id)) {
+    return {
+      success: true,
+      message: 'Ночью вас обольстила путана, вы пропустили свою очередь',
+      data: { blocked: true, blocker: 'prostitute' }
+    }
+  }
+  
   // Универсальная обработка пропуска действия
   if (action.type === 'skip') {
     return {
@@ -72,6 +81,8 @@ const getRoleHandler = (roleId) => {
     hunter: handleHunter,
     insomniac: handleInsomniac,
     doppelganger: handleDoppelganger,
+    cthulhu: handleCthulhu,
+    prostitute: handleProstitute,
     werewolf_2: handleWerewolf,
     werewolf_3: handleWerewolf
   }
@@ -330,6 +341,70 @@ const handleInsomniac = async (gameEngine, player, action) => {
       currentRole: player.role,
       roleInfo
     }
+  }
+}
+
+const handleCthulhu = async (gameEngine, player, action) => {
+  const { targetId, message } = action
+  const room = gameEngine.room
+  
+  if (!targetId || !message) {
+    return { error: 'Выберите игрока и напишите сообщение' }
+  }
+  
+  const target = room.getPlayer(targetId)
+  if (!target || target.id === player.id || !target.alive) {
+    return { error: 'Недопустимая цель' }
+  }
+  
+  // Отправляем анонимное сообщение целевому игроку
+  room.sendToPlayer(targetId, 'cthulhu-message', {
+    message: message,
+    from: 'Ктулху'
+  })
+  
+  return {
+    success: true,
+    message: `Анонимное сообщение отправлено игроку ${target.name}`,
+    data: { target: target.name, message }
+  }
+}
+
+const handleProstitute = async (gameEngine, player, action) => {
+  const { targetId } = action
+  const room = gameEngine.room
+  
+  if (!targetId) {
+    return { error: 'Выберите игрока для блокировки' }
+  }
+  
+  const target = room.getPlayer(targetId)
+  if (!target || target.id === player.id || !target.alive) {
+    return { error: 'Недопустимая цель' }
+  }
+  
+  // Проверяем, есть ли у цели ночная способность
+  const targetRole = getRoleInfo(target.role)
+  if (!targetRole || !targetRole.hasNightAction) {
+    return { error: 'У этого игрока нет ночной способности' }
+  }
+  
+  // Блокируем ночное действие цели
+  if (!gameEngine.blockedPlayers) {
+    gameEngine.blockedPlayers = new Set()
+  }
+  gameEngine.blockedPlayers.add(targetId)
+  
+  // Отправляем уведомление заблокированному игроку
+  room.sendToPlayer(targetId, 'action-blocked', {
+    message: 'Ночью вас обольстила путана, вы пропустили свою очередь',
+    blocker: 'Путана'
+  })
+  
+  return {
+    success: true,
+    message: `Вы заблокировали ночное действие игрока ${target.name}`,
+    data: { target: target.name, blockedRole: targetRole.name }
   }
 }
 

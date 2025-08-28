@@ -22,6 +22,10 @@ export class WinConditions {
       }
     }
     
+    // Проверяем специальные роли (Ктулху)
+    const cthulhuWin = this.checkCthulhuWin()
+    if (cthulhuWin) return cthulhuWin
+    
     // Проверяем специальные роли (Неудачник)
     const tannerWin = this.checkTannerWin()
     if (tannerWin) return tannerWin
@@ -38,6 +42,32 @@ export class WinConditions {
     return null
   }
   
+  /**
+   * Проверка победы Ктулху
+   */
+  checkCthulhuWin() {
+    const cthulhuPlayers = Array.from(this.game.room.players.values()).filter(p => {
+      if (p.role === 'game_master') return false
+      const role = this.game.room.getRole(p.role)
+      return role && role.id === 'cthulhu' && p.alive
+    })
+    
+    // Проверяем каждого живого Ктулху
+    for (const cthulhuPlayer of cthulhuPlayers) {
+      const roleInstance = this.game.room.gameEngine?.roleInstances?.get(cthulhuPlayer.id)
+      if (roleInstance && roleInstance.checkVictoryCondition && roleInstance.checkVictoryCondition()) {
+        return {
+          type: 'cthulhu',
+          message: `${cthulhuPlayer.name} (Ктулху) побеждает! Пережил 3 голосования. Все остальные проигрывают.`,
+          winners: [cthulhuPlayer],
+          losers: Array.from(this.game.room.players.values()).filter(p => p.id !== cthulhuPlayer.id && p.role !== 'game_master')
+        }
+      }
+    }
+    
+    return null
+  }
+
   /**
    * Проверка победы Неудачника
    */

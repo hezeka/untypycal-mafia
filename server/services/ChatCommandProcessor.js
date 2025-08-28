@@ -32,7 +32,8 @@ export class ChatCommandProcessor {
       'ш': ['whisper', 'w'],
       'помощь': ['help', 'h', '?'],
       'кто': ['who', 'список', 'list'],
-      'время': ['time', 'timer']
+      'время': ['time', 'timer'],
+      'публичные': ['public', 'комнаты', 'rooms']
     }
 
     for (const [cmd, aliases] of Object.entries(commands)) {
@@ -90,6 +91,9 @@ export class ChatCommandProcessor {
           
         case 'время':
           return await this.handleTimeCommand(sender)
+          
+        case 'публичные':
+          return await this.handlePublicRoomsCommand(sender)
           
         default:
           return { success: false, error: 'Команда не реализована' }
@@ -463,6 +467,7 @@ export class ChatCommandProcessor {
     
     helpText += '• `/помощь` - показать эту справку\n'
     helpText += '• `/кто` - список всех игроков\n'
+    helpText += '• `/публичные` - список доступных игр\n'
     
     if (this.room.gameEngine?.phaseTimer) {
       helpText += '• `/время` - показать оставшееся время\n'
@@ -612,6 +617,63 @@ export class ChatCommandProcessor {
     }
 
     return { success: true }
+  }
+
+  // ✅ КОМАНДА ПУБЛИЧНЫХ КОМНАТ
+  async handlePublicRoomsCommand(sender) {
+    // Получаем доступ к глобальным комнатам через импорт
+    const { getPublicRooms } = await import('../socket-server.js')
+    const publicRooms = getPublicRooms()
+
+    let roomsText = '🏠 **Публичные комнаты:**\n\n'
+    
+    if (publicRooms.length === 0) {
+      roomsText += '❌ Нет активных публичных комнат\n'
+      roomsText += 'Создайте свою игру первыми!'
+    } else {
+      roomsText += `📊 **Найдено комнат: ${publicRooms.length}**\n\n`
+      
+      publicRooms.forEach((room, index) => {
+        const phaseIcon = this.getPhaseIcon(room.phase)
+        const dayInfo = room.daysSurvived ? ` (день ${room.daysSurvived})` : ''
+        
+        roomsText += `**${index + 1}. ${room.name}** \`${room.id}\`\n`
+        roomsText += `${phaseIcon} Фаза: ${this.getPhaseDisplayName(room.phase)}${dayInfo}\n`
+        roomsText += `👑 Ведущий: ${room.hostName}\n`
+        roomsText += `👥 Игроки: ${room.alivePlayers}/${room.totalPlayers}\n\n`
+      })
+      
+      roomsText += '💡 **Присоединиться:** Введите код комнаты на главной странице'
+    }
+
+    const roomsMessage = {
+      id: Date.now(),
+      senderId: 'system',
+      senderName: 'Система',
+      text: roomsText,
+      type: MESSAGE_TYPES.SYSTEM,
+      timestamp: Date.now()
+    }
+
+    const socket = this.room.sockets.get(sender.id)
+    if (socket) {
+      socket.emit('new-message', { message: roomsMessage })
+    }
+
+    return { success: true }
+  }
+
+  // Получение иконки для фазы игры
+  getPhaseIcon(phase) {
+    const icons = {
+      [GAME_PHASES.SETUP]: '⚙️',
+      [GAME_PHASES.INTRODUCTION]: '👋',
+      [GAME_PHASES.NIGHT]: '🌙',
+      [GAME_PHASES.DAY]: '☀️',
+      [GAME_PHASES.VOTING]: '🗳️',
+      [GAME_PHASES.ENDED]: '🏁'
+    }
+    return icons[phase] || '❓'
   }
 
   // Отправка направленных событий шепота

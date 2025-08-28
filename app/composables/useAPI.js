@@ -49,6 +49,11 @@ export const useAPI = () => {
       return await apiCall('/api/rooms/public')
     },
 
+    // Получить роли комнаты
+    getRoomRoles: async (roomId) => {
+      return await apiCall(`/api/rooms/${roomId}/roles`)
+    },
+
     // Получить историю чата комнаты
     getChatHistory: async (roomId, playerId = null) => {
       const params = playerId ? `?playerId=${playerId}` : ''

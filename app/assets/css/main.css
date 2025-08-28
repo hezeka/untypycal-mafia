@@ -246,10 +246,10 @@ body {
 
 .main-content {
   flex: 1;
-  max-width: 1200px;
+  /* max-width: 1200px;
   margin: 0 auto;
-  padding: 32px;
-  width: 100%;
+  padding: 0 32px;
+  width: 100%; */
 }
 
 .content-layout {
@@ -1891,7 +1891,7 @@ body {
   }
 
   .main-content {
-    padding: 1rem;
+    padding: 0;
   }
   
   .players-grid {
