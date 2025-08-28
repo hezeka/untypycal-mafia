@@ -24,7 +24,7 @@
               <button @click="toggleSound" class="control-btn sound" :class="{ active: soundEnabled }">
               </button>
               
-              <div class="microphone-container">
+              <!-- <div class="microphone-container">
                 <button 
                   @click="toggleMicrophone" 
                   @mouseenter="showMicSettings = true"
@@ -44,7 +44,6 @@
                   </div>
                 </button>
                 
-                <!-- Settings Modal on hover -->
                 <SettingsModal 
                   v-if="showMicSettings"
                   @close="showMicSettings = false"
@@ -54,7 +53,7 @@
                 />
               </div>
               
-              <div class="control-separator"></div>
+              <div class="control-separator"></div> -->
               
               <div class="user-panel">
                 <div class="user-info">
