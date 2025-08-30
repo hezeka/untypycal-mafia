@@ -188,11 +188,19 @@ const availableRoles = computed(() => {
 
 // Методы
 const shouldShowRole = (player) => {
-  // Показываем роль если это текущий игрок, ведущий, игрок мертв, или игра закончена
-  return player.id === currentPlayer.value?.id || 
-         isGameMaster.value ||
-         !player.alive || 
-         gameState.room.phase === 'ended'
+  // Доверяем серверу - если роль пришла, значит её нужно показать
+  const shouldShow = player.role !== null && player.role !== undefined
+  
+  // Отладочная информация для мертвых игроков
+  if (!player.alive && !shouldShow) {
+    console.log(`🔍 Dead player ${player.name} role not shown:`, {
+      role: player.role,
+      alive: player.alive,
+      shouldShow
+    })
+  }
+  
+  return shouldShow
 }
 
 const getRoleName = (roleId) => {

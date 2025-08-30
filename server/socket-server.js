@@ -188,10 +188,16 @@ const handleJoinRoom = (socket, data) => {
     
     logger.info(`🎮 Player ${username} joined room ${roomCode}`)
     
-    // Отправляем данные игроку  
+    // ИСПРАВЛЕНО: Убираем дублирование - используем только getClientData
+    const roomData = room.getClientData(socket.id)
+    
+    console.log(`📊 Socket join-success for ${player.name}`)
+    console.log(`📊 Players with roles:`, roomData.players.map(p => `${p.name}: ${p.role} (alive: ${p.alive})`))
+    
     socket.emit('join-success', { 
-      room: room.getClientData(socket.id),
-      player: player 
+      room: roomData,
+      player: player
+      // playersStatus больше не нужен - вся информация уже в roomData.players
     })
     
     // Если игрок подключился во время ночной фазы, отправляем информацию о текущем ночном действии
@@ -221,8 +227,46 @@ const handleJoinRoom = (socket, data) => {
       }
     }
     
-    // Уведомляем остальных
-    room.broadcast(SOCKET_EVENTS.GAME_UPDATED, { room: room.getClientData() })
+    // Определяем, это новый игрок или переподключение по имени
+    const wasReconnection = Array.from(room.players.values())
+      .some(p => p.name.toLowerCase() === username.toLowerCase() && p.id !== socket.id)
+      
+    if (!wasReconnection) {
+      // Новый игрок - уведомляем всех
+      room.broadcastExcept('player-joined', { 
+        player: {
+          id: player.id,
+          name: player.name,
+          isHost: player.isHost,
+          connected: true
+        }
+      }, [socket.id])
+    } else {
+      // Переподключение - уведомляем об изменении статуса
+      room.broadcastExcept('player-reconnected', { 
+        playerId: player.id,
+        playerName: player.name
+      }, [socket.id])
+    }
+    
+    // ВАЖНО: Всегда отправляем актуальный статус подключения всем игрокам
+    // чтобы у всех была синхронизированная информация о том, кто онлайн
+    setTimeout(() => {
+      // Отправляем персонализированную информацию каждому игроку
+      room.sockets.forEach((socket, socketId) => {
+        const viewer = room.getPlayer(socketId)
+        if (viewer) {
+          socket.emit('players-status-sync', {
+            players: room.getSortedPlayers().map(p => ({
+              id: p.id,
+              name: p.name,
+              connected: p.connected,
+              role: room.shouldShowPlayerRole(p, viewer) ? p.role : undefined
+            }))
+          })
+        }
+      })
+    }, 150) // Увеличиваем задержку для надежности
     
     // Системное сообщение
     // room.addSystemMessage(`${player.name} присоединился к игре`) // Убираем чтобы не засорять чат
@@ -279,10 +323,15 @@ const handleSendMessage = async (socket, data) => {
       return sendError(socket, ERROR_CODES.PERMISSION_DENIED, 'Чат отключен в этой фазе')
     }
     
-    // Проверяем специфичные права для ночи (только оборотни)
+    // Проверяем специфичные права для ночи (только оборотни и Ктулху)
     if (room.gameState === GAME_PHASES.NIGHT && room.chatPermissions.werewolfChat) {
-      if (!room.isWerewolf(player.role)) {
-        return sendError(socket, ERROR_CODES.PERMISSION_DENIED, 'Ночью могут говорить только оборотни')
+      if (!room.isWerewolf(player.role) && player.role !== 'cthulhu') {
+        return sendError(socket, ERROR_CODES.PERMISSION_DENIED, 'Ночью могут говорить только оборотни и Ктулху')
+      }
+      
+      // Дополнительная проверка для Ктулху - только команды /приказ
+      if (player.role === 'cthulhu') {
+        return sendError(socket, ERROR_CODES.PERMISSION_DENIED, 'Ктулху может писать только команду /приказ')
       }
     }
     
@@ -482,14 +531,32 @@ const handleAdminAction = (socket, data) => {
       case 'kill':
         target.alive = false
         room.addSystemMessage(`${target.name} был убит администратором`, MESSAGE_TYPES.SYSTEM)
+        // НОВОЕ: Синхронизируем статус после админ убийства
+        room.syncPlayersStatus()
         break
       case 'revive':
         target.alive = true
         room.addSystemMessage(`${target.name} был воскрешен администратором`, MESSAGE_TYPES.SYSTEM)
+        // НОВОЕ: Синхронизируем статус после админ воскрешения
+        room.syncPlayersStatus()
         break
       case 'kick':
         room.removePlayer(targetId)
         room.addSystemMessage(`${target.name} был исключен из игры`, MESSAGE_TYPES.SYSTEM)
+        // НОВОЕ: Синхронизируем статус после кика игрока
+        room.syncPlayersStatus()
+        break
+      case 'change-role':
+        const { newRole } = data
+        if (!newRole) {
+          return sendError(socket, ERROR_CODES.VALIDATION_ERROR, 'Не указана новая роль')
+        }
+        
+        const oldRole = target.role
+        target.role = newRole
+        room.addSystemMessage(`${target.name}: роль изменена с ${oldRole} на ${newRole}`, MESSAGE_TYPES.SYSTEM)
+        // НОВОЕ: Синхронизируем статус после смены роли админом
+        room.syncPlayersStatus()
         break
       case 'next-phase':
         if (room.gameEngine) {
@@ -498,7 +565,8 @@ const handleAdminAction = (socket, data) => {
         break
     }
     
-    room.broadcast(SOCKET_EVENTS.GAME_UPDATED, { room: {} })
+    // Отправляем специфичное событие вместо полного обновления
+    room.broadcast('admin-action-completed', { action, targetId })
     
   } catch (error) {
     logger.error('Admin action error:', error)
@@ -520,6 +588,26 @@ const handleVoiceActivity = (socket, data) => {
   }
 }
 
+const handleRequestPlayersSync = (socket) => {
+  console.log('🔄 Players sync requested by', socket.id)
+  const room = getPlayerRoom(socket.id)
+  if (room) {
+    const viewer = room.getPlayer(socket.id)
+    if (viewer) {
+      // Отправляем актуальный статус всех игроков запрашивающему клиенту
+      socket.emit('players-status-sync', {
+        players: room.getSortedPlayers().map(p => ({
+          id: p.id,
+          name: p.name,
+          connected: p.connected,
+          role: room.shouldShowPlayerRole(p, viewer) ? p.role : undefined
+        }))
+      })
+      console.log('✅ Players sync sent to', socket.id)
+    }
+  }
+}
+
 const handleDisconnect = (socket) => {
   const room = getPlayerRoom(socket.id)
   if (room) {
@@ -533,6 +621,24 @@ const handleDisconnect = (socket) => {
         playerId: socket.id,
         playerName: player.name
       })
+      
+      // Синхронизируем статус подключения после отключения
+      setTimeout(() => {
+        // Отправляем персонализированную информацию каждому игроку
+        room.sockets.forEach((socket, socketId) => {
+          const viewer = room.getPlayer(socketId)
+          if (viewer) {
+            socket.emit('players-status-sync', {
+              players: room.getSortedPlayers().map(p => ({
+                id: p.id,
+                name: p.name,
+                connected: p.connected,
+                role: room.shouldShowPlayerRole(p, viewer) ? p.role : undefined
+              }))
+            })
+          }
+        })
+      }, 150)
       
       logger.info(`🔌 Player ${player.name} disconnected from room ${room.id}`)
     }
@@ -561,6 +667,7 @@ io.on('connection', (socket) => {
   socket.on(SOCKET_EVENTS.NIGHT_ACTION, (data) => handleNightAction(socket, data))
   socket.on(SOCKET_EVENTS.ADMIN_ACTION, (data) => handleAdminAction(socket, data))
   socket.on(SOCKET_EVENTS.VOICE_ACTIVITY, (data) => handleVoiceActivity(socket, data))
+  socket.on('request-players-sync', () => handleRequestPlayersSync(socket))
   
   socket.on('disconnect', () => handleDisconnect(socket))
 })
@@ -593,9 +700,78 @@ app.get('/api/rooms/:roomId', (req, res) => {
     return res.status(404).json({ error: 'Комната не найдена' })
   }
   
-  // Возвращаем данные комнаты для анонимного просмотра
-  const roomData = room.getClientData()
+  // ИСПРАВЛЕНО: Используем только getClientData(null) для анонимного просмотра
+  // Не переопределяем players - доверяем логике getClientData
+  const roomData = room.getClientData(null)
+  
+  console.log(`📊 API /rooms/${roomId} - returning data for anonymous viewer`)
+  console.log(`📊 Players with roles:`, roomData.players.map(p => `${p.name}: ${p.role} (alive: ${p.alive})`))
+  
   res.json(roomData)
+})
+
+// Получение полного состояния игры (включая ночные действия)
+app.get('/api/rooms/:roomId/game-state', (req, res) => {
+  const { roomId } = req.params
+  const { playerId } = req.query
+  
+  const room = rooms.get(roomId)
+  if (!room) {
+    return res.status(404).json({ error: 'Комната не найдена' })
+  }
+  
+  try {
+    // Базовые данные комнаты
+    const gameState = {
+      room: room.getClientData(playerId),
+      chat: [],
+      nightAction: {
+        active: false,
+        role: null,
+        timeLimit: 0,
+        endTime: null
+      }
+    }
+    
+    // Если игрок указан, добавляем персонализированные данные
+    if (playerId) {
+      const player = room.getPlayer(playerId)
+      if (player) {
+        gameState.player = {
+          id: player.id,
+          name: player.name,
+          role: player.role,
+          alive: player.alive,
+          isHost: player.isHost,
+          connected: player.connected
+        }
+        
+        // Добавляем информацию о текущем ночном действии
+        if (room.gameState === 'night' && room.gameEngine) {
+          const nightRoles = room.gameEngine.nightRoles || []
+          const currentNightActionIndex = room.gameEngine.nightActionIndex || 0
+          
+          if (currentNightActionIndex < nightRoles.length) {
+            const currentRole = nightRoles[currentNightActionIndex]
+            if (currentRole && player.role === currentRole.id && player.alive) {
+              gameState.nightAction = {
+                active: true,
+                role: currentRole.id,
+                timeLimit: 30,
+                endTime: (room.gameEngine.phaseStartTime || Date.now()) + (30 * 1000)
+              }
+            }
+          }
+        }
+      }
+    }
+    
+    res.json(gameState)
+    
+  } catch (error) {
+    logger.error('Get game state error:', error)
+    res.status(500).json({ error: 'Ошибка получения состояния игры' })
+  }
 })
 
 // Присоединение к комнате через HTTP (создание игрока)
@@ -627,13 +803,57 @@ app.post('/api/rooms/:roomId/join', (req, res) => {
     
     logger.info(`🎮 Player ${username} joined room ${roomId} via HTTP`)
     
-    // Уведомляем остальных через сокеты
-    room.broadcast(SOCKET_EVENTS.GAME_UPDATED, { room: room.getClientData() })
+    // Определяем, это новый игрок или переподключение
+    const wasReconnection = Array.from(room.players.values())
+      .some(p => p.name.toLowerCase() === username.toLowerCase() && p.id !== socketId)
+      
+    if (!wasReconnection) {
+      // Новый игрок - уведомляем всех
+      room.broadcast('player-joined', { 
+        player: {
+          id: player.id,
+          name: player.name,
+          isHost: player.isHost,
+          connected: true
+        }
+      })
+    } else {
+      // Переподключение - уведомляем об изменении статуса
+      room.broadcast('player-reconnected', { 
+        playerId: player.id,
+        playerName: player.name
+      })
+    }
+    
+    // Синхронизируем статус подключения всех игроков
+    setTimeout(() => {
+      // Отправляем персонализированную информацию каждому игроку
+      room.sockets.forEach((socket, socketId) => {
+        const viewer = room.getPlayer(socketId)
+        if (viewer) {
+          socket.emit('players-status-sync', {
+            players: room.getSortedPlayers().map(p => ({
+              id: p.id,
+              name: p.name,
+              connected: p.connected,
+              role: room.shouldShowPlayerRole(p, viewer) ? p.role : undefined
+            }))
+          })
+        }
+      })
+    }, 150)
     // room.addSystemMessage(`${player.name} присоединился к игре`) // Убираем чтобы не засорять чат
     
+    // ИСПРАВЛЕНО: Убираем дублирование - используем только getClientData
+    const roomData = room.getClientData(socketId)
+    
+    console.log(`📊 API /join - returning data for player ${player.name}`)
+    console.log(`📊 Players with roles:`, roomData.players.map(p => `${p.name}: ${p.role} (alive: ${p.alive})`))
+    
     res.json({
-      room: room.getClientData(socketId),
-      player: player
+      room: roomData,
+      player: player,
+      // playersStatus больше не нужен - вся информация уже в room.players
     })
     
   } catch (error) {
@@ -796,8 +1016,12 @@ app.post('/api/rooms/:roomId/roles', (req, res) => {
       return res.status(400).json({ error: 'Неверное действие. Используйте add или remove' })
     }
     
-    // Уведомляем всех игроков об изменении
-    room.broadcast(SOCKET_EVENTS.GAME_UPDATED, { room: room.getClientData() })
+    // Уведомляем об изменении ролей более легким событием
+    room.broadcast('roles-updated', { 
+      selectedRoles: room.selectedRoles,
+      action,
+      roleId 
+    })
     
     res.json({
       success: true,
@@ -876,8 +1100,12 @@ app.put('/api/rooms/:roomId/phase', async (req, res) => {
     
     logger.info(`🎮 Phase action '${action}' by ${player.name} in room ${roomId}`)
     
-    // Уведомляем всех игроков об изменении
-    room.broadcast(SOCKET_EVENTS.GAME_UPDATED, { room: room.getClientData() })
+    // Уведомляем о действии с фазой без отправки полного состояния
+    room.broadcast('phase-action-completed', { 
+      action,
+      result: result.message,
+      newPhase: room.gameState
+    })
     
     res.json({
       ...result,

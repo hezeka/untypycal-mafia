@@ -61,7 +61,7 @@ const gameState = reactive({
 
 export const useGame = () => {
   const { socket, isConnected, emit, on, getSocketId } = useSocket()
-  const { getRoomData, joinRoom: apiJoinRoom, getChatHistory, manageRole, managePhase, nightAction } = useAPI()
+  const { getRoomData, joinRoom: apiJoinRoom, getChatHistory, manageRole, managePhase, nightAction, getGameState } = useAPI()
   const timer = useTimer()
   const router = useRouter()
   const loading = ref(false)
@@ -92,13 +92,14 @@ export const useGame = () => {
         return false
       }
       
-      // Определяем оборотней по ролям (как на сервере в GameRoom.js)
+      // Определяем оборотней и Ктулху по ролям (как на сервере в GameRoom.js)
       const werewolfRoles = [
         'werewolf', 'werewolf_2', 'werewolf_3',
         'mystic_wolf', 'alpha_wolf', 'dream_wolf'
       ]
       
-      return werewolfRoles.includes(playerRole)
+      // Ктулху тоже может писать в ночной фазе
+      return werewolfRoles.includes(playerRole) || playerRole === 'cthulhu'
     }
     
     // В остальных случаях используем базовое право canChat
@@ -134,17 +135,19 @@ export const useGame = () => {
     emit('create-room', { username, isPrivate, hostAsObserver })
   }
   
-  const joinRoom = async (roomCode, username) => {
+  const joinRoom = async (roomCode, username, skipRoomDataCheck = false) => {
     loading.value = true
     
     try {
-      // Сначала получаем данные комнаты для проверки существования
-      console.log('🔄 Checking room exists:', roomCode)
-      const roomData = await getRoomData(roomCode)
-      console.log('✅ Room found:', roomData)
-      
-      // Обновляем состояние комнаты
-      Object.assign(gameState.room, roomData)
+      // Получаем данные комнаты только если не пропускаем проверку
+      if (!skipRoomDataCheck) {
+        console.log('🔄 Checking room exists:', roomCode)
+        const roomData = await getRoomData(roomCode)
+        console.log('✅ Room found:', roomData)
+        
+        // Обновляем состояние комнаты
+        Object.assign(gameState.room, roomData)
+      }
       
       // Если сокет подключен, присоединяемся через HTTP API
       if (isConnected.value && getSocketId()) {
@@ -152,9 +155,14 @@ export const useGame = () => {
         const result = await apiJoinRoom(roomCode, username, getSocketId())
         console.log('✅ Joined successfully:', result)
         
-        // Обновляем состояние с персонализированными данными
+        // ИСПРАВЛЕНО: Обновляем состояние с персонализированными данными
+        // Больше не нужен playersStatus - вся информация уже в result.room.players
         Object.assign(gameState.room, result.room)
         Object.assign(gameState.player, result.player)
+        
+        console.log('✅ HTTP API join completed. Players with roles:', 
+          gameState.room.players.map(p => `${p.name}: ${p.role} (alive: ${p.alive})`))
+        
         gameState.connected = true
         
         // Регистрируем сокет в комнате
@@ -177,6 +185,70 @@ export const useGame = () => {
     }
   }
   
+  // Обновление прав чата по фазе игры
+  const updateChatPermissions = (phase) => {
+    let newPermissions = {}
+    
+    switch (phase) {
+      case 'setup':
+      case 'introduction':
+        newPermissions = {
+          canChat: true,
+          canSeeAll: true,
+          canWhisper: true,
+          werewolfChat: false
+        }
+        break
+        
+      case 'night':
+        newPermissions = {
+          canChat: true,           // Оборотни могут говорить
+          canSeeAll: false,        // Обычные не видят сообщения
+          canWhisper: true,        // Личные сообщения разрешены
+          werewolfChat: true       // Только оборотни видят ночной чат
+        }
+        break
+        
+      case 'day':
+        newPermissions = {
+          canChat: true,
+          canSeeAll: true,
+          canWhisper: true,
+          werewolfChat: false
+        }
+        break
+        
+      case 'voting':
+        newPermissions = {
+          canChat: false,          // Чат полностью отключен
+          canSeeAll: false,
+          canWhisper: true,        // Только шепот ведущему
+          werewolfChat: false
+        }
+        break
+        
+      case 'ended':
+        newPermissions = {
+          canChat: true,
+          canSeeAll: true,
+          canWhisper: true,
+          werewolfChat: false
+        }
+        break
+        
+      default:
+        newPermissions = {
+          canChat: true,
+          canSeeAll: true,
+          canWhisper: true,
+          werewolfChat: false
+        }
+    }
+    
+    gameState.room.chatPermissions = newPermissions
+    console.log(`💬 Chat permissions updated for phase ${phase}:`, newPermissions)
+  }
+
   // Безопасный emit с проверкой подключения
   const safeEmit = (event, data) => {
     if (!isConnected.value) {
@@ -328,7 +400,77 @@ export const useGame = () => {
     }
   }
 
-  // Новая функция для загрузки данных комнаты через HTTP
+  // Загрузка полного состояния игры через HTTP (включая ночные действия)
+  const loadGameState = async (roomId, playerId = null, options = {}) => {
+    // Предотвращаем частые загрузки состояния
+    const now = Date.now()
+    const lastLoad = loadGameState.lastCall || 0
+    if (!options.force && now - lastLoad < 1000) {
+      console.log('⚠️ Skipping game state load - too frequent')
+      return
+    }
+    loadGameState.lastCall = now
+    
+    loading.value = true
+    
+    try {
+      console.log('🔄 Loading full game state for:', roomId, 'player:', playerId)
+      const fullGameState = await getGameState(roomId, playerId)
+      console.log('✅ Full game state loaded:', fullGameState)
+      
+      // Более осторожное обновление состояния комнаты
+      if (fullGameState.room) {
+        // Сохраняем текущие права чата если они не изменились
+        const currentChatPerms = gameState.room.chatPermissions
+        Object.assign(gameState.room, fullGameState.room)
+        
+        // Восстанавливаем права чата если фаза не изменилась
+        if (currentChatPerms && gameState.room.phase === fullGameState.room.phase) {
+          gameState.room.chatPermissions = currentChatPerms
+          console.log('💬 Preserved current chat permissions')
+        }
+      }
+      
+      // Обновляем состояние игрока, если предоставлено
+      if (fullGameState.player) {
+        Object.assign(gameState.player, fullGameState.player)
+      }
+      
+      // Обновляем состояние ночного действия только если оно изменилось
+      if (fullGameState.nightAction) {
+        const currentNightAction = gameState.nightAction
+        const newNightAction = fullGameState.nightAction
+        
+        // Обновляем только если действительно есть изменения
+        if (currentNightAction.active !== newNightAction.active || 
+            currentNightAction.role !== newNightAction.role) {
+          Object.assign(gameState.nightAction, newNightAction)
+          console.log('🌙 Updated night action state')
+          
+          // Устанавливаем таймер, если есть активное ночное действие
+          if (newNightAction.active && newNightAction.endTime) {
+            timer.setEndTime(newNightAction.endTime)
+          }
+        }
+      }
+      
+      return fullGameState
+      
+    } catch (error) {
+      console.log(error.message)
+      if (error.message === 'Комната не найдена') {
+        console.error('❌ Room not found, redirecting to home...')
+        router.push('/')
+        return
+      }
+      console.error('❌ Failed to load game state:', error)
+      throw error
+    } finally {
+      loading.value = false
+    }
+  }
+
+  // Новая функция для загрузки данных комнаты через HTTP (обратная совместимость)
   const loadRoomData = async (roomId) => {
     loading.value = true
     
@@ -457,19 +599,211 @@ export const useGame = () => {
       on('join-success', (data) => {
         console.log('✅ Joined room:', data.room.id)
         loading.value = false
+        // ИСПРАВЛЕНО: Больше не дублируем логику синхронизации
+        // Все данные уже корректно в data.room.players
         Object.assign(gameState.room, data.room)
         Object.assign(gameState.player, data.player)
+        
+        console.log('✅ Socket join-success completed. Players with roles:', 
+          gameState.room.players.map(p => `${p.name}: ${p.role} (alive: ${p.alive})`))
+        
         gameState.connected = true
         
         // Автоматический переход на игровую страницу
         router.push(`/game/${data.room.id}`)
       })
       
-      // Обновления игры
+      // Легкие обновления для присоединения игроков
+      on('player-joined', (data) => {
+        console.log('👋 Player joined:', data.player)
+        // Добавляем или обновляем игрока в списке только если он еще не существует
+        const existingPlayerIndex = gameState.room.players.findIndex(p => p.id === data.player.id)
+        if (existingPlayerIndex >= 0) {
+          // Обновляем только статус подключения существующего игрока
+          gameState.room.players[existingPlayerIndex].connected = data.player.connected
+          console.log('✅ Updated existing player connection status')
+        } else {
+          // Добавляем нового игрока только если его действительно нет
+          const playerExists = gameState.room.players.some(p => p.name === data.player.name)
+          if (!playerExists) {
+            gameState.room.players.push(data.player)
+            console.log('✅ Added new player to list')
+          } else {
+            console.log('⚠️ Player already exists, skipping duplicate')
+          }
+        }
+      })
+      
+      // Переподключение игроков
+      on('player-reconnected', (data) => {
+        console.log('🔄 Player reconnected:', data.playerName)
+        // Обновляем статус игрока на подключенный
+        const existingPlayer = gameState.room.players.find(p => p.id === data.playerId)
+        if (existingPlayer) {
+          existingPlayer.connected = true
+          console.log('✅ Updated player reconnection status')
+        }
+      })
+      
+      // Синхронизация статуса подключения всех игроков
+      on('players-status-sync', (data) => {
+        console.log('🔄 Players status sync received:', data.players.length, 'players')
+        
+        // Обновляем статус игроков - только те поля которые пришли с сервера
+        // Сохраняем важные поля которые НЕ приходят в sync: isMe, isHost, sequentialId
+        data.players.forEach(serverPlayer => {
+          const localPlayer = gameState.room.players.find(p => p.id === serverPlayer.id)
+          if (localPlayer) {
+            // Обновляем имя только если изменилось (обычно не меняется)
+            if (serverPlayer.name !== undefined && serverPlayer.name !== localPlayer.name) {
+              localPlayer.name = serverPlayer.name
+              console.log(`✅ Updated player name: ${localPlayer.name} -> ${serverPlayer.name}`)
+            }
+            
+            // Обновляем статус подключения только если изменился
+            if (serverPlayer.connected !== undefined && serverPlayer.connected !== localPlayer.connected) {
+              localPlayer.connected = serverPlayer.connected
+              console.log(`✅ Updated ${serverPlayer.name} connection:`, serverPlayer.connected)
+            }
+            
+            // Обновляем статус alive только если изменился
+            if (serverPlayer.alive !== undefined && serverPlayer.alive !== localPlayer.alive) {
+              localPlayer.alive = serverPlayer.alive
+              console.log(`✅ Updated ${serverPlayer.name} alive status:`, serverPlayer.alive)
+            }
+            
+            // Обновляем роль только если она предоставлена и отличается
+            if (serverPlayer.role !== undefined && serverPlayer.role !== localPlayer.role) {
+              localPlayer.role = serverPlayer.role
+              console.log(`✅ Updated ${serverPlayer.name} role:`, serverPlayer.role)
+            }
+            
+            // НЕ ТРОГАЕМ: isMe, isHost, sequentialId - эти поля остаются как были
+          }
+        })
+      })
+      
+      // Отключение игроков
+      on('player-disconnected', (data) => {
+        console.log('🔴 Player disconnected:', data.playerName)
+        // Обновляем статус игрока на отключенный
+        const existingPlayer = gameState.room.players.find(p => p.id === data.playerId)
+        if (existingPlayer) {
+          existingPlayer.connected = false
+          console.log('✅ Updated player disconnection status')
+        }
+      })
+      
+      // Обновления ролей
+      on('roles-updated', (data) => {
+        console.log('🎭 Roles updated:', data)
+        gameState.room.selectedRoles = data.selectedRoles
+      })
+      
+      // Действия администратора
+      on('admin-action-completed', (data) => {
+        console.log('⚡ Admin action completed:', data)
+        // При необходимости загружаем полное состояние только для критических действий
+        if (['kick'].includes(data.action)) {
+          // Только кик требует полной перезагрузки
+          loadGameState(gameState.room.id, gameState.player.id)
+        }
+        // Для kill/revive просто обновим состояние через специальное событие
+      })
+      
+      // Действия с фазами
+      on('phase-action-completed', (data) => {
+        console.log('⚡ Phase action completed:', data)
+        if (data.newPhase) {
+          gameState.room.phase = data.newPhase
+        }
+      })
+      
+      // Результаты ночи
+      on('night-results-announced', (data) => {
+        console.log('🌅 Night results announced:', data)
+        // Можем обновить состояние игроков если нужно
+      })
+      
+      // Окончание игры
+      on('game-ended', (data) => {
+        console.log('🏆 Game ended:', data)
+        gameState.room.phase = data.phase
+        gameState.room.gameResult = data.result
+      })
+      
+      // Сброс комнаты (новая игра)
+      on('room-reset', (data) => {
+        console.log('🔄 Room reset:', data.message)
+        
+        // Сбрасываем состояние игры
+        gameState.room.phase = 'setup'
+        gameState.room.gameResult = null
+        gameState.room.gameStartTime = null
+        gameState.room.gameEndTime = null
+        gameState.room.daysSurvived = 0
+        gameState.room.civiliansKilled = 0
+        gameState.room.chatStats = {}
+        
+        // Очищаем ночное состояние
+        gameState.nightAction = {
+          active: false,
+          role: null,
+          result: null
+        }
+        
+        // Очищаем состояние голосования
+        gameState.voting = {
+          active: false,
+          myVote: null,
+          results: {}
+        }
+        
+        // Сбрасываем состояние всех игроков (очищаем роли, восстанавливаем alive)
+        gameState.room.players.forEach(player => {
+          if (player.role !== 'game_master') {
+            player.role = null
+            player.alive = true
+          }
+        })
+        
+        // Сбрасываем роли в комнате
+        gameState.room.roles = []
+        gameState.room.centerCards = 0
+        
+        console.log('✅ Game state reset to setup phase')
+      })
+      
+      // Обновления игры - только для критических изменений состояния
       on('game-updated', (data) => {
-        console.log('🔄 Game updated:', data)
+        console.log('🔄 Game updated (critical):', data)
+        
+        if (data.reason === 'roles-assigned') {
+          console.log('🎭 Roles assigned update received')
+          // При раздаче ролей обновляем полное состояние
+          if (data.room) {
+            Object.assign(gameState.room, data.room)
+            console.log('✅ Roles updated for all players:', gameState.room.players.map(p => `${p.name}: ${p.role}`))
+          }
+          
+          // УБРАНО: избыточная загрузка данных
+          // Роли уже корректно обновлены в data.room выше
+          return
+        }
+        
         if (data.room) {
+          // Сохраняем важные текущие состояния перед обновлением
+          const currentChatPerms = gameState.room.chatPermissions
+          const currentNightAction = gameState.nightAction
+          
           Object.assign(gameState.room, data.room)
+          
+          // Восстанавливаем права чата если фаза не изменилась
+          if (currentChatPerms && gameState.room.phase === data.room.phase) {
+            gameState.room.chatPermissions = currentChatPerms
+            console.log('💬 Preserved chat permissions during game-updated')
+          }
+          
           console.log('✅ Room state updated:', gameState.room)
           
           // Проверяем таймер в данных комнаты
@@ -484,11 +818,36 @@ export const useGame = () => {
         }
       })
       
+      // Персональное назначение роли
+      on('role-assigned', (data) => {
+        console.log('🎭 Personal role assigned:', data)
+        // Обновляем роль игрока немедленно
+        if (data.playerId === gameState.player.id || data.playerId === getSocketId()) {
+          gameState.player.role = data.role
+          console.log(`✅ My role assigned: ${data.role}`)
+        }
+      })
+      
+      // Раскрытие роли при смерти
+      on('role-revealed', (data) => {
+        console.log('💀 Role revealed:', data)
+        // Обновляем локальное состояние игрока
+        const player = gameState.room.players.find(p => p.id === data.playerId)
+        if (player) {
+          player.alive = false // Обновляем статус если еще не обновлен
+          console.log(`💀 ${data.playerName} role revealed: ${data.roleName}`)
+        }
+      })
+      
       // Смена фазы
       on('phase-changed', (data) => {
         console.log('🔄 Phase changed:', data)
+        const oldPhase = gameState.room.phase
         gameState.room.phase = data.phase
         gameState.voting.myVote = null
+        
+        // Обновляем права чата в зависимости от новой фазы
+        updateChatPermissions(data.phase)
         
         // Очищаем состояние ночных действий при смене фазы (кроме night)
         if (data.phase !== 'night') {
@@ -506,6 +865,9 @@ export const useGame = () => {
           console.log('❌ No phase timer, deactivating')
           timer.setEndTime(null)
         }
+        
+        // УБРАНО: избыточное обновление данных при смене фазы
+        // Теперь роли корректно синхронизируются через единую логику getClientData
       })
       
       // Ночные действия
@@ -538,6 +900,54 @@ export const useGame = () => {
         
         // Можно деактивировать интерфейс ночного действия
         gameState.nightAction.active = false
+      })
+      
+      // Событие завершения хода игрока (скрывает кнопки действий)
+      on('night-turn-ended', (data) => {
+        console.log('🌙 Night turn ended for player:', data.playerId)
+        // Скрываем кнопки действий если это наш ход закончился
+        if (data.playerId === currentPlayer.value?.id) {
+          gameState.nightAction.active = false
+          console.log('🌙 Hiding night action buttons - turn ended')
+        }
+      })
+      
+      // Автозаполнение чата
+      on('auto-fill-chat', (data) => {
+        console.log('📝 Auto-filling chat:', data.command)
+        // Найдем компонент чата и заполним его
+        // Это событие обрабатывается в GameChat.vue
+      })
+      
+      // Приказ от Ктулху
+      on('cthulhu-order', (data) => {
+        console.log('🐙 Received Cthulhu order:', data)
+        
+        // Добавляем предупреждающее сообщение
+        gameState.chat.push({
+          id: `cthulhu-warning-${Date.now()}`,
+          type: 'cthulhu-warning',
+          senderId: 'system',
+          senderName: 'Система',
+          message: data.warning,
+          timestamp: Date.now(),
+          isSystemMessage: true,
+          specialType: 'cthulhu-warning'
+        })
+        
+        // Добавляем сам приказ через небольшую задержку
+        setTimeout(() => {
+          gameState.chat.push({
+            id: `cthulhu-order-${Date.now()}`,
+            type: 'cthulhu-order',
+            senderId: 'system',
+            senderName: data.from,
+            message: `📜 Приказ: ${data.message}`,
+            timestamp: Date.now(),
+            isSystemMessage: true,
+            specialType: 'cthulhu-order'
+          })
+        }, 1000)
       })
       
       // Чат
@@ -693,6 +1103,7 @@ export const useGame = () => {
     getPhaseInfo,
     initSocketListeners,
     loadRoomData,
+    loadGameState,
     loadChatHistory,
     cleanup,
     

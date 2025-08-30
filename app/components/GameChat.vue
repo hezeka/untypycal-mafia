@@ -73,18 +73,30 @@
 </template>
 
 <script setup>
-import { ref, computed, nextTick, watch } from 'vue'
+import { ref, computed, nextTick, watch, onMounted } from 'vue'
 import { useGame } from '~/composables/useGame'
+import { useSocket } from '~/composables/useSocket'
 import { useSound } from '~/composables/useSound'
 import { getAllRoles } from '../../shared/rolesRegistry.js'
 
 const { gameState, canChat, sendMessage: sendGameMessage } = useGame()
 const { playSound } = useSound()
+const { socket } = useSocket()
 
 // Функция для установки текста в инпут (для команд шепота)
 const setInputText = (text) => {
   messageText.value = text
 }
+
+// Обработка автозаполнения чата
+onMounted(() => {
+  if (socket.value) {
+    socket.value.on('auto-fill-chat', (data) => {
+      console.log('📝 Auto-filling chat in GameChat:', data.command)
+      setInputText(data.command)
+    })
+  }
+})
 
 const messageText = ref('')
 const messagesContainer = ref(null)

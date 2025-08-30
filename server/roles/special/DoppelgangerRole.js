@@ -1,5 +1,5 @@
 import { BaseRole } from '../BaseRole.js'
-import { getRole } from '../rolesList.js'
+import { getRole } from '../../utils/gameHelpers.js'
 
 export class DoppelgangerRole extends BaseRole {
   constructor() {
@@ -31,53 +31,59 @@ export class DoppelgangerRole extends BaseRole {
       return { error: 'Недопустимая цель' }
     }
     
-    // Копируем роль
+    // Сохраняем информацию о копировании, но пока НЕ меняем роль
     const oldRole = player.role
-    player.role = target.role
+    const targetRole = target.role
     player.copiedFrom = target.id
     
-    // Меняем команду согласно новой роли
-    const roleInfo = room.getRoleInfo(target.role)
-    if (roleInfo) {
-      // Логика смены команды будет обработана в GameEngine
-    }
+    const roleInfo = getRole(targetRole)
     
-    // Если у скопированной роли есть ночное действие, выполняем его
-    const roleInstance = getRole(target.role)
-    if (roleInstance && roleInstance.hasNightAction) {
+    // Если у скопированной роли есть ночное действие, выполняем его автоматически
+    if (roleInfo && roleInfo.hasNightAction) {
       try {
-        const result = await roleInstance.executeNightAction(gameEngine, player, { type: 'auto' })
-        return {
-          success: true,
-          message: `Вы скопировали роль ${target.name}: ${roleInfo?.name || target.role}`,
-          data: {
-            oldRole,
-            newRole: target.role,
-            roleInfo,
-            actionResult: result
+        // Получаем обработчик роли из rolesList.js
+        const { getRoleHandler } = await import('../rolesList.js')
+        const roleHandler = getRoleHandler(targetRole)
+        
+        if (roleHandler) {
+          const autoResult = await roleHandler(gameEngine, player, { type: 'auto' })
+          
+          return {
+            success: true,
+            message: `Вы скопировали роль ${target.name}: ${roleInfo.name || targetRole}`,
+            data: {
+              oldRole,
+              newRole: targetRole,
+              roleInfo,
+              actionResult: autoResult,
+              changeRoleAfterAction: true // Флаг для GameEngine
+            }
           }
         }
       } catch (error) {
         return {
           success: true,
-          message: `Вы скопировали роль ${target.name}: ${roleInfo?.name || target.role}`,
+          message: `Вы скопировали роль ${target.name}: ${roleInfo.name || targetRole}`,
           data: {
             oldRole,
-            newRole: target.role,
+            newRole: targetRole,
             roleInfo,
-            actionError: error.message
+            actionError: error.message,
+            changeRoleAfterAction: true // Флаг для GameEngine
           }
         }
       }
     }
     
+    // Если у роли нет ночного действия, просто завершаем
     return {
       success: true,
-      message: `Вы скопировали роль ${target.name}: ${roleInfo?.name || target.role}`,
+      message: `Вы скопировали роль ${target.name}: ${roleInfo?.name || targetRole}`,
       data: {
         oldRole,
-        newRole: target.role,
-        roleInfo
+        newRole: targetRole,
+        roleInfo,
+        changeRoleAfterAction: true // Флаг для GameEngine
       }
     }
   }

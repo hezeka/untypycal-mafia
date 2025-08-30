@@ -47,6 +47,24 @@ export class GameRoom {
     }
   }
 
+  // ✅ ПОЛУЧЕНИЕ ПРАВ ЧАТА ДЛЯ КОНКРЕТНОГО ИГРОКА
+  getPlayerChatPermissions(player) {
+    if (!player) return { canChat: false, canSeeAll: false, canWhisper: false, werewolfChat: false }
+    
+    // Наблюдатели имеют ограниченные права
+    if (player.role === 'observer' || player.isObserver) {
+      return {
+        canChat: false,        // Наблюдатели не могут писать
+        canSeeAll: true,       // Но видят все общие сообщения
+        canWhisper: false,     // Не могут шептать
+        werewolfChat: false    // Не видят ночной чат оборотней
+      }
+    }
+    
+    // Для остальных игроков используем общие права
+    return this.chatPermissions
+  }
+
   // ✅ ОБНОВЛЕНИЕ ПРАВ ЧАТА ПО ФАЗАМ
   updateChatPermissions() {
     switch (this.gameState) {
@@ -140,7 +158,63 @@ export class GameRoom {
     }
     
     this.players.set(playerId, player)
+    
+    // Если игра уже началась и у игрока нет роли, попробуем назначить ее
+    if (this.gameState !== GAME_PHASES.SETUP && !player.role && !player.isHost) {
+      this.assignRoleToNewPlayer(player)
+    }
+    
     return player
+  }
+  
+  // Назначает роль новому игроку, присоединившемуся к уже запущенной игре
+  assignRoleToNewPlayer(player) {
+    // Все поздние присоединения становятся наблюдателями
+    console.log(`👁️ Late-joining player ${player.name} becomes observer`)
+    player.role = 'observer'
+    player.alive = false // Наблюдатели не участвуют в голосовании и не имеют прав игрока
+    player.isObserver = true // Дополнительный флаг для удобства
+  }
+  
+  // Уведомляет о смерти игрока с раскрытием роли
+  announcePlayerDeath(player, cause = 'killed') {
+    if (!player || !player.role) {
+      console.log(`⚠️ Cannot announce death: player=${!!player}, role=${player?.role}`)
+      return
+    }
+    
+    console.log(`💀 Announcing death: ${player.name} (alive: ${player.alive} -> false, role: ${player.role})`)
+    
+    const roleInfo = this.getRoleInfo(player.role)
+    const roleName = roleInfo?.name || player.role
+    
+    let message = ''
+    switch (cause) {
+      case 'night':
+        message = `💀 ${player.name} был убит ночью. Он был ${roleName}.`
+        break
+      case 'voting':
+        message = `🗳️ ${player.name} был исключен голосованием. Он был ${roleName}.`
+        break
+      case 'hunter':
+        message = `🏹 ${player.name} был застрелен охотником. Он был ${roleName}.`
+        break
+      default:
+        message = `💀 ${player.name} погиб. Он был ${roleName}.`
+    }
+    
+    console.log(`💀 Player death announced: ${player.name} (${roleName}), alive status: ${player.alive}`)
+    this.addSystemMessage(message)
+    
+    // Отправляем специальное событие раскрытия роли
+    this.broadcast('role-revealed', {
+      playerId: player.id,
+      playerName: player.name,
+      role: player.role,
+      roleName: roleName,
+      cause: cause,
+      alive: player.alive // Добавляем статус для отладки
+    })
   }
   
   removePlayer(playerId) {
@@ -243,7 +317,7 @@ export class GameRoom {
 
     this.chat.push(message)
     
-    // Отправляем всем подключенным
+    // Отправляем всем подключенным (без дополнительного game-updated)
     this.broadcast('new-message', { message })
     
     return message
@@ -292,19 +366,28 @@ export class GameRoom {
 
   // ✅ ПРАВА НА ПРОСМОТР РОЛЕЙ ДРУГИХ ИГРОКОВ
   shouldShowPlayerRole(targetPlayer, viewerPlayer) {
-    if (!viewerPlayer || !targetPlayer) return false
+    if (!targetPlayer) return false
     
-    // В setup фазе роли не показываются
+    // В setup фазе роли не показываются никому
     if (this.gameState === GAME_PHASES.SETUP) return false
 
     // В фазе ended все роли показываются всем
     if (this.gameState === GAME_PHASES.ENDED) return true
 
-    // Свою роль видишь всегда
+    // ВАЖНО: Роли мертвых игроков видят ВСЕ (включая анонимных пользователей)
+    if (targetPlayer.alive === false) return true
+    
+    // Если нет информации о смотрящем игроке (анонимный просмотр), больше ничего не показываем
+    if (!viewerPlayer) return false
+
+    // Свою роль видишь всегда (если она есть)
     if (targetPlayer.id === viewerPlayer.id) return true
 
     // game_master видит все роли
     if (viewerPlayer.role === 'game_master') return true
+
+    // Наблюдатели видят только роли мертвых игроков (уже проверено выше)
+    if (viewerPlayer.role === 'observer' || viewerPlayer.isObserver) return false
 
     // Оборотни видят других оборотней (после setup)
     if (this.isWerewolf(viewerPlayer.role) && this.isWerewolf(targetPlayer.role)) {
@@ -325,7 +408,7 @@ export class GameRoom {
     }
     
     const voter = this.getPlayer(voterId)
-    if (!voter || !voter.alive || voter.role === 'game_master') {
+    if (!voter || !voter.alive || voter.role === 'game_master' || voter.role === 'observer' || voter.isObserver) {
       throw new Error('Игрок не может голосовать')
     }
     
@@ -339,9 +422,9 @@ export class GameRoom {
   checkVotingCompletion() {
     if (!this.votingActive) return
     
-    // Считаем всех живых игроков (кроме game_master)
+    // Считаем всех живых игроков (кроме game_master и наблюдателей)
     const eligibleVoters = Array.from(this.players.values())
-      .filter(p => p.alive && p.role !== 'game_master')
+      .filter(p => p.alive && p.role !== 'game_master' && p.role !== 'observer' && !p.isObserver)
     
     const votesCount = this.votes.size
     
@@ -488,6 +571,26 @@ export class GameRoom {
       }
     }
   }
+
+  // Синхронизация статуса и ролей игроков для всех подключенных клиентов
+  syncPlayersStatus() {
+    console.log('🔄 Syncing players status for all connected clients...')
+    this.sockets.forEach((socket, socketId) => {
+      const viewer = this.getPlayer(socketId)
+      if (viewer) {
+        socket.emit('players-status-sync', {
+          players: this.getSortedPlayers().map(p => ({
+            id: p.id,
+            name: p.name,
+            connected: p.connected,
+            alive: p.alive,
+            role: this.shouldShowPlayerRole(p, viewer) ? p.role : undefined
+          }))
+        })
+      }
+    })
+    console.log('✅ Players status synced for all clients')
+  }
   
   getRoleInfo(roleId) {
     return getRoleInfo(roleId)
@@ -505,7 +608,7 @@ export class GameRoom {
       phase: this.gameState,
       selectedRoles: this.selectedRoles,
       centerCards: this.centerCards.length,
-      chatPermissions: this.chatPermissions,
+      chatPermissions: player ? this.getPlayerChatPermissions(player) : this.chatPermissions,
       votingActive: this.votingActive,
       gameResult: this.gameResult,
       votingRounds: this.votingRounds,
@@ -546,6 +649,8 @@ export class GameRoom {
         player.messageCount = 0
         player.whisperCount = 0
       }
+      // Сбрасываем флаг использования команды Ктулху
+      player.cthulhuOrderUsedTonight = false
     }
     
     // Сбрасываем игровой движок

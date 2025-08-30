@@ -24,7 +24,7 @@ const SOUNDS = {
   'notification': '/sounds/notification.mp3',
   
   // Специальные события
-  'night-turn': '/sounds/notification.mp3', // Используем notification для ночной очереди
+  'night-turn': '/sounds/power.mp3', // Используем notification для ночной очереди
   'voting-start': '/sounds/voting.mp3',      // Используем voting для начала голосования
   'night-action': '/sounds/notification.mp3', // Клик по ночным кнопкам
 }

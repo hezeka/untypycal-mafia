@@ -1,4 +1,6 @@
 import { getRole as getSharedRole, getAllRoles } from '../utils/gameHelpers.js'
+import { CthulhuRole } from './special/CthulhuRole.js'
+import { DoppelgangerRole } from './special/DoppelgangerRole.js'
 
 /**
  * Получение информации о роли
@@ -91,6 +93,15 @@ export const executeRoleAction = async (gameEngine, player, action) => {
 }
 
 /**
+ * Экспорт обработчика роли (для использования в роли Доппельгангера)
+ */
+export { getRoleHandler }
+
+// Инициализируем экземпляры классов ролей
+const cthulhuRole = new CthulhuRole()
+const doppelgangerRole = new DoppelgangerRole()
+
+/**
  * Получение обработчика роли
  */
 const getRoleHandler = (roleId) => {
@@ -106,8 +117,8 @@ const getRoleHandler = (roleId) => {
     bodyguard: handleBodyguard,
     hunter: handleHunter,
     insomniac: handleInsomniac,
-    doppelganger: handleDoppelganger,
-    cthulhu: handleCthulhu,
+    doppelganger: (gameEngine, player, action) => doppelgangerRole.executeNightAction(gameEngine, player, action),
+    cthulhu: (gameEngine, player, action) => cthulhuRole.executeNightAction(gameEngine, player, action),
     prostitute: handleProstitute,
     werewolf_2: handleWerewolf,
     werewolf_3: handleWerewolf
@@ -316,27 +327,6 @@ const handleMinion = async (gameEngine, player, action) => {
   }
 }
 
-const handleDoppelganger = async (gameEngine, player, action) => {
-  const { targetId } = action
-  
-  if (!targetId) {
-    return { error: 'Выберите игрока для копирования' }
-  }
-  
-  const target = gameEngine.room.getPlayer(targetId)
-  if (!target || target.id === player.id) {
-    return { error: 'Недопустимая цель' }
-  }
-  
-  // Копируем роль
-  player.role = target.role
-  
-  return {
-    success: true,
-    message: `Вы скопировали роль ${target.name}: ${getRoleInfo(target.role)?.name || target.role}`,
-    data: { newRole: target.role }
-  }
-}
 
 const handleDreamWolf = async (gameEngine, player, action) => {
   // Волк-сновидец не делает ничего, только показывает палец оборотням
@@ -370,31 +360,6 @@ const handleInsomniac = async (gameEngine, player, action) => {
   }
 }
 
-const handleCthulhu = async (gameEngine, player, action) => {
-  const { targetId, message } = action
-  const room = gameEngine.room
-  
-  if (!targetId || !message) {
-    return { error: 'Выберите игрока и напишите сообщение' }
-  }
-  
-  const target = room.getPlayer(targetId)
-  if (!target || target.id === player.id || !target.alive) {
-    return { error: 'Недопустимая цель' }
-  }
-  
-  // Отправляем анонимное сообщение целевому игроку
-  room.sendToPlayer(targetId, 'cthulhu-message', {
-    message: message,
-    from: 'Ктулху'
-  })
-  
-  return {
-    success: true,
-    message: `Анонимное сообщение отправлено игроку ${target.name}`,
-    data: { target: target.name, message }
-  }
-}
 
 const handleProstitute = async (gameEngine, player, action) => {
   const { targetId } = action

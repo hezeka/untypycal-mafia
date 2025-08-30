@@ -133,11 +133,11 @@
                 >
                   <div class="player-top">
                     <div class="player-avatar" :class="{ speaking: isSpeaking(player.id) }">
-                      <div class="player-avatar_role" v-if="player.role && shouldShowRole(player)">
+                      <div class="player-avatar_role" v-if="player.role">
                         <img  :src="`/roles/compressed/${player.role}.webp`"
                               :alt="getRoleName(player.role)"
                               class="role-image"
-                              @error="$event.target.src = `/roles/${player.role}.png`">
+                              @error="handleRoleImageErrorSimple($event, player.role)">
                       </div>
                       <div v-else class="player-avatar_default">
                         {{ player.name[0]?.toUpperCase() }}
@@ -145,9 +145,9 @@
                     </div>
                     <div class="player-info">
                       <div class="player-username">{{ player.name }}</div>
-                      <div class="player-role" v-if="player.role && shouldShowRole(player)">{{ getRoleName(player.role) }}</div>
+                      <div class="player-role" v-if="player.role">{{ getRoleName(player.role) }}</div>
                     </div>
-                    <div class="claws" v-if="isWerewolfRole(player.role) && shouldShowRole(player)"></div>
+                    <div class="claws" v-if="isWerewolfRole(player.role) && player.role"></div>
                   </div>
                   
                   <!-- Универсальная система кнопок действий -->
@@ -235,12 +235,16 @@
                 Результаты
               </button>
               <!-- Кнопка воздержания во время голосования -->
-              <button v-else-if="gameState.room.phase === 'voting'" @click="abstainVote" class="abstain-btn">
-                Воздержаться
+              <button v-else-if="gameState.room.phase === 'voting'" @click="abstainVote" 
+                      class="abstain-btn" :class="{ 'pressed': votingAbstained }"
+                      :disabled="votingAbstained">
+                {{ votingAbstained ? 'Воздерживаетесь' : 'Воздержаться' }}
               </button>
               <!-- Кнопка пропуска -->
-              <button v-else-if="gameState.nightAction.active" @click="skipNightAction" class="skip-action-btn">
-                Пропустить
+              <button v-else-if="gameState.nightAction.active" @click="skipNightAction" 
+                      class="skip-action-btn" :class="{ 'pressed': nightActionSkipped }"
+                      :disabled="nightActionSkipped">
+                {{ nightActionSkipped ? 'Пропущено' : 'Пропустить' }}
               </button>
               <div v-else class="game-stats">
                 <span>Дней пережито: {{ gameState.room.daysSurvived || 0 }}</span>
@@ -344,6 +348,7 @@ import { useAPI } from '~/composables/useAPI'
 import { useVoiceActivity } from '~/composables/useVoiceActivity'
 import { useSound } from '~/composables/useSound'
 import { getRole, getAllRoles } from '../../../shared/rolesRegistry.js'
+import { handleRoleImageErrorSimple } from '~/utils/imageUtils.js'
 import MicrophoneSettings from '~/components/MicrophoneSettings.vue'
 import SettingsModal from '~/components/SettingsModal.vue'
 import RolesLibraryModal from '~/components/RolesLibraryModal.vue'
@@ -370,6 +375,7 @@ const {
   joinRoom,
   timer,
   loadRoomData,
+  loadGameState,
   loadChatHistory,
   votePlayer,
   adminAction: gameAdminAction,
@@ -388,6 +394,10 @@ const showRoles = ref(false)
 const showGameResults = ref(false)
 const error = ref(null)
 const whisperNotifications = ref([])
+
+// Состояния кнопок Skip/Abstain
+const nightActionSkipped = ref(false)
+const votingAbstained = ref(false)
 const notificationTimeouts = new Map() // Хранилище для таймеров
 
 // Отладка реактивности уведомлений
@@ -399,6 +409,10 @@ watch(whisperNotifications, (newVal) => {
 watch(() => gameState.room.phase, (newPhase, oldPhase) => {
   if (oldPhase && newPhase !== oldPhase) {
     console.log(`🎵 Phase changed: ${oldPhase} → ${newPhase}`)
+    
+    // Сбрасываем состояния кнопок при смене фазы
+    nightActionSkipped.value = false
+    votingAbstained.value = false
     
     // Воспроизводим соответствующий звук
     switch (newPhase) {
@@ -530,33 +544,14 @@ const handleNewGame = async () => {
     const api = useAPI()
     await api.resetRoom(route.params.id)
     
-    // Перезагружаем страницу чтобы вернуться к настройке ролей
-    window.location.reload()
+    // Сервер отправит событие room-reset которое обновит состояние
+    console.log('✅ New game requested, waiting for room-reset event')
   } catch (error) {
     console.error('Failed to start new game:', error)
   }
 }
 
 // Player methods
-const shouldShowRole = (player) => {
-  // Свою роль видишь всегда
-  if (player.isMe) return true
-  
-  // game_master видит все роли
-  if (currentPlayer.value.role === 'game_master') return true
-  
-  // Оборотни видят роли других оборотней (кроме фазы setup)
-  if (isWerewolf.value && isWerewolfRole(player.role) && gameState.room.phase !== 'setup') {
-    return true
-  }
-  
-  // Миньон видит роли оборотней (но они его не видят)
-  if (currentPlayer.value.role === 'minion' && isWerewolfRole(player.role) && gameState.room.phase !== 'setup') {
-    return true
-  }
-  
-  return false
-}
 
 const isWerewolfRole = (role) => {
   if (!role) return false
@@ -676,6 +671,7 @@ const openWhisperTo = (player) => {
   }
 }
 
+
 const canVoteFor = (player) => {
   // Мертвые игроки не могут голосовать, также нельзя голосовать за себя и game_master
   const currentPlayerAlive = currentPlayer.value?.alive !== false
@@ -696,6 +692,7 @@ const voteForPlayer = (targetId) => {
 
 const abstainVote = () => {
   votePlayer(null) // null означает воздержание
+  votingAbstained.value = true
 }
 
 const adminAction = (action, targetId) => {
@@ -883,6 +880,7 @@ const drunkSwap = async (centerIndex) => {
 const skipNightAction = async () => {
   playSound('night-action')
   await executeNightAction({ type: 'skip' })
+  nightActionSkipped.value = true
 }
 
 // Тестовая функция для отладки
@@ -916,6 +914,7 @@ const getPlayerActions = (player) => {
     condition: true,
     action: () => openWhisperTo(player)
   })
+  
   
   // Админские функции
   if (canAdminControl.value) {
@@ -979,6 +978,17 @@ const getPlayerActions = (player) => {
           action: () => nightAction('vote_kill', player.name)
         })
       }
+    }
+    
+    else if (myRole === 'werewolf' || myRole === 'werewolf_2' || myRole === 'werewolf_3') {
+      actions.push({
+        type: 'vote_kill',
+        class: 'vote-kill',
+        title: nightActionCompleted ? 'Вы уже совершили действие' : 'Проголосовать за убийство',
+        condition: true,
+        extraClass: nightActionCompleted ? 'active' : '',
+        action: () => nightAction('vote_kill', player.name)
+      })
     }
     
     // Смутьян - выбор двух игроков
@@ -1122,10 +1132,10 @@ onMounted(async () => {
   }
   
   try {
-    // Сначала загружаем данные комнаты через HTTP
-    console.log('🔄 Loading room data via HTTP...')
+    // Сначала загружаем базовые данные комнаты через HTTP
+    console.log('🔄 Loading initial room data via HTTP...')
     await loadRoomData(roomId)
-    console.log('✅ Room data loaded successfully')
+    console.log('✅ Initial room data loaded successfully')
     
     // Проверяем, нужно ли присоединиться как игрок
     const { username } = useUser()
@@ -1145,10 +1155,15 @@ onMounted(async () => {
       
       if (isConnected.value) {
         console.log('🔄 Socket connected, joining room as player...')
-        const joinResult = await joinRoom(roomId, username.value)
+        const joinResult = await joinRoom(roomId, username.value, true) // skip room data check
         console.log('✅ Joined room successfully')
         playerId = gameState.player.id
         console.log('✅ Player ID after join:', playerId)
+        
+        // Запрашиваем актуальный статус всех игроков после присоединения
+        setTimeout(() => {
+          console.log('🔄 Requesting players status sync after join...')
+        }, 200)
       } else {
         console.warn('⚠️ Socket connection timeout, joining as observer via HTTP API')
         gameState.connected = false
@@ -1169,6 +1184,24 @@ onMounted(async () => {
         playerId = existingPlayer.id
         console.log('✅ Found existing player with ID:', playerId)
       }
+    }
+
+    // После определения playerId загружаем полное состояние игры только для ночной фазы
+    if (playerId && gameState.room.phase === 'night') {
+      console.log('🔄 Loading full game state for night phase restoration...')
+      await loadGameState(roomId, playerId, { force: true })
+      console.log('✅ Full game state loaded with night actions restored')
+    } else if (playerId) {
+      console.log('📋 Player context available, state already loaded')
+    }
+
+    // ВСЕГДА запрашиваем актуальную синхронизацию статуса игроков после загрузки
+    if (isConnected.value && socket.value) {
+      setTimeout(() => {
+        console.log('🔄 Requesting mandatory players status sync...')
+        // Принудительно запрашиваем актуальный статус всех игроков
+        socket.value.emit('request-players-sync')
+      }, 500) // Даём время серверу обработать присоединение
     }
 
     // Загружаем историю чата с учетом прав доступа игрока
@@ -1437,8 +1470,19 @@ onUnmounted(() => {
   transition: background 0.2s;
 }
 
-.skip-action-btn:hover {
+.skip-action-btn:hover:not(:disabled) {
   background: #4b5563;
+}
+
+.skip-action-btn.pressed {
+  background: #4ade80;
+  color: #000;
+  cursor: default;
+}
+
+.skip-action-btn:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
 }
 
 .results-btn {
@@ -1467,8 +1511,19 @@ onUnmounted(() => {
   transition: background 0.2s;
 }
 
-.abstain-btn:hover {
+.abstain-btn:hover:not(:disabled) {
   background: #d97706;
+}
+
+.abstain-btn.pressed {
+  background: #4ade80;
+  color: #000;
+  cursor: default;
+}
+
+.abstain-btn:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
 }
 
 .admin-btn {

@@ -15,8 +15,19 @@ export class GameEngine {
   }
 
   async startGame() {
+    console.log('🎮 Starting game and assigning roles...')
     this.assignRoles()
+    
+    // Немедленно уведомляем игроков об их ролях после назначения
+    this.broadcastRoleAssignments()
+    
+    // Сразу переходим к фазе знакомства - роли уже розданы
     await this.setPhase(GAME_PHASES.INTRODUCTION)
+    
+    // НОВОЕ: Синхронизируем статус игроков ПОСЛЕ смены фазы (чтобы роли были видны)
+    this.room.syncPlayersStatus()
+    
+    console.log('✅ Game started successfully, roles assigned')
   }
 
   assignRoles() {
@@ -78,6 +89,30 @@ export class GameEngine {
     // Оставшиеся роли - центральные карты
     this.room.centerCards = centerRoles
   }
+
+  broadcastRoleAssignments() {
+    console.log('📤 Broadcasting role assignments to players...')
+    const players = Array.from(this.room.players.values()).filter(p => p.role !== 'game_master')
+    
+    players.forEach(player => {
+      if (player.role && player.role !== 'observer') {
+        // Отправляем каждому игроку его роль немедленно
+        this.room.sendToPlayer(player.id, 'role-assigned', {
+          playerId: player.id,
+          role: player.role
+        })
+        console.log(`✅ Sent role ${player.role} to ${player.name} (${player.id})`)
+      }
+    })
+    
+    // ВАЖНО: Отправляем game-updated с причиной roles-assigned для синхронизации всех клиентов
+    this.room.broadcast('game-updated', {
+      reason: 'roles-assigned',
+      room: this.room.getClientData(null) // null означает обновление для всех
+    })
+    
+    console.log('✅ Broadcasted roles-assigned game-updated event')
+  }
   
   // Вспомогательный метод для перемешивания массива
   shuffleArray(array) {
@@ -118,6 +153,12 @@ export class GameEngine {
     // Специальная логика для фаз
     switch (newPhase) {
       case GAME_PHASES.NIGHT:
+        // Сбрасываем флаги ночных действий Ктулху для новой ночи
+        this.room.players.forEach(player => {
+          if (player.role === 'cthulhu') {
+            player.cthulhuOrderUsedTonight = false
+          }
+        })
         this.startNightPhase()
         break
       case GAME_PHASES.DAY:
@@ -135,8 +176,8 @@ export class GameEngine {
       timerEndTime: endTime
     })
     
-    // Обновляем состояние комнаты (включая права чата)
-    this.room.broadcast('game-updated', { room: this.room.getClientData() })
+    // Не отправляем game-updated для каждой смены фазы - phase-changed достаточно
+    // Состояние будет синхронизовано через HTTP API при необходимости
   }
 
   updateChatPermissions() {
@@ -271,6 +312,11 @@ export class GameEngine {
     }
     
     this.nightActionIndex++
+    
+    // НОВОЕ: Синхронизируем статус при переходе к следующему ночному действию
+    // Это важно если предыдущая роль изменила роли - порядок ходов может измениться
+    this.room.syncPlayersStatus()
+    
     this.processNextNightAction()
   }
   
@@ -281,9 +327,12 @@ export class GameEngine {
     const currentRole = this.nightRoles[this.nightActionIndex]
     const players = this.getPlayersWithRole(currentRole.id)
     
+    // Проверяем сколько игроков с текущей ролью завершили действие
+    const completedPlayersWithCurrentRole = players.filter(p => this.completedActions.has(p.id)).length
+    
     // Если все игроки с текущей ролью выполнили действие
-    if (players.length > 0 && this.completedActions.size >= players.length) {
-      console.log(`✅ All players with role ${currentRole.id} completed their actions`)
+    if (players.length > 0 && completedPlayersWithCurrentRole >= players.length) {
+      console.log(`✅ All players with role ${currentRole.id} completed their actions (${completedPlayersWithCurrentRole}/${players.length})`)
       this.nextNightAction()
     }
   }
@@ -302,8 +351,9 @@ export class GameEngine {
       return { error: 'Сейчас не ваш ход' }
     }
 
-    // Проверяем, не выполнял ли уже этот игрок действие
+    // Проверяем, не выполнял ли уже этот игрок действие (включая Доппельгангеров после смены роли)
     if (this.completedActions.has(playerId)) {
+      console.log(`🚫 Player ${player.name} (${player.role}) already completed action, preventing duplicate`)
       return { error: 'Вы уже выполнили своё действие' }
     }
 
@@ -313,12 +363,33 @@ export class GameEngine {
       // Если действие успешно (включая заблокированные с auto-skip), отмечаем игрока как выполнившего действие
       if (result && !result.error) {
         // Заблокированные действия уже помечаются как выполненные в executeRoleAction
-        if (!result.data?.blocked) {
+        if (!result.data?.blocked && !result.data?.actionNotComplete) {
           this.completedActions.add(playerId)
           console.log(`✅ Player ${player.name} (${player.role}) completed action`)
           
-          // Проверяем, все ли игроки с этой ролью завершили действие
-          this.checkAllPlayersCompleted()
+          // Специальная обработка для Доппельгангера - меняем роль ПОСЛЕ завершения действия
+          if (result.data?.changeRoleAfterAction && result.data?.newRole) {
+            player.role = result.data.newRole
+            console.log(`🔄 Doppelganger ${player.name} role changed from ${result.data.oldRole} to ${result.data.newRole}`)
+            // Синхронизируем статус после смены роли
+            this.room.syncPlayersStatus()
+          }
+          
+          // Уведомляем игрока что его ход завершен (скрывает кнопки)
+          this.room.sendToPlayer(playerId, 'night-turn-ended', {
+            playerId: playerId
+          })
+          
+          // Специальная обработка для Доппельгангера - сразу переходим к следующей роли
+          if (result.data?.changeRoleAfterAction) {
+            console.log(`⏭️ Doppelganger completed, forcing next night action`)
+            this.nextNightAction()
+          } else {
+            // Для остальных ролей проверяем, все ли игроки завершили действие
+            this.checkAllPlayersCompleted()
+          }
+        } else if (result.data?.actionNotComplete) {
+          console.log(`⏳ Player ${player.name} (${player.role}) action partially completed, waiting for full completion`)
         }
         // Для заблокированных действий логика выполнения уже обработана в executeRoleAction
       }
@@ -351,10 +422,13 @@ export class GameEngine {
         const player = this.room.getPlayer(playerId)
         if (player && player.alive) { // Проверяем, что игрок еще жив
           player.alive = false
-          messages.push(`${player.name} был убит ночью`)
+          this.room.announcePlayerDeath(player, 'night')
           console.log(`💀 ${player.name} killed during night`)
         }
       })
+      
+      // НОВОЕ: Синхронизируем статус после убийства игроков ночью
+      this.room.syncPlayersStatus()
     } else if (this.attackedPlayers.length > 0) {
       // Были покушения, но все защищены
       this.attackedPlayers.forEach(playerId => {
@@ -373,8 +447,11 @@ export class GameEngine {
       this.room.addSystemMessage(msg, MESSAGE_TYPES.SYSTEM)
     })
     
-    // Обновляем состояние комнаты для всех игроков
-    this.room.broadcast('game-updated', { room: this.room.getClientData() })
+    // Отправляем только уведомление о завершении ночи, без полных данных комнаты
+    this.room.broadcast('night-results-announced', { 
+      killedPlayers: this.killedPlayers,
+      attackedPlayers: this.attackedPlayers 
+    })
     
     // Проверяем условия победы после объявления результатов ночи
     if (this.checkWinConditions()) {
@@ -467,6 +544,9 @@ export class GameEngine {
         if (player) {
           player.alive = false
           
+          // Уведомляем о смерти с раскрытием роли
+          this.room.announcePlayerDeath(player, 'voting')
+          
           // Проверяем, если убили охотника
           if (player.role === 'hunter') {
             huntersKilled.push(player)
@@ -489,6 +569,9 @@ export class GameEngine {
           this.room.addSystemMessage(`💀 ${player.name} (${roleName}) был исключен голосованием`, MESSAGE_TYPES.SYSTEM)
         }
       })
+      
+      // НОВОЕ: Синхронизируем статус после исключения игроков голосованием
+      this.room.syncPlayersStatus()
     } else {
       this.room.addSystemMessage('Никто не был исключен', MESSAGE_TYPES.SYSTEM)
     }
@@ -502,8 +585,8 @@ export class GameEngine {
     // Показываем результаты голосования
     this.room.broadcast('voting-ended', result)
     
-    // ВАЖНО: Обновляем состояние игры для всех игроков
-    this.room.broadcast('game-updated', { room: this.room.getClientData() })
+    // Отправляем только результат голосования без полного состояния комнаты
+    // Клиенты обновят состояние через phase-changed и другие целевые события
   }
   
   announceVotingResults(result) {
@@ -551,6 +634,10 @@ export class GameEngine {
         const target = this.room.getPlayer(hunterVote)
         if (target && target.alive) {
           target.alive = false
+          
+          // Уведомляем о смерти от охотника с раскрытием роли
+          this.room.announcePlayerDeath(target, 'hunter')
+          
           const targetRoleInfo = getRoleInfo(target.role)
           const targetRoleName = targetRoleInfo?.name || target.role
           
@@ -692,8 +779,14 @@ export class GameEngine {
     // Раскрываем роли всех игроков
     this.revealAllRoles()
     
-    // Обновляем состояние для всех игроков
-    this.room.broadcast('game-updated', { room: this.room.getClientData() })
+    // НОВОЕ: Синхронизируем статус игроков после завершения игры (все роли видны)
+    this.room.syncPlayersStatus()
+    
+    // Отправляем специальное событие окончания игры вместо game-updated
+    this.room.broadcast('game-ended', {
+      result: this.room.gameResult,
+      phase: GAME_PHASES.ENDED
+    })
     
     // Останавливаем все таймеры
     if (this.phaseTimer) {
@@ -767,6 +860,11 @@ export class GameEngine {
       const temp = player1.role
       player1.role = player2.role
       player2.role = temp
+      
+      console.log(`🔄 Swapped roles: ${player1.name} (${temp}) ↔ ${player2.name} (${player1.role})`)
+      
+      // НОВОЕ: Синхронизируем статус после обмена ролями
+      this.room.syncPlayersStatus()
     }
   }
 
@@ -776,6 +874,11 @@ export class GameEngine {
       const temp = player.role
       player.role = this.room.centerCards[centerIndex]
       this.room.centerCards[centerIndex] = temp
+      
+      console.log(`🔄 Swapped ${player.name} role (${temp}) with center card (${player.role})`)
+      
+      // НОВОЕ: Синхронизируем статус после обмена с центром
+      this.room.syncPlayersStatus()
     }
   }
 

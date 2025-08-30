@@ -33,7 +33,8 @@ export class ChatCommandProcessor {
       'помощь': ['help', 'h', '?'],
       'кто': ['who', 'список', 'list'],
       'время': ['time', 'timer'],
-      'публичные': ['public', 'комнаты', 'rooms']
+      'публичные': ['public', 'комнаты', 'rooms'],
+      'приказ': ['order', 'cmd']
     }
 
     for (const [cmd, aliases] of Object.entries(commands)) {
@@ -94,6 +95,9 @@ export class ChatCommandProcessor {
           
         case 'публичные':
           return await this.handlePublicRoomsCommand(sender)
+          
+        case 'приказ':
+          return await this.handleCthulhuOrderCommand(sender, parsed.args)
           
         default:
           return { success: false, error: 'Команда не реализована' }
@@ -469,6 +473,11 @@ export class ChatCommandProcessor {
     helpText += '• `/кто` - список всех игроков\n'
     helpText += '• `/публичные` - список доступных игр\n'
     
+    // Добавляем команду /приказ для Ктулху
+    if (sender.role === 'cthulhu' && !sender.cthulhuOrderUsedTonight) {
+      helpText += '• `/приказ <игрок> <текст>` - отправить приказ игроку (только для Ктулху, один раз за ночь)\n'
+    }
+    
     if (this.room.gameEngine?.phaseTimer) {
       helpText += '• `/время` - показать оставшееся время\n'
     }
@@ -706,6 +715,122 @@ export class ChatCommandProcessor {
         })
       }
     })
+  }
+
+  // ✅ КОМАНДА ПРИКАЗА КТУЛХУ
+  async handleCthulhuOrderCommand(sender, args) {
+    // Проверяем что отправитель - Ктулху
+    if (sender.role !== 'cthulhu') {
+      return {
+        success: false,
+        error: 'Только Ктулху может использовать команду /приказ'
+      }
+    }
+    
+    // Проверяем что команда еще не использовалась в эту ночь
+    if (sender.cthulhuOrderUsedTonight) {
+      return {
+        success: false,
+        error: 'Команда /приказ может быть использована только один раз за ночь'
+      }
+    }
+    
+    // Проверяем формат команды: /приказ игрок сообщение
+    if (args.length < 2) {
+      return {
+        success: false,
+        error: 'Формат команды: /приказ игрок сообщение'
+      }
+    }
+    
+    const targetName = args[0]
+    const message = args.slice(1).join(' ')
+    
+    if (message.length > 200) {
+      return {
+        success: false,
+        error: 'Сообщение слишком длинное (максимум 200 символов)'
+      }
+    }
+    
+    // Находим целевого игрока
+    const target = Array.from(this.room.players.values())
+      .find(p => p.name.toLowerCase().includes(targetName.toLowerCase()))
+    if (!target) {
+      return {
+        success: false,
+        error: `Игрок "${targetName}" не найден`
+      }
+    }
+    
+    if (target.id === sender.id) {
+      return {
+        success: false,
+        error: 'Нельзя отправить приказ самому себе'
+      }
+    }
+    
+    // Отмечаем что команда использована в эту ночь
+    sender.cthulhuOrderUsedTonight = true
+    
+    // Создаем сообщение с приказом
+    const orderMessage = {
+      id: `cthulhu-order-${Date.now()}`,
+      type: 'whisper',
+      text: `🐙 ПРИКАЗ КТУЛХУ: ${message}`,
+      timestamp: Date.now(),
+      senderId: sender.id,
+      senderName: 'Ктулху',
+      recipientId: target.id,
+      recipientName: target.name,
+      isOwn: false
+    }
+    
+    // Создаем сообщение с инструкцией
+    const instructionMessage = {
+      id: `cthulhu-instruction-${Date.now()}`,
+      type: 'whisper',
+      text: `⚠️ Вы обязаны подчиниться приказу ктулху\nи выполнять его действие весь день.\n\nИнформация о приказе - секрет до конца игры.\n\nЕсли вы раскрываете приказ - вы умираете.`,
+      timestamp: Date.now() + 1,
+      senderId: 'system',
+      senderName: 'Система',
+      recipientId: target.id,
+      recipientName: target.name,
+      isOwn: false
+    }
+    
+    // Сохраняем оба сообщения в чат
+    this.room.chat.push(orderMessage)
+    this.room.chat.push(instructionMessage)
+    
+    // Отправляем сообщения получателю
+    this.room.sendToPlayer(target.id, 'new-message', { message: orderMessage })
+    setTimeout(() => {
+      this.room.sendToPlayer(target.id, 'new-message', { message: instructionMessage })
+    }, 100) // Небольшая задержка для правильного порядка
+    
+    // ЗАВЕРШАЕМ НОЧНОЕ ДЕЙСТВИЕ КТУЛХУ
+    if (this.room.gameEngine) {
+      this.room.gameEngine.completedActions.add(sender.id)
+      console.log(`✅ Cthulhu ${sender.name} completed night action via /приказ command`)
+      
+      // Уведомляем игрока что его ход завершен (скрывает кнопки)
+      this.room.sendToPlayer(sender.id, 'night-turn-ended', {
+        playerId: sender.id
+      })
+      
+      // Проверяем, все ли игроки с этой ролью завершили действие
+      this.room.gameEngine.checkAllPlayersCompleted()
+    }
+    
+    // Логируем действие
+    console.log(`🐙 Cthulhu ${sender.name} sent order to ${target.name}: "${message}"`)
+    
+    return {
+      success: true,
+      isCommand: true,
+      message: `Приказ отправлен игроку ${target.name}: "${message}"`
+    }
   }
 
   // Получение отображаемого имени фазы

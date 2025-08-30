@@ -36,6 +36,12 @@ export const useAPI = () => {
       return await apiCall(`/api/rooms/${roomId}`)
     },
 
+    // Получить полное состояние игры (включая ночные действия)
+    getGameState: async (roomId, playerId = null) => {
+      const params = playerId ? `?playerId=${playerId}` : ''
+      return await apiCall(`/api/rooms/${roomId}/game-state${params}`)
+    },
+
     // Присоединиться к комнате
     joinRoom: async (roomId, username, socketId) => {
       return await apiCall(`/api/rooms/${roomId}/join`, {

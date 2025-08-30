@@ -32,6 +32,7 @@
         <button @click="skipAction" class="skip-btn">Пропустить</button>
       </div>
       
+      
       <!-- Остальные роли - только кнопка пропуска -->
       <div v-else class="action-buttons">
         <p class="hint-text">Выберите игроков на поле или пропустите действие</p>
@@ -90,6 +91,7 @@ const result = ref(null)
 
 const getRoleName = (roleId) => roles[roleId]?.name || roleId
 const getHint = () => roles[gameState.nightAction.role]?.phaseHints?.night || ''
+
 
 // Действия для провидца
 

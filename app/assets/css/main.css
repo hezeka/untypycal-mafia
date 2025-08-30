@@ -830,6 +830,11 @@ body {
   background-image: url('/icons/pm.png');
 }
 
+.player-handler_btn.cthulhu-order {
+  background-image: url('/icons/cthulhu.png');
+  background-color: #6b46c1;
+}
+
 .player-handler_btn.message {
   background-color: #00e9b31e;
   background-image: url('/icons/cthulhu.png');
@@ -877,6 +882,11 @@ body {
 .player-handler_btn.swap, .player-handler_btn.troublemake {
   background-color: #ff8d0b10;
   background-image: url('/icons/swap.png');
+}
+
+.player-handler_btn.copy {
+  background-color: #AE00FF10;
+  background-image: url('/icons/copy.png');
 }
 
 .player-handler_btn.off {

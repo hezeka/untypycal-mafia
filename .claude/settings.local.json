@@ -3,10 +3,11 @@
     "allow": [
       "Bash(curl:*)",
       "Bash(grep:*)",
-      "Bash(npm run lint)"
+      "Bash(node:*)"
     ],
     "deny": [
-      "Bash(npm run dev:*)"
+      "Bash(npm run dev:*)",
+      "Bash(npm run lint)"
     ],
     "ask": []
   }

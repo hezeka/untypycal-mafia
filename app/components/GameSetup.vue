@@ -104,6 +104,7 @@
 import { computed, ref } from 'vue'
 import { useGame } from '~/composables/useGame'
 import { getAllRoles, validateRoleBalance, getTeamNames } from '../../../shared/rolesRegistry.js'
+import { handleRoleImageError } from '~/utils/imageUtils.js'
 
 const { gameState, selectRole, startGame: gameStart } = useGame()
 const roles = getAllRoles()
@@ -160,15 +161,8 @@ const isRoleSelected = (roleId) => gameState.room.selectedRoles.includes(roleId)
 const getRoleCount = (roleId) => gameState.room.selectedRoles.filter(id => id === roleId).length
 const getTeamName = (teamId) => teamNames[teamId] || teamId
 
-const handleImageError = (event, roleId) => {
-  // Сначала пробуем несжатую версию
-  if (event.target.src.includes('compressed')) {
-    event.target.src = `/roles/${roleId}.png`
-  } else {
-    // Если и несжатая не загрузилась, показываем card-back
-    event.target.src = '/roles/card-back.png'
-  }
-}
+// Используем общую утилиту для обработки ошибок изображений
+const handleImageError = handleRoleImageError
 
 const toggleRole = async (roleId) => {
   if (roleLoading.value.has(roleId)) return

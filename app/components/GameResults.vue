@@ -28,7 +28,7 @@
                     v-if="getPlayerRole(playerId)"
                     :src="`/roles/compressed/${getPlayerRole(playerId)}.webp`" 
                     :alt="getRoleName(getPlayerRole(playerId))"
-                    @error="$event.target.src = `/roles/${getPlayerRole(playerId)}.png`"
+                    @error="handleImageError($event, getPlayerRole(playerId))"
                     class="winner-role-image"
                   >
                   <div v-else class="winner-default-avatar">
@@ -101,7 +101,7 @@
                     v-if="player.role"
                     :src="`/roles/compressed/${player.role}.webp`" 
                     :alt="getRoleName(player.role)"
-                    @error="$event.target.src = `/roles/${player.role}.png`"
+                    @error="handleImageError($event, player.role)"
                     class="role-reveal-image"
                   >
                   <div v-else class="role-reveal-default">
@@ -146,6 +146,7 @@ import { useSocket } from '~/composables/useSocket'
 import { useAPI } from '~/composables/useAPI'
 import { useRoute, useRouter } from 'vue-router'
 import { getAllRoles } from '../../../shared/rolesRegistry.js'
+import { handleRoleImageErrorSimple } from '~/utils/imageUtils.js'
 
 const emit = defineEmits(['new-game', 'leave', 'close'])
 const { gameState, currentPlayer } = useGame()
@@ -239,12 +240,15 @@ const handleNewGame = async () => {
     const api = useAPI()
     await api.resetRoom(route.params.id)
     
-    // Перезагружаем страницу чтобы вернуться к настройке ролей
-    window.location.reload()
+    // Закрываем модальное окно результатов - сервер отправит событие room-reset
+    emit('close')
   } catch (error) {
     console.error('Failed to start new game:', error)
   }
 }
+
+// Используем простую версию утилиты для обработки ошибок изображений
+const handleImageError = handleRoleImageErrorSimple
 
 const handleLeave = async () => {
   try {
