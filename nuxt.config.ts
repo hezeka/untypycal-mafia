@@ -37,8 +37,16 @@ export default defineNuxtConfig({
         { name: 'theme-color', content: '#F38920' }
       ],
       link: [
-        { rel: 'shortcut icon', type: 'image/x-icon', href: '/app-icons/favicon.ico' },
-        { rel: 'icon', type: 'image/png', href: '/app-icons/favicon-96x96.png' },
+        { rel: 'icon', type: 'image/png', sizes: '192x192', href: '/app-icons/android-icon-192x192.png' },
+        { rel: 'icon', type: 'image/png', sizes: '144x144', href: '/app-icons/android-icon-144x144.png' },
+        { rel: 'icon', type: 'image/png', sizes: '96x96', href: '/app-icons/android-icon-96x96.png' },
+        { rel: 'icon', type: 'image/png', sizes: '72x72', href: '/app-icons/android-icon-72x72.png' },
+        { rel: 'icon', type: 'image/png', sizes: '48x48', href: '/app-icons/android-icon-48x48.png' },
+        { rel: 'icon', type: 'image/png', sizes: '36x36', href: '/app-icons/android-icon-36x36.png' },
+        { rel: 'apple-touch-icon', sizes: '192x192', href: '/app-icons/android-icon-192x192.png' },
+        { rel: 'apple-touch-icon', sizes: '144x144', href: '/app-icons/android-icon-144x144.png' },
+        { rel: 'apple-touch-icon', sizes: '96x96', href: '/app-icons/android-icon-96x96.png' },
+        { rel: 'manifest', href: '/manifest.json' },
         { rel: 'preconnect', href: 'https://fonts.googleapis.com' },
         { rel: 'preconnect', href: 'https://fonts.gstatic.com', crossorigin: '' },
         { rel: 'stylesheet', href: 'https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap' }
