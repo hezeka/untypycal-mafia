@@ -24,7 +24,7 @@ export default defineNuxtConfig({
   
   // Модули
   modules: [
-    
+    '@vite-pwa/nuxt'
   ],
   
   // Настройки приложения
@@ -45,7 +45,6 @@ export default defineNuxtConfig({
         { rel: 'icon', type: 'image/png', sizes: '192x192', href: '/app-icons/favicon-192x192.png'},
         { rel: 'icon', type: 'image/png', sizes: '384x384', href: '/app-icons/favicon-384x384.png'},
         { rel: 'icon', type: 'image/png', sizes: '512x512', href: '/app-icons/favicon-512x512.png'},
-        { rel: 'manifest', href: '/manifest.json' },
         { rel: 'preconnect', href: 'https://fonts.googleapis.com' },
         { rel: 'preconnect', href: 'https://fonts.gstatic.com', crossorigin: '' },
         { rel: 'stylesheet', href: 'https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap' }
