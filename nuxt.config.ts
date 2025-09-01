@@ -34,10 +34,11 @@ export default defineNuxtConfig({
       meta: [
         { name: 'description', content: 'Социально-дедукционная игра основанная на One Night Ultimate Werewolf' },
         { name: 'viewport', content: 'width=device-width, initial-scale=1' },
-        { name: 'theme-color', content: '#1a1a1a' }
+        { name: 'theme-color', content: '#F38920' }
       ],
       link: [
-        { rel: 'icon', type: 'image/x-icon', href: '/favicon.ico' },
+        { rel: 'icon', type: 'image/png', href: '/app-icons/favicon-96x96.png' },
+        { rel: 'shortcut icon', type: 'image/x-icon', href: '/app-icons/favicon.ico' },
         { rel: 'preconnect', href: 'https://fonts.googleapis.com' },
         { rel: 'preconnect', href: 'https://fonts.gstatic.com', crossorigin: '' },
         { rel: 'stylesheet', href: 'https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap' }
@@ -53,13 +54,79 @@ export default defineNuxtConfig({
       globPatterns: ['**/*.{js,css,html,png,svg,ico}']
     },
     manifest: {
-      name: 'Нетипичная Мафия',
-      short_name: 'Мафия',
-      description: 'Социально-дедукционная игра',
-      theme_color: '#1a1a1a',
-      background_color: '#000000',
-      display: 'standalone',
-      orientation: 'portrait'
+      "name": "Нетипичная Мафия",
+      "short_name": "Нетипичка",
+      "version": "3.0.1",
+      "description": "Социальная игра-дедукция на основе \"ONUW\" с многопользовательским онлайн-режимом",
+      "start_url": "/?source=pwa",
+      "scope": "/",
+      "display": "standalone",
+      "orientation": "any",
+      "theme_color": "#F38920",
+      "background_color": "#1a1a1a",
+      "lang": "ru-RU",
+      "id": "mafia.waifucards.app",
+      "categories": ["games", "entertainment", "social"],
+      "display_override": ["window-controls-overlay", "standalone"],
+      "icons": [
+        {
+          "src": "/app-icons/android-icon-36x36.png",
+          "sizes": "36x36",
+          "type": "image/png",
+          "density": "0.75"
+        },
+        {
+          "src": "/app-icons/android-icon-48x48.png",
+          "sizes": "48x48",
+          "type": "image/png",
+          "density": "1.0"
+        },
+        {
+          "src": "/app-icons/android-icon-72x72.png",
+          "sizes": "72x72",
+          "type": "image/png",
+          "density": "1.5"
+        },
+        {
+          "src": "/app-icons/android-icon-96x96.png",
+          "sizes": "96x96",
+          "type": "image/png",
+          "density": "2.0"
+        },
+        {
+          "src": "/app-icons/android-icon-144x144.png",
+          "sizes": "144x144",
+          "type": "image/png",
+          "density": "3.0"
+        },
+        {
+          "src": "/app-icons/android-icon-192x192.png",
+          "sizes": "192x192",
+          "type": "image/png",
+          "density": "4.0",
+          "purpose": "any maskable"
+        }
+      ],
+      "shortcuts": [
+        {
+          "name": "Присоединиться к игре",
+          "short_name": "Войти",
+          "description": "Присоединиться к существующей игровой комнате",
+          "url": "/",
+          "icons": [
+            {
+              "src": "/app-icons/android-icon-96x96.png",
+              "sizes": "96x96",
+              "type": "image/png"
+            }
+          ]
+        }
+      ],
+      "related_applications": [{
+        "platform": "webapp",
+        "url": "https://mafia.waifucards.app/manifest.json"
+      }],
+      "prefer_related_applications": true
     }
   },
   
@@ -91,7 +158,7 @@ export default defineNuxtConfig({
   },
   
   // Совместимость
-  compatibilityDate: '2024-01-01',
+  compatibilityDate: '2025-09-01',
   
   // Настройки производительности
   experimental: {

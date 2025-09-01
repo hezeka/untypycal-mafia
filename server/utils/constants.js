@@ -13,7 +13,7 @@ export const GAME_PHASES = {
 // ✅ ДЛИТЕЛЬНОСТЬ ФАЗ (в секундах)
 export const PHASE_DURATIONS = {
   INTRODUCTION: 180,    // 3 минуты
-  NIGHT: 30,           // 30 секунд на действие
+  NIGHT: 60,           // 60 секунд на действие
   DAY: 300,            // 5 минут
   VOTING: 20          // 20 секунд
 }
