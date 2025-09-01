@@ -37,8 +37,8 @@ export default defineNuxtConfig({
         { name: 'theme-color', content: '#F38920' }
       ],
       link: [
-        { rel: 'icon', type: 'image/png', href: '/app-icons/favicon-96x96.png' },
         { rel: 'shortcut icon', type: 'image/x-icon', href: '/app-icons/favicon.ico' },
+        { rel: 'icon', type: 'image/png', href: '/app-icons/favicon-96x96.png' },
         { rel: 'preconnect', href: 'https://fonts.googleapis.com' },
         { rel: 'preconnect', href: 'https://fonts.gstatic.com', crossorigin: '' },
         { rel: 'stylesheet', href: 'https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap' }
