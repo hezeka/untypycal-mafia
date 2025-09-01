@@ -37,14 +37,14 @@ export default defineNuxtConfig({
         { name: 'theme-color', content: '#F38920' }
       ],
       link: [
-        { rel: 'icon', type: 'image/png', sizes: '72x72', href: '/favicon-72x72.png'},
-        { rel: 'icon', type: 'image/png', sizes: '96x96', href: '/favicon-96x96.png'},
-        { rel: 'icon', type: 'image/png', sizes: '128x128', href: '/favicon-128x128.png'},
-        { rel: 'icon', type: 'image/png', sizes: '144x144', href: '/favicon-144x144.png'},
-        { rel: 'apple-touch-icon', type: 'image/png', sizes: '152x152', href: '/favicon-152x152.png' },
-        { rel: 'icon', type: 'image/png', sizes: '192x192', href: '/favicon-192x192.png'},
-        { rel: 'icon', type: 'image/png', sizes: '384x384', href: '/favicon-384x384.png'},
-        { rel: 'icon', type: 'image/png', sizes: '512x512', href: '/favicon-512x512.png'},
+        { rel: 'icon', type: 'image/png', sizes: '72x72', href: '/app-icon/favicon-72x72.png'},
+        { rel: 'icon', type: 'image/png', sizes: '96x96', href: '/app-icon/favicon-96x96.png'},
+        { rel: 'icon', type: 'image/png', sizes: '128x128', href: '/app-icon/favicon-128x128.png'},
+        { rel: 'icon', type: 'image/png', sizes: '144x144', href: '/app-icon/favicon-144x144.png'},
+        { rel: 'apple-touch-icon', type: 'image/png', sizes: '152x152', href: '/app-icon/favicon-152x152.png' },
+        { rel: 'icon', type: 'image/png', sizes: '192x192', href: '/app-icon/favicon-192x192.png'},
+        { rel: 'icon', type: 'image/png', sizes: '384x384', href: '/app-icon/favicon-384x384.png'},
+        { rel: 'icon', type: 'image/png', sizes: '512x512', href: '/app-icon/favicon-512x512.png'},
         { rel: 'manifest', href: '/manifest.json' },
         { rel: 'preconnect', href: 'https://fonts.googleapis.com' },
         { rel: 'preconnect', href: 'https://fonts.gstatic.com', crossorigin: '' },
@@ -77,49 +77,49 @@ export default defineNuxtConfig({
       "display_override": ["window-controls-overlay", "standalone"],
       "icons": [
         {
-          "src": "/favicon-72x72.png",
+          "src": "/app-icon/favicon-72x72.png",
           "type": "image/png",
           "sizes": "72x72",
           "purpose": "any maskable"
         },
         {
-          "src": "/favicon-96x96.png",
+          "src": "/app-icon/favicon-96x96.png",
           "type": "image/png",
           "sizes": "96x96",
           "purpose": "any maskable"
         },
         {
-          "src": "/favicon-128x128.png",
+          "src": "/app-icon/favicon-128x128.png",
           "type": "image/png",
           "sizes": "128x128",
           "purpose": "any maskable"
         },
         {
-          "src": "/favicon-144x144.png",
+          "src": "/app-icon/favicon-144x144.png",
           "type": "image/png",
           "sizes": "144x144",
           "purpose": "any maskable"
         },
         {
-          "src": "/favicon-152x152.png",
+          "src": "/app-icon/favicon-152x152.png",
           "type": "image/png",
           "sizes": "152x152",
           "purpose": "any maskable"
         },
         {
-          "src": "/favicon-192x192.png",
+          "src": "/app-icon/favicon-192x192.png",
           "type": "image/png",
           "sizes": "192x192",
           "purpose": "any maskable"
         },
         {
-          "src": "/favicon-384x384.png",
+          "src": "/app-icon/favicon-384x384.png",
           "type": "image/png",
           "sizes": "384x384",
           "purpose": "any maskable"
         },
         {
-          "src": "/favicon-512x512.png",
+          "src": "/app-icon/favicon-512x512.png",
           "type": "image/png",
           "sizes": "512x512",
           "purpose": "any maskable"
