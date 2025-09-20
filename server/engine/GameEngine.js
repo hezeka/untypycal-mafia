@@ -372,7 +372,7 @@ export class GameEngine {
       .filter(p => p.role === roleId && p.alive)
   }
 
-  async executeNightAction(playerId, action) {
+  async _executeNightActionInternal(playerId, action) {
     const player = this.room.getPlayer(playerId)
     if (!player || !player.alive) return { error: 'Игрок не найден' }
 
@@ -504,6 +504,7 @@ export class GameEngine {
   }
   
   processWerewolfVotes() {
+    console.log('🐺 Processing werewolf votes. Current votes:', this.werewolfVotes ? Array.from(this.werewolfVotes.entries()) : 'undefined')
     if (!this.werewolfVotes || this.werewolfVotes.size === 0) {
       console.log('No werewolf votes to process')
       return
@@ -872,84 +873,32 @@ export class GameEngine {
     return names[team] || team
   }
 
-  // Простое выполнение ночного действия
+  // Публичный метод выполнения ночного действия (с логированием)
   async executeNightAction(socketId, action) {
-    const player = this.room.getPlayer(socketId)
-    if (!player || player.role === 'game_master') {
-      return { error: 'Игрок не найден' }
-    }
+    // Сначала выполняем настоящее ночное действие
+    const result = await this._executeNightActionInternal(socketId, action)
 
-    // Особая обработка для Ктулху - НЕ помечаем действие как завершенное
-    if (player.role === 'cthulhu') {
-      const { targetId } = action
-      if (!targetId) {
-        return { error: 'Напишите в чат /приказ имя_игрока ваш_приказ.' }
-      }
-      
-      const target = this.room.getPlayer(targetId)
-      if (!target || target.id === player.id || target.role === 'game_master') {
-        return { error: 'Недопустимая цель' }
-      }
-      
-      // Проверяем что команда еще не использовалась в эту ночь
-      if (player.cthulhuOrderUsedTonight) {
-        return { error: 'Вы уже дали приказ в эту ночь' }
-      }
-      
-      // Автоматически заполняем чат командой приказа
-      const chatCommand = `/приказ ${target.name} `
-      
-      // Отправляем событие для заполнения чата
-      this.room.sendToPlayer(player.id, 'auto-fill-chat', {
-        command: chatCommand
-      })
-      
-      return {
-        success: true,
-        message: `Цель выбрана. Напишите в чат /приказ ${target.name} ваш_приказ.`,
-        actionNotComplete: true, // Сообщаем клиенту что действие не завершено
-        data: { 
-          targetId: target.id,
-          targetName: target.name,
-          autoFilled: true,
-          actionNotComplete: true
+    // Если действие выполнено успешно, логируем его
+    if (result && result.success) {
+      try {
+        const player = this.room.getPlayer(socketId)
+        const eventType = this.getNightActionEventType(player.role)
+        const target = action.targetId ? this.room.getPlayer(action.targetId) : null
+
+        if (eventType && player) {
+          this.room.gameHistory.logNightAction(eventType, player, target, {
+            success: true,
+            action: action,
+            result: result.data
+          })
         }
+      } catch (error) {
+        console.error('Night action logging error:', error)
+        // Логирование не должно влиять на результат действия
       }
     }
 
-    // Для остальных ролей - простое выполнение с логированием
-    try {
-      const eventType = this.getNightActionEventType(player.role)
-      const target = action.targetId ? this.room.getPlayer(action.targetId) : null
-      
-      if (eventType) {
-        this.room.gameHistory.logNightAction(eventType, player, target, {
-          success: true,
-          action: action
-        })
-      }
-      
-      // Помечаем что игрок выполнил действие
-      if (this.completedActions) {
-        this.completedActions.add(player.id)
-      }
-      
-      // Проверяем завершили ли все игроки с этой ролью
-      this.checkAllPlayersCompleted()
-      
-      return { 
-        success: true, 
-        message: 'Ночное действие выполнено',
-        data: action
-      }
-    } catch (error) {
-      console.error('Night action logging error:', error)
-      return { 
-        success: true, 
-        message: 'Ночное действие выполнено',
-        data: action
-      }
-    }
+    return result
   }
 
   // Получить тип события для роли
