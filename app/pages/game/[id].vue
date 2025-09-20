@@ -24,7 +24,7 @@
           <button @click="toggleSound" class="control-btn sound" :class="{ active: soundEnabled }">
           </button>
           
-          <div class="microphone-container">
+          <!-- <div class="microphone-container">
             <button 
               @click="toggleMicrophone" 
               @mouseenter="showMicSettings = true"
@@ -44,7 +44,6 @@
               </div>
             </button>
             
-            <!-- Settings Modal on hover -->
             <SettingsModal 
               v-if="showMicSettings"
               @close="showMicSettings = false"
@@ -52,7 +51,7 @@
               @mouseleave="showMicSettings = false"
               class="hover-settings-modal"
             />
-          </div>
+          </div> -->
           
           <div class="control-separator"></div>
           
@@ -185,6 +184,9 @@
 
 
             
+            <!-- Прогресс ночных действий -->
+            <NightProgress v-if="gameState.room.phase === 'night'" />
+            
             <!-- [Подсказка о текущей фазе] + Кнопки ведущего -->
             <div class="phase-controls">
               <div class="phase-hint">
@@ -205,10 +207,73 @@
                     </template>
                   </template>
                   
+                  <!-- Фаза голосования: показываем прогресс -->
+                  <template v-else-if="gameState.room.phase === 'voting' && votingProgress">
+                    <div class="voting-hint">
+                      {{ getPhaseHint() }}
+                      <div class="voting-progress">
+                        <div class="votes-text">
+                          Проголосовало: {{ votingProgress.voted }}/{{ votingProgress.total }}
+                        </div>
+                        <div class="human-icons">
+                          <span 
+                            v-for="i in votingProgress.total" 
+                            :key="i"
+                            class="human-icon"
+                            :class="{ 'voted': i <= votingProgress.voted }"
+                          >
+                            👤
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  </template>
+                  
                   <!-- Остальные фазы -->
                   <template v-else>
                     {{ getPhaseHint() }}
                   </template>
+                </div>
+                
+                <!-- Кнопка и статус голосования за пропуск фазы -->
+                <div v-if="canShowSkipButton" class="phase-skip-section">
+                  <div class="skip-button-container">
+                    <button 
+                      v-if="!hasVotedSkip"
+                      @click="voteSkipPhase"
+                      class="skip-phase-btn"
+                      title="Проголосовать за пропуск фазы"
+                    >
+                      Пропустить
+                    </button>
+                    <button 
+                      v-else
+                      @click="unvoteSkipPhase"
+                      class="skip-phase-btn voted"
+                      title="Отменить голос за пропуск"
+                    >
+                      Отменить
+                    </button>
+                  </div>
+                  
+                  <div class="skip-votes-display">
+                    <div class="votes-text">
+                      Голосов за пропуск: {{ phaseSkipStatus.votes }}/{{ phaseSkipStatus.required }}
+                    </div>
+                    <div class="human-icons">
+                      <span 
+                        v-for="i in phaseSkipStatus.total" 
+                        :key="i"
+                        class="human-icon"
+                        :class="{ 
+                          'voted': i <= phaseSkipStatus.votes,
+                          'required': i <= phaseSkipStatus.required
+                        }"
+                      >
+                        👤
+                      </span>
+                    </div>
+                  </div>
                 </div>
               </div>
               <!-- Дополнительные кнопки для центральных карт -->
@@ -311,6 +376,7 @@
     
     <RolesLibraryModal
       v-if="showRoles"
+      :selected-roles="gameState.room?.selectedRoles || []"
       @close="showRoles = false"
     />
     
@@ -352,6 +418,7 @@ import { handleRoleImageErrorSimple } from '~/utils/imageUtils.js'
 import MicrophoneSettings from '~/components/MicrophoneSettings.vue'
 import SettingsModal from '~/components/SettingsModal.vue'
 import RolesLibraryModal from '~/components/RolesLibraryModal.vue'
+import NightProgress from '~/components/NightProgress.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -474,6 +541,25 @@ const canAdminControl = computed(() => {
   return currentPlayer.value.role === 'game_master' || currentPlayer.value.isHost
 })
 
+const votingProgress = computed(() => {
+  if (gameState.room.phase !== 'voting') return null
+  
+  const totalPlayers = gameState.room.players.filter(p => 
+    p.alive && p.role !== 'game_master'
+  ).length
+  
+  // Считаем только голоса от игроков, которые могут голосовать
+  const votedPlayers = Object.keys(gameState.voting.votes || {}).filter(voterId => {
+    const voter = gameState.room.players.find(p => p.id === voterId)
+    return voter && voter.alive && voter.role !== 'game_master'
+  }).length
+  
+  return {
+    voted: votedPlayers,
+    total: totalPlayers
+  }
+})
+
 const isWerewolf = computed(() => {
   const role = currentPlayer.value.role
   if (!role) return false
@@ -484,6 +570,26 @@ const isWerewolf = computed(() => {
   ]
   
   return werewolfRoles.includes(role)
+})
+
+const phaseSkipStatus = computed(() => {
+  return gameState.room.phaseSkipStatus || {
+    votes: 0,
+    required: 0,
+    total: 0,
+    canSkip: false,
+    voters: []
+  }
+})
+
+const canShowSkipButton = computed(() => {
+  const phase = gameState.room.phase
+  return phase === 'introduction' || phase === 'day'
+})
+
+const hasVotedSkip = computed(() => {
+  const myId = currentPlayer.value?.id
+  return myId && phaseSkipStatus.value.voters.includes(myId)
 })
 
 // Methods
@@ -695,6 +801,30 @@ const abstainVote = () => {
   votingAbstained.value = true
 }
 
+const resurrectPlayer = (targetId) => {
+  if (!socket.value) return
+  
+  socket.value.emit('resurrect-player', {
+    targetId: targetId
+  })
+}
+
+const voteSkipPhase = () => {
+  if (!socket.value) return
+  
+  socket.value.emit('skip-phase', {
+    action: 'vote'
+  })
+}
+
+const unvoteSkipPhase = () => {
+  if (!socket.value) return
+  
+  socket.value.emit('skip-phase', {
+    action: 'unvote'
+  })
+}
+
 const adminAction = (action, targetId) => {
   gameAdminAction(action, targetId)
 }
@@ -749,10 +879,12 @@ const nightAction = async (type, targetName) => {
       break
   }
   
-  // Воспроизводим звук клика перед выполнением действия
-  playSound('night-action')
+  const result = await executeNightAction(action)
   
-  await executeNightAction(action)
+  // Воспроизводим звук только если действие завершено успешно
+  if (result.success && !result.message?.includes('Чат заполнен')) {
+    playSound('night-action')
+  }
 }
 
 // Night action helper methods
@@ -792,7 +924,7 @@ const canNightActionTarget = (player) => {
     case 'bodyguard':
     case 'robber':
     case 'doppelganger':
-    case 'prostitute':
+    case 'slut':
     case 'cthulhu':
       // Эти роли могут выбрать любого живого игрока (кроме себя)
       return true
@@ -849,7 +981,7 @@ const getNightActionButtonEmoji = () => {
       return '👥'
     case 'seer':
       return '👁️'
-    case 'prostitute':
+    case 'slut':
       return '🚫'
     default:
       return '✨'
@@ -878,9 +1010,11 @@ const drunkSwap = async (centerIndex) => {
 }
 
 const skipNightAction = async () => {
-  playSound('night-action')
-  await executeNightAction({ type: 'skip' })
-  nightActionSkipped.value = true
+  const result = await executeNightAction({ type: 'skip' })
+  if (result.success) {
+    playSound('night-action')
+    nightActionSkipped.value = true
+  }
 }
 
 // Тестовая функция для отладки
@@ -950,6 +1084,20 @@ const getPlayerActions = (player) => {
       condition: true,
       action: () => voteForPlayer(player.id),
       extraClass: votedForThisPlayer ? 'active' : (hasVoted ? 'off' : '')
+    })
+  }
+  
+  // Воскрешение для некроманта (доступно в любое время кроме голосования)
+  if (myRole === 'necromancer' && currentPhase !== 'voting' && !player.alive) {
+    const necromancerUsed = currentPlayer.value?.necromancerUsed
+    
+    actions.push({
+      type: 'resurrect',
+      class: 'revive',
+      title: necromancerUsed ? 'Воскрешение уже использовано' : 'Воскресить игрока',
+      condition: true,
+      action: () => resurrectPlayer(player.id),
+      extraClass: necromancerUsed ? 'off' : ''
     })
   }
   
@@ -1029,7 +1177,7 @@ const getPlayerActions = (player) => {
       } else if (myRole === 'robber') {
         buttonClass = 'swap'
         title = nightActionCompleted ? 'Вы уже совершили действие' : 'Поменяться ролями'
-      } else if (myRole === 'prostitute') {
+      } else if (myRole === 'slut') {
         buttonClass = 'block'
         title = nightActionCompleted ? 'Вы уже совершили действие' : 'Отключить способность'
       } else if (myRole === 'doppelganger') {
@@ -1037,7 +1185,7 @@ const getPlayerActions = (player) => {
         title = nightActionCompleted ? 'Вы уже совершили действие' : 'Скопировать роль'
       } else if (myRole === 'cthulhu') {
         buttonClass = 'message'
-        title = nightActionCompleted ? 'Вы уже совершили действие' : 'Отправить анонимное сообщение'
+        title = nightActionCompleted ? 'Вы уже совершили действие' : 'Дать приказ игроку'
       } else if (myRole === 'insomniac') {
         buttonClass = 'check'
         title = nightActionCompleted ? 'Вы уже совершили действие' : 'Проверить свою роль'
@@ -1386,6 +1534,10 @@ onUnmounted(() => {
   background: #f59e0b !important;
 }
 
+.night-action-btn.revive {
+  background: #22c55e !important;
+}
+
 .night-action-btn:hover {
   transform: scale(1.1);
   box-shadow: 0 0 12px rgba(79, 70, 229, 0.6);
@@ -1645,6 +1797,111 @@ onUnmounted(() => {
     opacity: 0;
     transform: translate(-50%, -50%) scale(0.8);
   }
+}
+
+/* Стили для прогресса голосования */
+.voting-hint {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.voting-progress {
+  color: #fbbf24;
+  font-weight: 600;
+  font-size: 0.9rem;
+  text-align: center;
+  padding: 0.25rem 0.5rem;
+  background: rgba(251, 191, 36, 0.1);
+  border-radius: 4px;
+  border: 1px solid rgba(251, 191, 36, 0.3);
+}
+
+.votes-text {
+  margin-bottom: 0.5rem;
+  font-size: 0.9rem;
+}
+
+.human-icons {
+  display: flex;
+  justify-content: center;
+  gap: 2px;
+  flex-wrap: wrap;
+}
+
+.human-icon {
+  font-size: 1.2rem;
+  opacity: 0.3;
+  transition: all 0.3s ease;
+}
+
+.human-icon.voted {
+  opacity: 1;
+  color: #22c55e;
+}
+
+.human-icon.required {
+  border: 1px solid #fbbf24;
+  border-radius: 50%;
+  background: rgba(251, 191, 36, 0.1);
+}
+
+/* Стили для пропуска фазы */
+.phase-skip-section {
+  margin-top: 1rem;
+  padding: 1rem;
+  background: rgba(59, 130, 246, 0.1);
+  border-radius: 8px;
+  border: 1px solid rgba(59, 130, 246, 0.3);
+}
+
+.skip-button-container {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 1rem;
+}
+
+.skip-phase-btn {
+  padding: 0.5rem 1rem;
+  background: #3b82f6;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.skip-phase-btn:hover {
+  background: #2563eb;
+  transform: translateY(-1px);
+}
+
+.skip-phase-btn.voted {
+  background: #22c55e;
+  color: white;
+}
+
+.skip-phase-btn.voted:hover {
+  background: #16a34a;
+}
+
+.skip-votes-display {
+  text-align: center;
+}
+
+.skip-votes-display .votes-text {
+  color: #3b82f6;
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+}
+
+.skip-votes-display .human-icons .human-icon {
+  color: #3b82f6;
+}
+
+.skip-votes-display .human-icons .human-icon.voted {
+  color: #22c55e;
 }
 
 </style>

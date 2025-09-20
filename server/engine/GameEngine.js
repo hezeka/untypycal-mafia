@@ -31,7 +31,24 @@ export class GameEngine {
   }
 
   assignRoles() {
-    const players = Array.from(this.room.players.values()).filter(p => p.role !== 'game_master')
+    // Получаем ведущего
+    const host = this.room.getHost()
+    
+    // Если ведущий есть и у него роль game_master, значит он в режиме наблюдателя
+    // Если у ведущего НЕТ роли game_master, значит он в режиме игрока
+    const isHostObserver = host && host.role === 'game_master'
+    
+    // Включаем всех игроков, кроме ведущего-наблюдателя
+    const players = Array.from(this.room.players.values()).filter(p => {
+      if (isHostObserver) {
+        return p.role !== 'game_master' // Исключаем ведущего-наблюдателя
+      } else {
+        return true // Включаем всех, включая ведущего-игрока
+      }
+    })
+    
+    console.log(`🎭 Host mode: ${isHostObserver ? 'Observer' : 'Player'}, distributing roles to ${players.length} players`)
+    
     const roles = [...this.room.selectedRoles]
     
     // Разделяем роли на оборотней и остальных
@@ -134,15 +151,24 @@ export class GameEngine {
   }
 
   async setPhase(newPhase) {
+    const oldPhase = this.currentPhase
     this.currentPhase = newPhase
     this.room.gameState = newPhase
     this.phaseStartTime = Date.now()
+    
+    // Очищаем голоса за пропуск фазы при каждой смене фазы
+    this.room.clearPhaseSkipVotes()
     
     const phaseKey = newPhase.toUpperCase()
     const duration = PHASE_DURATIONS[phaseKey]
     const endTime = duration ? this.phaseStartTime + (duration * 1000) : null
     
     console.log('🔄 Setting phase:', newPhase, 'PhaseKey:', phaseKey, 'Duration:', duration, 'End time:', endTime ? new Date(endTime) : null)
+    
+    // Логируем смену фазы в историю
+    if (oldPhase && oldPhase !== newPhase) {
+      this.room.gameHistory.changePhase(newPhase, oldPhase)
+    }
     
     // Обновляем права чата
     this.updateChatPermissions()
@@ -274,30 +300,34 @@ export class GameEngine {
       // Очищаем список выполненных действий для новой роли
       this.completedActions.clear()
       
+      // Определяем время для роли (60 секунд для Ктулху, 30 для остальных)
+      const timeLimit = currentRole.id === 'cthulhu' ? 60 : 30
+      const timeoutMs = timeLimit * 1000
+      
       // Обновляем таймер для клиента
       this.phaseStartTime = Date.now()
-      const endTime = this.phaseStartTime + (30 * 1000) // 30 секунд
+      const endTime = this.phaseStartTime + timeoutMs
       
       // Уведомляем игроков об их ходе
       players.forEach(player => {
         this.room.sendToPlayer(player.id, 'night-action-turn', {
           role: currentRole.id,
-          timeLimit: 30
+          timeLimit: timeLimit
         })
       })
       
       // Обновляем таймер для всех клиентов (используем отдельный event для ночных действий)
       this.room.broadcast('night-action-timer', {
         role: currentRole.id,
-        timeLimit: 30,
+        timeLimit: timeLimit,
         endTime: endTime
       })
       
-      // Устанавливаем таймер на 30 секунд
+      // Устанавливаем таймер
       this.currentPhaseTimer = setTimeout(() => {
-        console.log(`⏰ Night action timeout for role ${currentRole.id}`)
+        console.log(`Night action timeout for role ${currentRole.id}`)
         this.nextNightAction()
-      }, 30000)
+      }, timeoutMs)
     } else {
       // Нет игроков с этой ролью, пропускаем
       this.nextNightAction()
@@ -736,7 +766,7 @@ export class GameEngine {
     if (werewolfKilled) {
       console.log(`🏆 WIN: Werewolf ${werewolfKilled.name} killed - Village wins!`)
       const villageWinners = alivePlayers.filter(p => 
-        ['village', 'special'].includes(this.getTeam(p.role)) || p.role === 'minion'
+        this.getTeam(p.role) === 'village' || p.role === 'minion'
       )
       this.endGame('village', villageWinners.map(p => p.id))
       return true
@@ -770,6 +800,9 @@ export class GameEngine {
       winners: winnerIds,
       endedAt: Date.now()
     }
+    
+    // Логируем конец игры в историю
+    this.room.gameHistory.endGame(this.room.gameResult)
     
     // Устанавливаем фазу завершения игры
     this.room.gameState = GAME_PHASES.ENDED
@@ -839,10 +872,147 @@ export class GameEngine {
     return names[team] || team
   }
 
+  // Простое выполнение ночного действия
+  async executeNightAction(socketId, action) {
+    const player = this.room.getPlayer(socketId)
+    if (!player || player.role === 'game_master') {
+      return { error: 'Игрок не найден' }
+    }
+
+    // Особая обработка для Ктулху - НЕ помечаем действие как завершенное
+    if (player.role === 'cthulhu') {
+      const { targetId } = action
+      if (!targetId) {
+        return { error: 'Напишите в чат /приказ имя_игрока ваш_приказ.' }
+      }
+      
+      const target = this.room.getPlayer(targetId)
+      if (!target || target.id === player.id || target.role === 'game_master') {
+        return { error: 'Недопустимая цель' }
+      }
+      
+      // Проверяем что команда еще не использовалась в эту ночь
+      if (player.cthulhuOrderUsedTonight) {
+        return { error: 'Вы уже дали приказ в эту ночь' }
+      }
+      
+      // Автоматически заполняем чат командой приказа
+      const chatCommand = `/приказ ${target.name} `
+      
+      // Отправляем событие для заполнения чата
+      this.room.sendToPlayer(player.id, 'auto-fill-chat', {
+        command: chatCommand
+      })
+      
+      return {
+        success: true,
+        message: `Цель выбрана. Напишите в чат /приказ ${target.name} ваш_приказ.`,
+        actionNotComplete: true, // Сообщаем клиенту что действие не завершено
+        data: { 
+          targetId: target.id,
+          targetName: target.name,
+          autoFilled: true,
+          actionNotComplete: true
+        }
+      }
+    }
+
+    // Для остальных ролей - простое выполнение с логированием
+    try {
+      const eventType = this.getNightActionEventType(player.role)
+      const target = action.targetId ? this.room.getPlayer(action.targetId) : null
+      
+      if (eventType) {
+        this.room.gameHistory.logNightAction(eventType, player, target, {
+          success: true,
+          action: action
+        })
+      }
+      
+      // Помечаем что игрок выполнил действие
+      if (this.completedActions) {
+        this.completedActions.add(player.id)
+      }
+      
+      // Проверяем завершили ли все игроки с этой ролью
+      this.checkAllPlayersCompleted()
+      
+      return { 
+        success: true, 
+        message: 'Ночное действие выполнено',
+        data: action
+      }
+    } catch (error) {
+      console.error('Night action logging error:', error)
+      return { 
+        success: true, 
+        message: 'Ночное действие выполнено',
+        data: action
+      }
+    }
+  }
+
+  // Получить тип события для роли
+  getNightActionEventType(roleId) {
+    const eventTypes = {
+      'cthulhu': 'night_cthulhu_order',
+      'seer': 'night_investigate',
+      'bodyguard': 'night_protect',
+      'werewolf': 'night_kill',
+      'mystic_wolf': 'night_investigate',
+      'robber': 'night_convert',
+      'troublemaker': 'night_block',
+      'hunter': 'night_hunter_mark'
+    }
+    return eventTypes[roleId] || null
+  }
+
+  // Проверить завершили ли все игроки текущей роли действия
+  checkAllPlayersCompleted() {
+    if (!this.nightRoles || this.nightActionIndex >= this.nightRoles.length) {
+      return
+    }
+
+    const currentRole = this.nightRoles[this.nightActionIndex]
+    if (!currentRole) return
+
+    // Получаем всех игроков с текущей ролью
+    const playersWithRole = Array.from(this.room.players.values()).filter(p => 
+      p.role === currentRole.id && p.role !== 'game_master'
+    )
+
+    // Проверяем завершили ли все свои действия
+    const allCompleted = playersWithRole.every(player => 
+      this.completedActions && this.completedActions.has(player.id)
+    )
+
+    console.log(`🔍 Checking completion for role ${currentRole.id}:`, {
+      playersWithRole: playersWithRole.map(p => p.name),
+      completed: this.completedActions ? Array.from(this.completedActions) : [],
+      allCompleted
+    })
+
+    // Если все завершили - переходим к следующей роли
+    if (allCompleted && playersWithRole.length > 0) {
+      console.log(`✅ All players with role ${currentRole.id} completed actions, moving to next role`)
+      this.nextNightAction()
+    }
+  }
+
+
   // Методы для ролей
   killPlayer(playerId) {
     if (!this.protectedPlayers.includes(playerId) && !this.killedPlayers.includes(playerId)) {
       this.killedPlayers.push(playerId)
+      
+      // Логируем убийство в историю
+      const target = this.room.getPlayer(playerId)
+      if (target) {
+        this.room.gameHistory.logNightAction('night_kill', null, target, {
+          protected: false,
+          success: true
+        })
+      }
     }
   }
 
@@ -971,6 +1141,54 @@ export class GameEngine {
     
     console.log('❌ No timer info available')
     return null
+  }
+
+  // Получить прогресс ночных действий
+  getNightProgress() {
+    if (this.currentPhase !== GAME_PHASES.NIGHT || !this.nightRoles || this.nightRoles.length === 0) {
+      return {
+        currentRole: null,
+        completedRoles: [],
+        allRoles: [],
+        progress: 0
+      }
+    }
+
+    const allRoles = this.nightRoles.map((roleData, index) => {
+      const roleInfo = getRoleInfo(roleData.id)
+      return {
+        id: roleData.id,
+        name: roleInfo?.name || roleData.id,
+        order: roleData.order,
+        completed: index < this.nightActionIndex,
+        active: index === this.nightActionIndex
+      }
+    })
+
+    const currentRole = this.nightActionIndex < this.nightRoles.length ? 
+      this.nightRoles[this.nightActionIndex] : null
+
+    const currentRoleInfo = currentRole ? {
+      id: currentRole.id,
+      name: getRoleInfo(currentRole.id)?.name || currentRole.id,
+      order: currentRole.order
+    } : null
+
+    const completedRoles = allRoles.filter(role => role.completed).map(role => ({
+      id: role.id,
+      name: role.name,
+      order: role.order
+    }))
+
+    const progress = this.nightRoles.length > 0 ? 
+      (this.nightActionIndex / this.nightRoles.length) * 100 : 0
+
+    return {
+      currentRole: currentRoleInfo,
+      completedRoles,
+      allRoles,
+      progress: Math.round(progress)
+    }
   }
 
   destroy() {

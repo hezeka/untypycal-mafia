@@ -1,11 +1,12 @@
 import { BaseRole } from '../BaseRole.js'
+import { EVENT_TYPES } from '../../models/GameHistory.js'
 
 export class CthulhuRole extends BaseRole {
   constructor() {
     super('cthulhu', {
       name: 'Ктулху',
       description: 'Ночью отправляет приказ игроку, который тот должен выполнять весь день. Побеждает если переживет 3 голосования.',
-      team: 'special',
+      team: 'cthulhu',
       color: 'purple',
       hasNightAction: true,
       nightOrder: 11,
@@ -17,9 +18,23 @@ export class CthulhuRole extends BaseRole {
     })
   }
   
-  async executeNightAction(gameEngine, player, action) {
-    const { targetId } = action
+  getNightActionEventType() {
+    return EVENT_TYPES.NIGHT_CTHULHU_ORDER
+  }
+
+  async performNightAction(gameEngine, player, action) {
     const room = gameEngine.room
+    
+    // Обработка пропуска действия
+    if (action.type === 'skip') {
+      return {
+        success: true,
+        message: 'Вы пропустили выдачу приказа',
+        data: { skipped: true }
+      }
+    }
+    
+    const { targetId } = action
     
     if (!targetId) {
       return { error: 'Выберите игрока для приказа' }
@@ -42,6 +57,9 @@ export class CthulhuRole extends BaseRole {
     room.sendToPlayer(player.id, 'auto-fill-chat', {
       command: chatCommand
     })
+    
+    // Отмечаем что действие выполнено (но еще не завершено полностью)
+    player.cthulhuOrderUsedTonight = true
     
     // Отправляем инструкцию как шепот
     const instructionMessage = {

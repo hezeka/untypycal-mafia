@@ -10,9 +10,13 @@ import { ChatCommandProcessor } from './services/ChatCommandProcessor.js'
 import { SOCKET_EVENTS, ERROR_CODES, LIMITS, GAME_PHASES, MESSAGE_TYPES } from './utils/constants.js'
 import { sanitizeHtml } from './utils/gameHelpers.js'
 import { getRoleInfo } from './roles/rolesList.js'
+import { NecromancerRole } from './roles/village/NecromancerRole.js'
 import { createLogger } from './utils/logger.js'
 
 const logger = createLogger('SocketServer')
+
+// Экземпляр роли некроманта
+const necromancerRole = new NecromancerRole()
 
 // Функция форматирования результатов ночных действий для чата
 const formatNightActionResult = (result, roleId) => {
@@ -97,6 +101,14 @@ if (process.env.NODE_ENV === 'production') {
 // JSON body parsing
 app.use(express.json())
 app.use(express.urlencoded({ extended: true }))
+
+// Логирование только API запросов к нашим новым эндпоинтам
+app.use((req, res, next) => {
+  if (req.url.includes('/history') || req.url.includes('/statistics')) {
+    console.log(`🌐 ${req.method} ${req.url}`)
+  }
+  next()
+})
 
 // CORS настройки
 app.use(cors({
@@ -574,6 +586,110 @@ const handleAdminAction = (socket, data) => {
   }
 }
 
+const handleResurrectPlayer = async (socket, data) => {
+  try {
+    const room = getPlayerRoom(socket.id)
+    if (!room) {
+      return sendError(socket, ERROR_CODES.ROOM_NOT_FOUND, 'Комната не найдена')
+    }
+
+    const player = room.getPlayer(socket.id)
+    if (!player) {
+      return sendError(socket, ERROR_CODES.PLAYER_NOT_FOUND, 'Игрок не найден')
+    }
+
+    // Проверяем что игрок - некромант
+    if (player.role !== 'necromancer') {
+      return sendError(socket, ERROR_CODES.VALIDATION_ERROR, 'Только некромант может воскрешать')
+    }
+
+    const { targetId } = data
+    if (!targetId) {
+      return sendError(socket, ERROR_CODES.VALIDATION_ERROR, 'Не указана цель для воскрешения')
+    }
+
+    // Вызываем метод воскрешения роли некроманта
+    const result = await necromancerRole.resurrectPlayer(room.gameEngine, socket.id, targetId)
+    
+    if (result.error) {
+      return sendError(socket, ERROR_CODES.VALIDATION_ERROR, result.error)
+    }
+
+    // Отправляем обновление комнаты всем игрокам
+    room.broadcast(SOCKET_EVENTS.GAME_UPDATED, { 
+      room: {},  // broadcast method will automatically personalize room data for game-updated events
+      message: result.message 
+    })
+
+    logger.info(`Player ${player.name} resurrected ${result.data.targetName}`)
+    
+  } catch (error) {
+    logger.error('Resurrect player error:', error)
+    sendError(socket, ERROR_CODES.SERVER_ERROR, 'Ошибка при воскрешении')
+  }
+}
+
+const handleSkipPhase = async (socket, data) => {
+  try {
+    const room = getPlayerRoom(socket.id)
+    if (!room) {
+      return sendError(socket, ERROR_CODES.ROOM_NOT_FOUND, 'Комната не найдена')
+    }
+
+    const player = room.getPlayer(socket.id)
+    if (!player) {
+      return sendError(socket, ERROR_CODES.PLAYER_NOT_FOUND, 'Игрок не найден')
+    }
+
+    const { action } = data // 'vote' или 'unvote'
+    
+    if (action === 'vote') {
+      const shouldSkip = room.addPhaseSkipVote(socket.id)
+      
+      // Отправляем обновление статуса голосования всем игрокам
+      room.broadcast(SOCKET_EVENTS.GAME_UPDATED, { 
+        room: {}  // broadcast method will automatically personalize room data for game-updated events
+      })
+
+      // Если достигнут порог - пропускаем фазу
+      if (shouldSkip) {
+        logger.info(`Phase ${room.gameState} skipped by player vote in room ${room.id}`)
+        
+        // Очищаем голоса за пропуск ПЕРЕД сменой фазы
+        room.clearPhaseSkipVotes()
+        
+        // Отправляем обновление статуса после очистки голосов
+        room.broadcast(SOCKET_EVENTS.GAME_UPDATED, { 
+          room: {}  // broadcast method will automatically personalize room data for game-updated events
+        })
+        
+        // Используем GameEngine для правильного перехода фазы
+        if (room.gameState === GAME_PHASES.INTRODUCTION) {
+          // Переход к ночной фазе через GameEngine
+          await room.gameEngine.setPhase(GAME_PHASES.NIGHT)
+          room.addSystemMessage('Фаза знакомства пропущена голосованием игроков', MESSAGE_TYPES.SYSTEM)
+        } else if (room.gameState === GAME_PHASES.DAY) {
+          // Переход к голосованию через GameEngine
+          await room.gameEngine.setPhase(GAME_PHASES.VOTING)
+          room.addSystemMessage('Дневная фаза пропущена голосованием игроков', MESSAGE_TYPES.SYSTEM)
+        }
+      }
+      
+    } else if (action === 'unvote') {
+      room.removePhaseSkipVote(socket.id)
+      
+      // Отправляем обновление статуса голосования
+      room.broadcast(SOCKET_EVENTS.GAME_UPDATED, { 
+        room: {}  // broadcast method will automatically personalize room data for game-updated events
+      })
+    }
+    
+  } catch (error) {
+    logger.error('Skip phase error:', error)
+    sendError(socket, ERROR_CODES.VALIDATION_ERROR, error.message)
+  }
+}
+
 const handleVoiceActivity = (socket, data) => {
   const room = getPlayerRoom(socket.id)
   if (room) {
@@ -665,6 +781,8 @@ io.on('connection', (socket) => {
   socket.on(SOCKET_EVENTS.START_GAME, (data) => handleStartGame(socket, data))
   socket.on(SOCKET_EVENTS.VOTE, (data) => handleVote(socket, data))
   socket.on(SOCKET_EVENTS.NIGHT_ACTION, (data) => handleNightAction(socket, data))
+  socket.on(SOCKET_EVENTS.RESURRECT_PLAYER, (data) => handleResurrectPlayer(socket, data))
+  socket.on(SOCKET_EVENTS.SKIP_PHASE, (data) => handleSkipPhase(socket, data))
   socket.on(SOCKET_EVENTS.ADMIN_ACTION, (data) => handleAdminAction(socket, data))
   socket.on(SOCKET_EVENTS.VOICE_ACTIVITY, (data) => handleVoiceActivity(socket, data))
   socket.on('request-players-sync', () => handleRequestPlayersSync(socket))
@@ -691,6 +809,90 @@ app.get('/api/rooms/public', (req, res) => {
   res.json(publicRooms)
 })
 
+// Получить историю игры
+app.get('/api/rooms/:roomId/history', async (req, res) => {
+  const { roomId } = req.params
+  const { importance } = req.query // 'critical', 'normal', 'minor'
+  const room = rooms.get(roomId)
+  
+  if (!room) {
+    return res.status(404).json({ error: 'Комната не найдена' })
+  }
+  
+  // История доступна только после завершения игры
+  if (room.gameState !== 'ended') {
+    return res.status(400).json({ error: 'История доступна только после завершения игры' })
+  }
+  
+  try {
+    const history = room.getGameHistory(importance)
+    const formattedHistory = room.getFormattedHistory(importance)
+    const playerStats = room.getPlayerStatistics()
+    const summary = room.getGameSummary()
+    
+    res.json({
+      history,
+      formattedHistory,
+      playerStats,
+      summary
+    })
+  } catch (error) {
+    logger.error('Get history error:', error)
+    res.status(500).json({ error: error.message })
+  }
+})
+
+// Получить статистику игроков
+app.get('/api/rooms/:roomId/statistics', async (req, res) => {
+  const { roomId } = req.params
+  const room = rooms.get(roomId)
+  
+  if (!room) {
+    return res.status(404).json({ error: 'Комната не найдена' })
+  }
+  
+  // Статистика доступна только после завершения игры
+  if (room.gameState !== 'ended') {
+    return res.status(400).json({ error: 'Статистика доступна только после завершения игры' })
+  }
+  
+  try {
+    const playerStats = room.getPlayerStatistics()
+    const summary = room.getGameSummary()
+    
+    res.json({
+      playerStats,
+      summary
+    })
+  } catch (error) {
+    logger.error('Get statistics error:', error)
+    res.status(500).json({ error: error.message })
+  }
+})
+
+// Получить прогресс ночных действий
+app.get('/api/rooms/:roomId/night-progress', async (req, res) => {
+  const { roomId } = req.params
+  const room = rooms.get(roomId)
+  
+  if (!room) {
+    return res.status(404).json({ error: 'Комната не найдена' })
+  }
+  
+  // Прогресс доступен только в ночной фазе
+  if (room.gameState !== 'night') {
+    return res.status(400).json({ error: 'Прогресс доступен только в ночной фазе' })
+  }
+  
+  try {
+    const nightProgress = room.getNightProgress()
+    res.json(nightProgress)
+  } catch (error) {
+    logger.error('Get night progress error:', error)
+    res.status(500).json({ error: error.message })
+  }
+})
+
 // Получение данных конкретной комнаты
 app.get('/api/rooms/:roomId', (req, res) => {
   const { roomId } = req.params
@@ -704,8 +906,6 @@ app.get('/api/rooms/:roomId', (req, res) => {
   // Не переопределяем players - доверяем логике getClientData
   const roomData = room.getClientData(null)
   
-  console.log(`📊 API /rooms/${roomId} - returning data for anonymous viewer`)
-  console.log(`📊 Players with roles:`, roomData.players.map(p => `${p.name}: ${p.role} (alive: ${p.alive})`))
   
   res.json(roomData)
 })
@@ -847,8 +1047,6 @@ app.post('/api/rooms/:roomId/join', (req, res) => {
     // ИСПРАВЛЕНО: Убираем дублирование - используем только getClientData
     const roomData = room.getClientData(socketId)
     
-    console.log(`📊 API /join - returning data for player ${player.name}`)
-    console.log(`📊 Players with roles:`, roomData.players.map(p => `${p.name}: ${p.role} (alive: ${p.alive})`))
     
     res.json({
       room: roomData,
@@ -962,7 +1160,7 @@ app.get('/api/rooms/:roomId/roles', async (req, res) => {
       }
     }).sort((a, b) => {
       // Сортируем по команде, затем по порядку ночи
-      const teamOrder = { village: 1, werewolf: 2, special: 3, tanner: 4 }
+      const teamOrder = { village: 1, werewolf: 2, special: 3, cthulhu: 4, tanner: 5 }
       if (a.team !== b.team) {
         return (teamOrder[a.team] || 999) - (teamOrder[b.team] || 999)
       }
@@ -1031,6 +1229,50 @@ app.post('/api/rooms/:roomId/roles', (req, res) => {
     
   } catch (error) {
     logger.error('Role management error:', error)
+    res.status(400).json({ error: error.message })
+  }
+})
+
+// Управление режимом голосования
+app.post('/api/rooms/:roomId/voting-mode', (req, res) => {
+  const { roomId } = req.params
+  const { votingMode, playerId } = req.body
+  
+  if (!votingMode || !playerId) {
+    return res.status(400).json({ error: 'Укажите votingMode и playerId' })
+  }
+  
+  const room = rooms.get(roomId)
+  if (!room) {
+    return res.status(404).json({ error: 'Комната не найдена' })
+  }
+  
+  const player = room.getPlayer(playerId)
+  if (!player || !player.isHost) {
+    return res.status(403).json({ error: 'Только ведущий может изменять режим голосования' })
+  }
+  
+  if (room.gameState !== 'setup') {
+    return res.status(400).json({ error: 'Режим голосования можно изменять только в фазе настройки' })
+  }
+  
+  try {
+    room.setVotingMode(votingMode)
+    logger.info(`🗳️ Voting mode changed to ${votingMode} in room ${roomId} by ${player.name}`)
+    
+    // Уведомляем об изменении режима голосования
+    room.broadcast('voting-mode-updated', { 
+      votingMode: room.votingMode
+    })
+    
+    res.json({
+      success: true,
+      votingMode: room.votingMode,
+      room: room.getClientData(playerId)
+    })
+    
+  } catch (error) {
+    logger.error('Voting mode management error:', error)
     res.status(400).json({ error: error.message })
   }
 })
@@ -1207,6 +1449,8 @@ app.post('/api/rooms/:roomId/night-action', async (req, res) => {
   }
 })
 
+console.log('📍 Reset endpoint is being registered...')
+
 // Сброс комнаты (новая игра)
 app.post('/api/rooms/:roomId/reset', async (req, res) => {
   const { roomId } = req.params
@@ -1225,6 +1469,12 @@ app.post('/api/rooms/:roomId/reset', async (req, res) => {
       message: 'Игра сброшена, начинается новая игра'
     })
     
+    // Отправляем обновленное состояние комнаты всем клиентам
+    room.broadcast('game-updated', {
+      reason: 'room-reset',
+      room: room.getClientData()
+    })
+    
     res.json({
       success: true,
       message: 'Комната успешно сброшена'
@@ -1235,6 +1485,9 @@ app.post('/api/rooms/:roomId/reset', async (req, res) => {
     res.status(500).json({ error: error.message })
   }
 })
+
+
+
 
 // Покинуть комнату
 app.post('/api/rooms/:roomId/leave', async (req, res) => {

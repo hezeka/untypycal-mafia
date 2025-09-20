@@ -823,6 +823,12 @@ export class ChatCommandProcessor {
       this.room.gameEngine.checkAllPlayersCompleted()
     }
     
+    // Логируем ночное действие в историю игры
+    this.room.gameHistory.logNightAction('night_cthulhu_order', sender, target, {
+      order: message,
+      success: true
+    })
+    
     // Логируем действие
     console.log(`🐙 Cthulhu ${sender.name} sent order to ${target.name}: "${message}"`)
     

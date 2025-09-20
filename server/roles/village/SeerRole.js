@@ -3,6 +3,7 @@
  */
 
 import { BaseRole } from '../BaseRole.js'
+import { EVENT_TYPES } from '../../models/GameHistory.js'
 
 export class SeerRole extends BaseRole {
   constructor() {
@@ -21,7 +22,11 @@ export class SeerRole extends BaseRole {
     })
   }
   
-  async executeNightAction(gameEngine, player, action) {
+  getNightActionEventType() {
+    return EVENT_TYPES.NIGHT_INVESTIGATE
+  }
+
+  async performNightAction(gameEngine, player, action) {
     const { type, targetId, centerCards } = action
     const room = gameEngine.room
     

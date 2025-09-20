@@ -41,6 +41,39 @@
         </div>
         
         <div v-if="gameState.player.isHost" class="host-actions">
+          <!-- Режим голосования -->
+          <div class="voting-mode-section">
+            <label class="voting-mode-label">Режим голосования:</label>
+            <div class="voting-mode-options">
+              <button 
+                @click="changeVotingMode('democratic')"
+                :class="{ 
+                  'voting-mode-btn': true, 
+                  'active': gameState.room.votingMode === 'democratic' 
+                }"
+              >
+                Демократичный
+              </button>
+              <button 
+                @click="changeVotingMode('chaotic')"
+                :class="{ 
+                  'voting-mode-btn': true, 
+                  'active': gameState.room.votingMode === 'chaotic' 
+                }"
+              >
+                Хаотичный
+              </button>
+            </div>
+            <div class="voting-mode-description">
+              <span v-if="gameState.room.votingMode === 'democratic'">
+                Нужно большинство голосов для исключения (как в Among Us)
+              </span>
+              <span v-else>
+                Исключается игрок с наибольшим количеством голосов
+              </span>
+            </div>
+          </div>
+          
           <button 
             @click="startGame"
             :disabled="!canStart"
@@ -106,7 +139,7 @@ import { useGame } from '~/composables/useGame'
 import { getAllRoles, validateRoleBalance, getTeamNames } from '../../../shared/rolesRegistry.js'
 import { handleRoleImageError } from '~/utils/imageUtils.js'
 
-const { gameState, selectRole, startGame: gameStart } = useGame()
+const { gameState, selectRole, changeVotingMode, startGame: gameStart } = useGame()
 const roles = getAllRoles()
 const roleLoading = ref(new Set())
 const teamNames = getTeamNames()
@@ -191,4 +224,78 @@ const startGame = async () => {
   }
 }
 </script>
+
+<style scoped>
+/* Режим голосования */
+.voting-mode-section {
+  margin-bottom: 1rem;
+  padding: 1rem;
+  background: rgb(26 26 26 / 50%);
+  border-radius: 8px;
+  border: 1px solid #313131;
+}
+
+.voting-mode-label {
+  display: block;
+  color: #f9fafb;
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+  font-size: 0.875rem;
+  text-align: center;
+}
+
+.voting-mode-options {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.voting-mode-btn {
+  flex: 1;
+  padding: 0.5rem 1rem;
+  border: 1px solid #4b5563;
+  background: #374151;
+  color: #d1d5db;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s;
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.voting-mode-btn:hover {
+  background: #4b5563;
+  border-color: #6b7280;
+}
+
+.voting-mode-btn.active {
+  background: #ff8000;
+  border-color: #cf5300;
+  color: white;
+}
+
+.voting-mode-description {
+  color: #9ca3af;
+  font-size: 0.75rem;
+  text-align: center;
+  line-height: 1.4;
+}
+
+/* Адаптивность */
+@media (max-width: 640px) {
+  .voting-mode-options {
+    flex-direction: column;
+  }
+  
+  .voting-mode-btn {
+    font-size: 0.8rem;
+    padding: 0.4rem 0.8rem;
+  }
+  
+  .voting-mode-description {
+    font-size: 0.7rem;
+  }
+}
+</style>
 

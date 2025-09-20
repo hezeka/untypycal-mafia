@@ -44,84 +44,99 @@
           </div>
         </div>
         
-        <!-- Статистика игры -->
-        <div class="game-stats-section">
-          <h4>Статистика игры</h4>
-          
-          <div class="stats-grid">
-            <!-- Общая статистика -->
-            <div class="stat-group">
-              <h5>Общее</h5>
-              <div class="stat-item">
-                <span class="stat-label">Продолжительность:</span>
-                <span class="stat-value">{{ getGameDuration() }}</span>
+        <!-- Статистика игры из API -->
+        <div class="game-history-section" v-if="historyData">
+          <!-- Сводка игры -->
+          <div class="game-summary" v-if="historyData.summary">
+            <h4>Обзор игры</h4>
+            <div class="summary-grid">
+              <div class="summary-card">
+                <div class="summary-label">Продолжительность</div>
+                <div class="summary-value">{{ formatDuration(historyData.summary.duration) }}</div>
               </div>
-              <div class="stat-item">
-                <span class="stat-label">Дней пережито:</span>
-                <span class="stat-value">{{ gameState.room.daysSurvived || 0 }}</span>
+              <div class="summary-card">
+                <div class="summary-label">Дней</div>
+                <div class="summary-value">{{ historyData.summary.days }}</div>
               </div>
-              <div class="stat-item">
-                <span class="stat-label">Всего игроков:</span>
-                <span class="stat-value">{{ getActivePlayers().length }}</span>
+              <div class="summary-card">
+                <div class="summary-label">Ночей</div>
+                <div class="summary-value">{{ historyData.summary.nights }}</div>
               </div>
-            </div>
-            
-            <!-- Статистика чата -->
-            <div class="stat-group">
-              <h5>Активность в чате</h5>
-              <div class="chat-stats">
-                <div 
-                  v-for="player in getTopChatters()" 
-                  :key="player.id"
-                  class="chat-stat-item"
-                >
-                  <span class="player-name">{{ player.name }}:</span>
-                  <span class="message-count">{{ player.messageCount }} сообщений</span>
-                  <span class="whisper-count">({{ player.whisperCount }} личных)</span>
-                </div>
+              <div class="summary-card">
+                <div class="summary-label">Голосований</div>
+                <div class="summary-value">{{ historyData.summary.votings }}</div>
               </div>
             </div>
           </div>
-          
-          <!-- Роли всех игроков -->
-          <div class="roles-reveal">
-            <h5>Роли игроков</h5>
-            <div class="roles-grid">
+
+          <!-- Статистика игроков -->
+          <div class="player-stats" v-if="historyData.playerStats">
+            <h4>Активность игроков</h4>
+            <div class="stats-list">
               <div 
-                v-for="player in getActivePlayers()"
-                :key="player.id"
-                class="role-reveal-card"
+                v-for="stat in historyData.playerStats" 
+                :key="stat.name"
+                class="player-stat"
                 :class="{ 
-                  'winner': gameState.room.gameResult?.winners?.includes(player.id),
-                  'eliminated': !player.alive
+                  'winner': gameState.room.gameResult?.winners?.includes(getPlayerIdByName(stat.name)),
+                  'eliminated': stat.eliminationCause
                 }"
               >
-                <div class="role-reveal-avatar">
-                  <img 
-                    v-if="player.role"
-                    :src="`/roles/compressed/${player.role}.webp`" 
-                    :alt="getRoleName(player.role)"
-                    @error="handleImageError($event, player.role)"
-                    class="role-reveal-image"
-                  >
-                  <div v-else class="role-reveal-default">
-                    {{ player.name[0]?.toUpperCase() }}
+                <div class="player-info">
+                  <div class="player-avatar">
+                    <img 
+                      v-if="stat.role"
+                      :src="`/roles/compressed/${stat.role}.webp`" 
+                      :alt="getRoleName(stat.role)"
+                      @error="handleImageError($event, stat.role)"
+                      class="player-role-image"
+                    >
+                  </div>
+                  <div class="player-details">
+                    <div class="player-name">{{ stat.name }}</div>
+                    <div class="player-role" :class="`team-${getRoleTeam(stat.role)}`">{{ getRoleName(stat.role) }}</div>
                   </div>
                 </div>
-                <div class="role-reveal-info">
-                  <div class="role-reveal-name">{{ player.name }}</div>
-                  <div class="role-reveal-role" :class="`team-${getRoleTeam(player.role)}`">
-                    {{ getRoleName(player.role) }}
+                <div class="player-metrics">
+                  <div class="metric">
+                    <span class="metric-value">{{ stat.messagesCount }}</span>
+                    <span class="metric-label">сообщений</span>
                   </div>
-                  <div class="role-reveal-status">
-                    <span v-if="gameState.room.gameResult?.winners?.includes(player.id)" class="status-winner">Победитель</span>
-                    <span v-else-if="!player.alive" class="status-eliminated">Исключен</span>
-                    <span v-else class="status-alive">Проиграл</span>
+                  <div class="metric" v-if="stat.whispersCount > 0">
+                    <span class="metric-value">{{ stat.whispersCount }}</span>
+                    <span class="metric-label">личных</span>
+                  </div>
+                  <div class="metric" v-if="stat.nightActions.length > 0">
+                    <span class="metric-value">{{ stat.nightActions.length }}</span>
+                    <span class="metric-label">ночных действий</span>
+                  </div>
+                  <div class="elimination-info" v-if="stat.eliminationCause">
+                    <span class="elimination-text">{{ getEliminationText(stat.eliminationCause) }} (День {{ stat.eliminationDay }})</span>
                   </div>
                 </div>
               </div>
             </div>
           </div>
+
+          <!-- Ключевые события -->
+          <div class="game-timeline" v-if="historyData.formattedHistory">
+            <h4>События игры</h4>
+            <div class="timeline-content">
+              <pre class="timeline-text">{{ historyData.formattedHistory }}</pre>
+            </div>
+          </div>
+        </div>
+
+        <!-- Загрузка истории -->
+        <div class="loading-history" v-else-if="loadingHistory">
+          <div class="loading-spinner"></div>
+          <div class="loading-text">Загрузка истории игры...</div>
+        </div>
+
+        <!-- Ошибка загрузки истории -->
+        <div class="history-error" v-else-if="historyError">
+          <div class="error-text">Не удалось загрузить историю игры</div>
+          <button @click="loadGameHistory" class="retry-btn">Попробовать снова</button>
         </div>
       </div>
       
@@ -140,7 +155,7 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, ref, onMounted } from 'vue'
 import { useGame } from '~/composables/useGame'
 import { useSocket } from '~/composables/useSocket'
 import { useAPI } from '~/composables/useAPI'
@@ -151,16 +166,23 @@ import { handleRoleImageErrorSimple } from '~/utils/imageUtils.js'
 const emit = defineEmits(['new-game', 'leave', 'close'])
 const { gameState, currentPlayer } = useGame()
 const { socket } = useSocket()
+const api = useAPI()
 const route = useRoute()
 const router = useRouter()
 const roles = getAllRoles()
+
+// История игры
+const historyData = ref(null)
+const loadingHistory = ref(false)
+const historyError = ref(false)
 
 const getTeamName = () => {
   const teams = {
     village: 'Деревня',
     werewolf: 'Оборотни',
     tanner: 'Неудачник',
-    special: 'Особые'
+    special: 'Особые',
+    cthulhu: 'Ктулху'
   }
   return teams[gameState.room.gameResult?.winnerTeam] || 'Неизвестно'
 }
@@ -171,7 +193,8 @@ const getWinDescription = () => {
     village: 'Все оборотни исключены или их действия заблокированы',
     werewolf: 'Оборотни выжили или деревня не смогла их найти',
     tanner: 'Неудачник был исключен голосованием',
-    special: 'Особая победа достигнута'
+    special: 'Особая победа достигнута',
+    cthulhu: 'Ктулху выполнил условие победы'
   }
   return descriptions[team] || ''
 }
@@ -275,6 +298,54 @@ const handleLeave = async () => {
     router.push('/')
   }
 }
+
+// Загрузка истории игры
+const loadGameHistory = async () => {
+  loadingHistory.value = true
+  historyError.value = false
+  
+  try {
+    const data = await api.getGameHistory(route.params.id, 'critical')
+    historyData.value = data
+  } catch (error) {
+    console.error('Failed to load game history:', error)
+    historyError.value = true
+  } finally {
+    loadingHistory.value = false
+  }
+}
+
+// Форматирование продолжительности
+const formatDuration = (ms) => {
+  const minutes = Math.floor(ms / 1000 / 60)
+  if (minutes < 60) {
+    return `${minutes} мин`
+  }
+  const hours = Math.floor(minutes / 60)
+  const remainingMinutes = minutes % 60
+  return `${hours}ч ${remainingMinutes}мин`
+}
+
+// Получить ID игрока по имени
+const getPlayerIdByName = (playerName) => {
+  const player = getActivePlayers().find(p => p.name === playerName)
+  return player?.id
+}
+
+// Текст причины исключения
+const getEliminationText = (cause) => {
+  const causes = {
+    'voting': 'исключён голосованием',
+    'night': 'убит ночью',
+    'hunter': 'убит охотником'
+  }
+  return causes[cause] || cause
+}
+
+// Загружаем историю при монтировании компонента
+onMounted(() => {
+  loadGameHistory()
+})
 </script>
 
 <style scoped>
@@ -594,6 +665,7 @@ const handleLeave = async () => {
 .role-reveal-role.team-werewolf { color: #ef4444; }
 .role-reveal-role.team-tanner { color: #f59e0b; }
 .role-reveal-role.team-special { color: #a78bfa; }
+.role-reveal-role.team-cthulhu { color: #8b4513; }
 
 .role-reveal-status {
   font-size: 0.75rem;
@@ -685,5 +757,233 @@ const handleLeave = async () => {
     flex-direction: column;
     align-items: center;
   }
+  
+  .summary-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+  
+  .player-stat {
+    flex-direction: column;
+    gap: 12px;
+    text-align: center;
+  }
+  
+  .player-metrics {
+    justify-content: center;
+  }
+}
+
+/* Стили для истории игры */
+.game-history-section {
+  display: flex;
+  flex-direction: column;
+  gap: 32px;
+}
+
+.game-summary h4,
+.player-stats h4,
+.game-timeline h4 {
+  margin: 0 0 16px 0;
+  color: #fbbf24;
+  font-size: 1.25rem;
+}
+
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 16px;
+}
+
+.summary-card {
+  background: #2a2a2a;
+  border-radius: 12px;
+  padding: 20px;
+  text-align: center;
+  border: 1px solid #444;
+}
+
+.summary-label {
+  color: #d1d5db;
+  font-size: 0.9rem;
+  margin-bottom: 8px;
+}
+
+.summary-value {
+  color: #4ade80;
+  font-size: 1.5rem;
+  font-weight: 600;
+}
+
+.stats-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.player-stat {
+  background: #2a2a2a;
+  border-radius: 12px;
+  padding: 16px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border: 1px solid #444;
+  transition: border-color 0.2s;
+}
+
+.player-stat.winner {
+  border-color: #4ade80;
+  background: rgba(74, 222, 128, 0.1);
+}
+
+.player-stat.eliminated {
+  opacity: 0.7;
+}
+
+.player-info {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.player-avatar {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #333;
+}
+
+.player-role-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.player-details {
+  display: flex;
+  flex-direction: column;
+}
+
+.player-name {
+  font-weight: 600;
+  color: #fff;
+  font-size: 1.1rem;
+}
+
+.player-role {
+  font-size: 0.9rem;
+  margin-top: 2px;
+}
+
+.team-village { color: #4ade80; }
+.team-werewolf { color: #ef4444; }
+.team-special { color: #a855f7; }
+.team-cthulhu { color: #8b4513; }
+.team-tanner { color: #f97316; }
+
+.player-metrics {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.metric {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  min-width: 60px;
+}
+
+.metric-value {
+  color: #4ade80;
+  font-weight: 600;
+  font-size: 1.1rem;
+}
+
+.metric-label {
+  color: #9ca3af;
+  font-size: 0.8rem;
+  margin-top: 2px;
+}
+
+.elimination-info {
+  color: #ef4444;
+  font-size: 0.9rem;
+  font-style: italic;
+}
+
+.timeline-content {
+  background: #2a2a2a;
+  border-radius: 12px;
+  padding: 20px;
+  border: 1px solid #444;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.timeline-text {
+  color: #d1d5db;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  font-family: 'Courier New', monospace;
+  font-size: 0.9rem;
+  margin: 0;
+}
+
+.loading-history,
+.history-error {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px;
+  text-align: center;
+}
+
+.loading-spinner {
+  width: 40px;
+  height: 40px;
+  border: 3px solid #444;
+  border-top: 3px solid #4ade80;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  margin-bottom: 16px;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+.loading-text,
+.error-text {
+  color: #9ca3af;
+  font-size: 1.1rem;
+}
+
+.error-text {
+  color: #ef4444;
+  margin-bottom: 16px;
+}
+
+.retry-btn {
+  background: #4ade80;
+  color: #000;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.retry-btn:hover {
+  background: #22c55e;
 }
 </style>

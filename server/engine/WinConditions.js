@@ -100,16 +100,17 @@ export class WinConditions {
       return role && role.team === 'werewolf'
     })
     
+    // Оборотни должны убить всех жителей деревни (исключая независимых как Ктулху, Неудачник)
     const aliveVillagers = alivePlayers.filter(p => {
       const role = this.game.room.getRole(p.role)
-      return role && ['village', 'special'].includes(role.team)
+      return role && role.team === 'village'
     })
     
-    // Оборотни побеждают если их больше или равно жителям
-    if (aliveWerewolves.length >= aliveVillagers.length && aliveWerewolves.length > 0) {
+    // Оборотни побеждают если убили всех жителей деревни
+    if (aliveWerewolves.length > 0 && aliveVillagers.length === 0) {
       return {
         type: 'werewolf',
-        message: 'Оборотни захватили деревню!',
+        message: 'Оборотни убили всех жителей деревни!',
         winners: this.getAllWerewolves(),
         losers: this.getAllVillagers()
       }
@@ -165,13 +166,14 @@ export class WinConditions {
   }
   
   /**
-   * Получение всех жителей деревни
+   * Получение всех жителей деревни (исключая Ктулху, Неудачника и других независимых)
    */
   getAllVillagers() {
     return Array.from(this.game.room.players.values()).filter(p => {
       if (p.role === 'game_master') return false
       const role = this.game.room.getRole(p.role)
-      return role && ['village', 'special'].includes(role.team)
+      // Только настоящие жители деревни, исключаем независимых (Ктулху, Неудачник)
+      return role && role.team === 'village'
     })
   }
   
@@ -183,6 +185,39 @@ export class WinConditions {
       if (p.role === 'game_master') return false
       const role = this.game.room.getRole(p.role)
       return role && role.team === 'tanner'
+    })
+  }
+  
+  /**
+   * Получение всех игроков команды 'special' (включая других особых ролей)
+   */
+  getAllSpecialRoles() {
+    return Array.from(this.game.room.players.values()).filter(p => {
+      if (p.role === 'game_master') return false
+      const role = this.game.room.getRole(p.role)
+      return role && role.team === 'special'
+    })
+  }
+
+  /**
+   * Получение всех игроков команды 'cthulhu' (только Ктулху)
+   */
+  getAllCthulhuRoles() {
+    return Array.from(this.game.room.players.values()).filter(p => {
+      if (p.role === 'game_master') return false
+      const role = this.game.room.getRole(p.role)
+      return role && role.team === 'cthulhu'
+    })
+  }
+  
+  /**
+   * Получение всех независимых игроков (Ктулху, Неудачник, особые роли)
+   */
+  getAllIndependent() {
+    return Array.from(this.game.room.players.values()).filter(p => {
+      if (p.role === 'game_master') return false
+      const role = this.game.room.getRole(p.role)
+      return role && ['cthulhu', 'tanner', 'special'].includes(role.team)
     })
   }
   
@@ -204,6 +239,7 @@ export class WinConditions {
       werewolf: 0,
       village: 0,
       special: 0,
+      cthulhu: 0,
       tanner: 0,
       neutral: 0
     }

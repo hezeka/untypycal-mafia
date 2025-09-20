@@ -1487,6 +1487,11 @@ body {
   background: #1e3a8a;
 }
 
+.role-item.selected.team-cthulhu {
+  box-shadow: 0 0 0 2px rgb(139, 69, 19), 0 10px 10px rgba(139, 69, 19, 0.1);
+  background: #1e3a8a;
+}
+
 .role-item.selected.team-tanner {
   box-shadow: 0 0 0 2px rgb(186, 87, 38), 0 10px 10px rgba(104, 40, 9, 0.1);
   background: #1e3a8a;

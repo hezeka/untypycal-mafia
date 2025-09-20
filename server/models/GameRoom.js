@@ -2,6 +2,7 @@ import { GameEngine } from '../engine/GameEngine.js'
 import { getRoleInfo, validateRole } from '../roles/rolesList.js'
 import { generateRoomId, sanitizeHtml } from '../utils/gameHelpers.js'
 import { GAME_PHASES, MESSAGE_TYPES, LIMITS, ROLE_TEAMS } from '../utils/constants.js'
+import { GameHistory } from './GameHistory.js'
 
 export class GameRoom {
   constructor(hostId, isPrivate = false, hostAsObserver = false) {
@@ -15,7 +16,7 @@ export class GameRoom {
     this.players = new Map()
     this.selectedRoles = []
     this.centerCards = []
-    this.nextPlayerId = 1  // Последовательные ID для порядка
+    this.usedRandomIds = new Set()  // Для отслеживания уже использованных случайных номеров
     
     // Игровое состояние
     this.gameState = GAME_PHASES.SETUP
@@ -32,11 +33,30 @@ export class GameRoom {
     // Голосование
     this.votes = new Map()
     this.votingActive = false
+    this.votingMode = 'democratic' // 'democratic' или 'chaotic'
+    
+    // Голосование за пропуск фазы
+    this.phaseSkipVotes = new Set() // ID игроков, проголосовавших за пропуск
+    this.phaseSkipThreshold = 1.0 // 100% игроков для пропуска
     
     // Подключения Socket.IO
     this.sockets = new Map()
+    
+    // История игры
+    this.gameHistory = new GameHistory()
   }
   
+  // ✅ ГЕНЕРАЦИЯ УНИКАЛЬНОГО СЛУЧАЙНОГО ID ДЛЯ СОРТИРОВКИ
+  generateRandomSortId() {
+    let randomId
+    do {
+      randomId = Math.floor(Math.random() * 10000) + 1
+    } while (this.usedRandomIds.has(randomId))
+    
+    this.usedRandomIds.add(randomId)
+    return randomId
+  }
+
   // ✅ ПРАВА ЧАТА ПО УМОЛЧАНИЮ
   getDefaultChatPermissions() {
     return {
@@ -142,6 +162,10 @@ export class GameRoom {
       existingPlayer.id = playerId
       existingPlayer.connected = true
       this.players.set(playerId, existingPlayer)
+      
+      // Логируем переподключение
+      this.gameHistory.logPlayerConnection(existingPlayer, 'reconnect')
+      
       return existingPlayer
     }
     
@@ -154,10 +178,13 @@ export class GameRoom {
       connected: true,
       isHost,
       joinedAt: Date.now(),
-      sequentialId: this.nextPlayerId++  // Присваиваем порядковый номер
+      randomSortId: this.generateRandomSortId()  // Присваиваем случайный номер для сортировки
     }
     
     this.players.set(playerId, player)
+    
+    // Логируем присоединение игрока
+    this.gameHistory.logPlayerConnection(player, 'join')
     
     // Если игра уже началась и у игрока нет роли, попробуем назначить ее
     if (this.gameState !== GAME_PHASES.SETUP && !player.role && !player.isHost) {
@@ -177,13 +204,16 @@ export class GameRoom {
   }
   
   // Уведомляет о смерти игрока с раскрытием роли
-  announcePlayerDeath(player, cause = 'killed') {
+  announcePlayerDeath(player, cause = 'killed', killer = null) {
     if (!player || !player.role) {
       console.log(`⚠️ Cannot announce death: player=${!!player}, role=${player?.role}`)
       return
     }
     
     console.log(`💀 Announcing death: ${player.name} (alive: ${player.alive} -> false, role: ${player.role})`)
+    
+    // Логируем смерть в историю
+    this.gameHistory.logPlayerDeath(player, cause, killer)
     
     const roleInfo = this.getRoleInfo(player.role)
     const roleName = roleInfo?.name || player.role
@@ -229,9 +259,9 @@ export class GameRoom {
     return this.players.get(playerId)
   }
 
-  // Получить игроков в порядке присоединения
+  // Получить игроков в случайном порядке (по randomSortId)
   getSortedPlayers() {
-    return Array.from(this.players.values()).sort((a, b) => a.sequentialId - b.sequentialId)
+    return Array.from(this.players.values()).sort((a, b) => a.randomSortId - b.randomSortId)
   }
   
   addRole(roleId) {
@@ -257,6 +287,18 @@ export class GameRoom {
     }
   }
   
+  setVotingMode(mode) {
+    if (this.gameState !== GAME_PHASES.SETUP) {
+      throw new Error('Нельзя изменять режим голосования после начала игры')
+    }
+    
+    if (!['democratic', 'chaotic'].includes(mode)) {
+      throw new Error('Неизвестный режим голосования')
+    }
+    
+    this.votingMode = mode
+  }
+  
   async startGame() {
     const playerCount = Array.from(this.players.values())
       .filter(p => p.role !== 'game_master').length
@@ -274,6 +316,10 @@ export class GameRoom {
     
     this.gameEngine = new GameEngine(this)
     await this.gameEngine.startGame()
+    
+    // Логируем начало игры в историю
+    const activePlayers = Array.from(this.players.values()).filter(p => p.role !== 'game_master')
+    this.gameHistory.startGame(activePlayers, this.selectedRoles)
     
     // Добавляем системное сообщение с информацией о центральных картах
     const centerCardsCount = this.centerCards.length
@@ -300,6 +346,14 @@ export class GameRoom {
     }
 
     this.chat.push(message)
+    
+    // Логируем сообщение в историю
+    if (type === MESSAGE_TYPES.WHISPER) {
+      this.gameHistory.logChatMessage(sender, text, 'whisper', recipient)
+    } else if (type === MESSAGE_TYPES.PUBLIC) {
+      this.gameHistory.logChatMessage(sender, text, 'public')
+    }
+    
     return message
   }
 
@@ -472,30 +526,63 @@ export class GameRoom {
       }
     }
     
-    // Находим игроков с максимальным количеством голосов
-    const maxVotes = Math.max(0, ...voteCounts.values())
     let eliminated = []
+    const totalVotes = this.votes.size
     
-    if (maxVotes > 0) {
-      const playersWithMaxVotes = []
-      for (const [playerId, votes] of voteCounts) {
-        if (votes === maxVotes) {
-          playersWithMaxVotes.push(playerId)
+    if (this.votingMode === 'democratic') {
+      // Демократичный режим: нужно 50% или более голосов (как в Among Us)
+      const requiredPercentage = totalVotes / 2 // 50% от всех голосов
+      
+      // Найдем игрока(ов) с максимальным количеством голосов
+      const maxVotes = Math.max(0, ...voteCounts.values())
+      
+      if (maxVotes > 0) {
+        // Проверим, есть ли у кого-то 50% или более голосов
+        if (maxVotes >= requiredPercentage) {
+          // Найдем всех игроков с максимальным количеством голосов
+          const playersWithMaxVotes = []
+          for (const [playerId, votes] of voteCounts) {
+            if (votes === maxVotes) {
+              playersWithMaxVotes.push(playerId)
+            }
+          }
+          
+          // Исключаем только если один игрок набрал максимум (нет ничьи)
+          // Даже если несколько игроков набрали 50%+, но поровну - это ничья
+          if (playersWithMaxVotes.length === 1) {
+            eliminated = playersWithMaxVotes
+          }
         }
       }
+    } else {
+      // Хаотичный режим: максимальное количество голосов (как было изначально)
+      const maxVotes = Math.max(0, ...voteCounts.values())
       
-      // Если только один игрок получил максимальное количество голосов - он исключается
-      // Если несколько игроков имеют одинаковое максимальное количество голосов (ничья) - никто не исключается
-      if (playersWithMaxVotes.length === 1) {
-        eliminated = playersWithMaxVotes
+      if (maxVotes > 0) {
+        const playersWithMaxVotes = []
+        for (const [playerId, votes] of voteCounts) {
+          if (votes === maxVotes) {
+            playersWithMaxVotes.push(playerId)
+          }
+        }
+        
+        // Если только один игрок получил максимальное количество голосов - он исключается
+        // Если несколько игроков имеют одинаковое максимальное количество голосов (ничья) - никто не исключается
+        if (playersWithMaxVotes.length === 1) {
+          eliminated = playersWithMaxVotes
+        }
       }
     }
+    
+    // Логируем голосование в историю
+    this.gameHistory.logVoting(Object.fromEntries(this.votes), eliminated)
     
     return {
       eliminated,
       voteCounts: Object.fromEntries(voteCounts),
       abstainCount,
-      totalVotes: this.votes.size
+      totalVotes,
+      votingMode: this.votingMode
     }
   }
   
@@ -596,6 +683,59 @@ export class GameRoom {
     return getRoleInfo(roleId)
   }
   
+  // Получить историю игры
+  getGameHistory(importance = null) {
+    if (!this.gameHistory) {
+      return []
+    }
+    return this.gameHistory.getHistory(importance)
+  }
+  
+  // Получить статистику игроков
+  getPlayerStatistics() {
+    if (!this.gameHistory) {
+      return []
+    }
+    return this.gameHistory.getPlayerStats()
+  }
+  
+  // Получить форматированную историю
+  getFormattedHistory(importance = null) {
+    if (!this.gameHistory) {
+      return 'История недоступна - игра еще не началась'
+    }
+    return this.gameHistory.getFormattedHistory(importance)
+  }
+  
+  // Получить сводку игры
+  getGameSummary() {
+    if (!this.gameHistory) {
+      return {
+        duration: 0,
+        nights: 0,
+        days: 0,
+        votings: 0,
+        totalEvents: 0,
+        criticalEvents: 0,
+        playerStats: []
+      }
+    }
+    return this.gameHistory.getGameSummary()
+  }
+  
+  // Получить прогресс ночных действий
+  getNightProgress() {
+    if (!this.gameEngine || this.gameState !== GAME_PHASES.NIGHT) {
+      return {
+        currentRole: null,
+        completedRoles: [],
+        allRoles: []
+      }
+    }
+    
+    return this.gameEngine.getNightProgress()
+  }
+  
   getClientData(playerId = null) {
     const player = playerId ? this.getPlayer(playerId) : null
     const isGameMaster = player?.role === 'game_master'
@@ -610,11 +750,17 @@ export class GameRoom {
       centerCards: this.centerCards.length,
       chatPermissions: player ? this.getPlayerChatPermissions(player) : this.chatPermissions,
       votingActive: this.votingActive,
+      votingMode: this.votingMode,
       gameResult: this.gameResult,
       votingRounds: this.votingRounds,
       daysSurvived: this.daysSurvived,
       civiliansKilled: this.civiliansKilled,
       timer: this.gameEngine ? this.gameEngine.getTimerInfo() : null,
+      phaseSkipStatus: this.getPhaseSkipStatus(),
+      voting: {
+        active: this.votingActive,
+        votes: Object.fromEntries(this.votes)
+      },
       players: this.getSortedPlayers().map(p => ({
         id: p.id,
         name: p.name,
@@ -623,32 +769,42 @@ export class GameRoom {
         connected: p.connected,
         isHost: p.isHost,
         isMe: p.id === playerId,
-        sequentialId: p.sequentialId
+        randomSortId: p.randomSortId
       }))
     }
   }
   
   resetGame() {
     // Сбрасываем игровое состояние
-    this.gameState = 'setup'
+    this.gameState = GAME_PHASES.SETUP
     this.selectedRoles = []
     this.centerCards = []
     this.votingActive = false
     this.votes.clear()
+    this.phaseSkipVotes.clear()
     this.gameResult = null
     this.votingRounds = 0
     this.daysSurvived = 0
     this.civiliansKilled = 0
     this.chat = []
     
+    // Сбрасываем права чата к состоянию по умолчанию
+    this.chatPermissions = this.getDefaultChatPermissions()
+    
+    // Очищаем использованные случайные ID для новых игроков
+    this.usedRandomIds.clear()
+    
     // Сбрасываем состояние игроков
     for (const player of this.players.values()) {
-      player.role = null
-      player.alive = true
-      if (player.role !== 'game_master') {
+      const wasGameMaster = player.role === 'game_master'
+      
+      if (!wasGameMaster) {
+        player.role = null
         player.messageCount = 0
         player.whisperCount = 0
       }
+      player.alive = true
+      
       // Сбрасываем флаг использования команды Ктулху
       player.cthulhuOrderUsedTonight = false
     }
@@ -659,7 +815,80 @@ export class GameRoom {
       this.gameEngine = null
     }
     
+    // Сбрасываем историю игры
+    this.gameHistory.reset()
+    
     console.log(`🔄 Room ${this.id} has been reset`)
+  }
+  
+  // Методы для голосования за пропуск фазы
+  addPhaseSkipVote(playerId) {
+    const player = this.getPlayer(playerId)
+    
+    // Исключаем: мертвых игроков, ведущих-наблюдателей и наблюдателей
+    // Ведущий-игрок (isHost=true, но role !== 'game_master') может голосовать
+    if (!player || !player.alive || player.role === 'observer' || player.isObserver) {
+      throw new Error('Игрок не может голосовать за пропуск')
+    }
+    
+    // Ведущий-наблюдатель (role === 'game_master') не может голосовать
+    if (player.role === 'game_master') {
+      throw new Error('Ведущий-наблюдатель не может голосовать за пропуск')
+    }
+    
+    // Проверяем допустимые фазы для пропуска
+    if (!this.canSkipCurrentPhase()) {
+      throw new Error('Текущую фазу нельзя пропустить')
+    }
+    
+    this.phaseSkipVotes.add(playerId)
+    
+    // Проверяем, достигнут ли порог для пропуска
+    return this.checkPhaseSkipThreshold()
+  }
+  
+  removePhaseSkipVote(playerId) {
+    this.phaseSkipVotes.delete(playerId)
+  }
+  
+  canSkipCurrentPhase() {
+    return this.gameState === GAME_PHASES.INTRODUCTION || this.gameState === GAME_PHASES.DAY
+  }
+  
+  checkPhaseSkipThreshold() {
+    // Подсчитываем игроков, которые могут голосовать за пропуск
+    // Исключаем: мертвых, ведущих-наблюдателей (role === 'game_master') и наблюдателей  
+    // Включаем: живых игроков и ведущих-игроков (isHost=true, но role !== 'game_master')
+    const eligibleVoters = Array.from(this.players.values())
+      .filter(p => p.alive && p.role !== 'game_master' && p.role !== 'observer' && !p.isObserver)
+    
+    const requiredVotes = Math.ceil(eligibleVoters.length * this.phaseSkipThreshold)
+    const currentVotes = this.phaseSkipVotes.size
+    
+    console.log(`⏭️ Phase skip votes: ${currentVotes}/${requiredVotes} (threshold: ${this.phaseSkipThreshold})`)
+    console.log(`⏭️ Eligible voters:`, eligibleVoters.map(p => `${p.name}(${p.role || 'no-role'}, host:${p.isHost})`))
+    
+    return currentVotes >= requiredVotes
+  }
+  
+  clearPhaseSkipVotes() {
+    this.phaseSkipVotes.clear()
+  }
+  
+  getPhaseSkipStatus() {
+    // Подсчитываем игроков, которые могут голосовать за пропуск
+    // Исключаем: мертвых, ведущих-наблюдателей (role === 'game_master') и наблюдателей
+    // Включаем: живых игроков и ведущих-игроков (isHost=true, но role !== 'game_master')
+    const eligibleVoters = Array.from(this.players.values())
+      .filter(p => p.alive && p.role !== 'game_master' && p.role !== 'observer' && !p.isObserver)
+    
+    return {
+      votes: this.phaseSkipVotes.size,
+      required: Math.ceil(eligibleVoters.length * this.phaseSkipThreshold),
+      total: eligibleVoters.length,
+      canSkip: this.canSkipCurrentPhase(),
+      voters: Array.from(this.phaseSkipVotes)
+    }
   }
   
   removePlayer(playerId) {
@@ -670,6 +899,7 @@ export class GameRoom {
     this.players.delete(playerId)
     this.sockets.delete(playerId)
     this.votes.delete(playerId)
+    this.phaseSkipVotes.delete(playerId)
     
     console.log(`👋 Player ${player.name} removed from room ${this.id}`)
     return true

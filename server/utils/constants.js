@@ -38,6 +38,8 @@ export const SOCKET_EVENTS = {
   START_GAME: 'start-game',
   VOTE: 'vote',
   NIGHT_ACTION: 'night-action',
+  RESURRECT_PLAYER: 'resurrect-player',
+  SKIP_PHASE: 'skip-phase',
   ADMIN_ACTION: 'admin-action',
   VOICE_ACTIVITY: 'voice-activity',
   

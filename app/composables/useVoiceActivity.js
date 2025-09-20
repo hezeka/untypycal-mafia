@@ -20,7 +20,7 @@ const throttle = (func, limit) => {
 // Глобальное состояние (singleton)
 const speakingPlayers = ref([])
 const isListening = ref(false)
-const vadEnabled = ref(true)
+const vadEnabled = ref(false)
 
 export const useVoiceActivity = () => {
   const { emit } = useSocket()

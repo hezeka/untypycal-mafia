@@ -210,8 +210,8 @@ export const ROLES_REGISTRY = {
     }
   },
   
-  prostitute: {
-    id: 'prostitute',
+  slut: {
+    id: 'slut',
     name: 'Путана',
     description: 'Ночью может отключить ночную способность одного игрока.',
     team: 'village',
@@ -229,7 +229,7 @@ export const ROLES_REGISTRY = {
     id: 'cthulhu',
     name: 'Ктулху',
     description: 'Ночью отправляет приказ игроку, который тот должен выполнять весь день. Побеждает если переживет 3 голосования.',
-    team: 'special',
+    team: 'cthulhu',
     color: 'purple',
     hasNightAction: true,
     nightOrder: 11,
@@ -297,6 +297,35 @@ export const ROLES_REGISTRY = {
     implemented: true,
     phaseHints: {
       day: 'Найдите оборотней по их поведению и противоречиям'
+    }
+  },
+
+  medium: {
+    id: 'medium',
+    name: 'Медиум',
+    description: 'Обычный житель без особых способностей.',
+    team: 'village',
+    color: 'blue',
+    hasNightAction: false,
+    nightOrder: 0,
+    implemented: true,
+    phaseHints: {
+      day: 'Найдите оборотней по их поведению и противоречиям'
+    }
+  },
+
+  necromancer: {
+    id: 'necromancer',
+    name: 'Некромант',
+    description: 'Может воскресить одного игрока за всю игру в любой момент, кроме голосования.',
+    team: 'village',
+    color: 'blue',
+    hasNightAction: false,
+    nightOrder: 0,
+    implemented: true,
+    phaseHints: {
+      night: 'Можете воскресить мертвого игрока кнопкой "Воскресить"',
+      day: 'Можете воскресить мертвого игрока кнопкой "Воскресить"'
     }
   }
 }

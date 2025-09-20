@@ -209,6 +209,10 @@ const playerRole = computed(() => {
   border-left-color: #9370db;
 }
 
+.team-cthulhu {
+  border-left-color: #8b4513;
+}
+
 @media (max-width: 768px) {
   .introduction-phase {
     padding: 16px;

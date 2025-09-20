@@ -23,7 +23,42 @@ export class BaseRole {
    * @returns {Promise<Object>} Результат действия
    */
   async executeNightAction(gameEngine, player, action) {
+    const result = await this.performNightAction(gameEngine, player, action)
+    
+    // Логируем действие в историю игры
+    if (gameEngine.room.gameHistory && result.success !== false) {
+      const target = action.targetId ? gameEngine.room.getPlayer(action.targetId) : null
+      this.logNightAction(gameEngine.room.gameHistory, player, target, action, result)
+    }
+    
+    return result
+  }
+
+  /**
+   * Реализация ночного действия (переопределяется в дочерних классах)
+   */
+  async performNightAction(gameEngine, player, action) {
     return { success: true, message: 'Действие выполнено' }
+  }
+
+  /**
+   * Логирование ночного действия в историю
+   */
+  logNightAction(gameHistory, actor, target, action, result) {
+    const actionType = this.getNightActionEventType()
+    if (actionType) {
+      gameHistory.logNightAction(actionType, actor, target, {
+        ...action,
+        ...result
+      })
+    }
+  }
+
+  /**
+   * Получить тип события для логирования (переопределяется в дочерних классах)
+   */
+  getNightActionEventType() {
+    return null
   }
   
   /**

@@ -222,6 +222,10 @@ const handleImageError = (event, roleId) => {
   border-left: 4px solid #9C27B0;
 }
 
+.role-item.team-cthulhu {
+  border-left: 4px solid #8b4513;
+}
+
 .role-item.team-tanner {
   border-left: 4px solid #FF9800;
 }
@@ -328,6 +332,11 @@ const handleImageError = (event, roleId) => {
 
 .role-team-badge.team-special { 
   background: #9C27B0; 
+  color: white; 
+}
+
+.role-team-badge.team-cthulhu { 
+  background: #8b4513; 
   color: white; 
 }
 

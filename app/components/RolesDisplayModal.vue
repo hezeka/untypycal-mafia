@@ -102,6 +102,7 @@ const getTeamName = (team) => {
     village: 'Деревня',
     werewolf: 'Оборотни', 
     special: 'Особые',
+    cthulhu: 'Ктулху',
     tanner: 'Неудачник'
   }
   return teamNames[team] || team
@@ -242,6 +243,7 @@ onMounted(() => {
 .team-village { background: #4CAF50; color: white; }
 .team-werewolf { background: #f44336; color: white; }
 .team-special { background: #9C27B0; color: white; }
+.team-cthulhu { background: #8b4513; color: white; }
 .team-tanner { background: #FF9800; color: white; }
 
 .role-description {

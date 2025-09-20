@@ -1,6 +1,7 @@
 import { getRole as getSharedRole, getAllRoles } from '../utils/gameHelpers.js'
 import { CthulhuRole } from './special/CthulhuRole.js'
 import { DoppelgangerRole } from './special/DoppelgangerRole.js'
+import { NecromancerRole } from './village/NecromancerRole.js'
 
 /**
  * Получение информации о роли
@@ -63,7 +64,7 @@ export const executeRoleAction = async (gameEngine, player, action) => {
     const skipResult = {
       success: true,
       message: 'Ночью вас обольстила путана, вы пропустили свою очередь',
-      data: { blocked: true, blocker: 'prostitute', skipped: true }
+      data: { blocked: true, blocker: 'slut', skipped: true }
     }
     
     // Помечаем игрока как выполнившего действие (пропуск)
@@ -100,6 +101,7 @@ export { getRoleHandler }
 // Инициализируем экземпляры классов ролей
 const cthulhuRole = new CthulhuRole()
 const doppelgangerRole = new DoppelgangerRole()
+const necromancerRole = new NecromancerRole()
 
 /**
  * Получение обработчика роли
@@ -119,7 +121,9 @@ const getRoleHandler = (roleId) => {
     insomniac: handleInsomniac,
     doppelganger: (gameEngine, player, action) => doppelgangerRole.executeNightAction(gameEngine, player, action),
     cthulhu: (gameEngine, player, action) => cthulhuRole.executeNightAction(gameEngine, player, action),
-    prostitute: handleProstitute,
+    slut: handleProstitute,
+    medium: handleDefault,
+    necromancer: handleDefault,
     werewolf_2: handleWerewolf,
     werewolf_3: handleWerewolf
   }

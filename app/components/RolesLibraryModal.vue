@@ -39,7 +39,8 @@
               class="role-card"
               :class="{ 
                 [`team-${role.team}`]: true,
-                'not-implemented': !role.implemented
+                'not-implemented': !role.implemented,
+                'selected-in-game': isRoleSelectedInGame(roleId)
               }"
             >
               <div class="role-header">
@@ -60,6 +61,11 @@
                   <!-- Не реализована -->
                   <div v-if="!role.implemented" class="not-implemented-badge">
                     ⚠
+                  </div>
+
+                  <!-- Выбрана в игре -->
+                  <div v-if="isRoleSelectedInGame(roleId)" class="selected-in-game-badge">
+                    ✓
                   </div>
                 </div>
                 
@@ -102,6 +108,7 @@
           <span>Всего ролей: {{ totalRolesCount }}</span>
           <span>• Реализованных: {{ implementedRolesCount }}</span>
           <span v-if="showAll">• В разработке: {{ totalRolesCount - implementedRolesCount }}</span>
+          <span v-if="selectedInGameCount > 0" class="selected-in-game-stat">• В текущей игре: {{ selectedInGameCount }}</span>
         </div>
       </div>
     </div>
@@ -113,6 +120,12 @@ import { computed, ref } from 'vue'
 import { getAllRoles, getTeamNames } from '../../../shared/rolesRegistry.js'
 
 const emit = defineEmits(['close'])
+const props = defineProps({
+  selectedRoles: {
+    type: Array,
+    default: () => []
+  }
+})
 
 const roles = getAllRoles()
 const teamNames = getTeamNames()
@@ -124,6 +137,7 @@ const teams = [
   { id: 'village', name: 'Деревня', icon: '🏘️' },
   { id: 'werewolf', name: 'Оборотни', icon: '🐺' },
   { id: 'special', name: 'Особые', icon: '✨' },
+  { id: 'cthulhu', name: 'Ктулху', icon: '🐙' },
   { id: 'tanner', name: 'Неудачник', icon: '😔' }
 ]
 
@@ -183,6 +197,10 @@ const implementedRolesCount = computed(() => {
   return Object.values(roles).filter(role => role.implemented).length
 })
 
+const selectedInGameCount = computed(() => {
+  return props.selectedRoles.length
+})
+
 const handleImageError = (event, roleId) => {
   // Сначала пробуем несжатую версию
   if (event.target.src.includes('compressed')) {
@@ -211,6 +229,11 @@ const getPhaseLabel = (phase) => {
     voting: 'При голосовании'
   }
   return phaseLabels[phase] || phase
+}
+
+// Проверить, выбрана ли роль в текущей игре
+const isRoleSelectedInGame = (roleId) => {
+  return props.selectedRoles.includes(roleId)
 }
 </script>
 
@@ -378,6 +401,11 @@ const getPhaseLabel = (phase) => {
   border-style: dashed;
 }
 
+.role-card.selected-in-game {
+  border-color: #10b981;
+  box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.2);
+}
+
 /* Команды */
 .role-card.team-village {
   border-left: 4px solid #4CAF50;
@@ -389,6 +417,10 @@ const getPhaseLabel = (phase) => {
 
 .role-card.team-special {
   border-left: 4px solid #9C27B0;
+}
+
+.role-card.team-cthulhu {
+  border-left: 4px solid #8b4513;
 }
 
 .role-card.team-tanner {
@@ -442,6 +474,22 @@ const getPhaseLabel = (phase) => {
   font-size: 12px;
 }
 
+.selected-in-game-badge {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  background: #10b981;
+  color: white;
+  border-radius: 50%;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: bold;
+}
+
 .role-info {
   flex: 1;
 }
@@ -473,6 +521,11 @@ const getPhaseLabel = (phase) => {
 
 .role-team-badge.team-special { 
   background: #9C27B0; 
+  color: white; 
+}
+
+.role-team-badge.team-cthulhu { 
+  background: #8b4513; 
   color: white; 
 }
 
@@ -544,5 +597,10 @@ const getPhaseLabel = (phase) => {
   font-size: 14px;
   color: #aaa;
   justify-content: center;
+}
+
+.selected-in-game-stat {
+  color: #10b981 !important;
+  font-weight: 500;
 }
 </style>

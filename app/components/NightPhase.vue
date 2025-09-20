@@ -318,6 +318,10 @@ const handleNightAction = (action) => {
   border-left-color: #9370db;
 }
 
+.team-cthulhu {
+  border-left-color: #8b4513;
+}
+
 @media (max-width: 768px) {
   .night-phase {
     padding: 16px;

@@ -61,7 +61,7 @@ const gameState = reactive({
 
 export const useGame = () => {
   const { socket, isConnected, emit, on, getSocketId } = useSocket()
-  const { getRoomData, joinRoom: apiJoinRoom, getChatHistory, manageRole, managePhase, nightAction, getGameState } = useAPI()
+  const { getRoomData, joinRoom: apiJoinRoom, getChatHistory, manageRole, setVotingMode, managePhase, nightAction, getGameState } = useAPI()
   const timer = useTimer()
   const router = useRouter()
   const loading = ref(false)
@@ -305,6 +305,29 @@ export const useGame = () => {
     }
   }
   
+  const changeVotingMode = async (votingMode) => {
+    if (!gameState.room.id || !gameState.player.id) {
+      console.error('❌ Cannot change voting mode: missing room or player ID')
+      return false
+    }
+
+    try {
+      console.log(`🗳️ Changing voting mode to:`, votingMode)
+      const result = await setVotingMode(gameState.room.id, votingMode, gameState.player.id)
+      console.log('✅ Voting mode change successful:', result)
+      
+      // Обновляем локальное состояние комнаты
+      if (result.room) {
+        Object.assign(gameState.room, result.room)
+      }
+      
+      return true
+    } catch (error) {
+      console.error('❌ Voting mode change failed:', error)
+      return false
+    }
+  }
+  
   const sendMessage = (text) => {
     if (!text.trim()) return false
     return safeEmit('send-message', { text })
@@ -341,15 +364,31 @@ export const useGame = () => {
       
       if (result.success) {
         console.log('✅ Night action executed successfully:', result)
-        // Скрываем интерфейс ночного действия после успешного выполнения
-        gameState.nightAction.active = false
         
-        // Обновляем результат ночного действия для отображения
-        gameState.nightAction.result = {
-          success: true,
-          message: result.message,
-          data: result.data || {},
-          blocked: result.data?.blocked || false
+        // Проверяем флаг actionNotComplete - для Ктулху действие не завершено
+        const isActionComplete = !result.data?.actionNotComplete && !result.actionNotComplete
+        
+        // Для Ктулху (когда действие не завершено) - не показываем результат плашки снизу
+        if (!isActionComplete && (gameState.player.role === 'cthulhu' || result.data?.autoFilled)) {
+          console.log('🐙 Cthulhu action not complete, keeping interface active')
+          // Интерфейс остается активным, чат заполняется автоматически
+          return { success: true, message: result.message || 'Чат заполнен командой' }
+        }
+        
+        if (isActionComplete) {
+          // Скрываем интерфейс ночного действия только если действие действительно завершено
+          gameState.nightAction.active = false
+          
+          // Обновляем результат ночного действия для отображения
+          gameState.nightAction.result = {
+            success: true,
+            message: result.message,
+            data: result.data || {},
+            blocked: result.data?.blocked || false
+          }
+        } else {
+          // Для других ролей - показываем что действие не завершено
+          console.log('⚠️ Action not complete, keeping interface active')
         }
         
         return { success: true, message: result.message || 'Действие выполнено' }
@@ -700,6 +739,12 @@ export const useGame = () => {
         gameState.room.selectedRoles = data.selectedRoles
       })
       
+      // Обновления режима голосования
+      on('voting-mode-updated', (data) => {
+        console.log('🗳️ Voting mode updated:', data)
+        gameState.room.votingMode = data.votingMode
+      })
+      
       // Действия администратора
       on('admin-action-completed', (data) => {
         console.log('⚡ Admin action completed:', data)
@@ -749,15 +794,28 @@ export const useGame = () => {
         gameState.nightAction = {
           active: false,
           role: null,
+          timeLimit: 0,
+          data: null,
           result: null
         }
         
         // Очищаем состояние голосования
         gameState.voting = {
           active: false,
-          myVote: null,
-          results: {}
+          votes: {},
+          myVote: null
         }
+        
+        // Сбрасываем права чата к состоянию по умолчанию
+        gameState.room.chatPermissions = {
+          canChat: true,
+          canSeeAll: true,
+          canWhisper: true,
+          werewolfChat: false
+        }
+        
+        // Сбрасываем голосование
+        gameState.room.votingActive = false
         
         // Сбрасываем состояние всех игроков (очищаем роли, восстанавливаем alive)
         gameState.room.players.forEach(player => {
@@ -767,9 +825,21 @@ export const useGame = () => {
           }
         })
         
+        // Сбрасываем состояние текущего игрока (если он не game_master)
+        if (gameState.player.role !== 'game_master') {
+          gameState.player.role = null
+          gameState.player.alive = true
+        }
+        
         // Сбрасываем роли в комнате
-        gameState.room.roles = []
+        gameState.room.selectedRoles = []
         gameState.room.centerCards = 0
+        
+        // Очищаем чат
+        gameState.chat = []
+        
+        // Сбрасываем таймер
+        timer.setEndTime(null)
         
         console.log('✅ Game state reset to setup phase')
       })
@@ -777,6 +847,16 @@ export const useGame = () => {
       // Обновления игры - только для критических изменений состояния
       on('game-updated', (data) => {
         console.log('🔄 Game updated (critical):', data)
+        
+        if (data.reason === 'room-reset') {
+          console.log('🔄 Room reset update received - syncing full state')
+          // При сбросе комнаты обновляем полное состояние
+          if (data.room) {
+            Object.assign(gameState.room, data.room)
+            console.log('✅ Room state fully updated after reset')
+          }
+          return
+        }
         
         if (data.reason === 'roles-assigned') {
           console.log('🎭 Roles assigned update received')
@@ -797,6 +877,12 @@ export const useGame = () => {
           const currentNightAction = gameState.nightAction
           
           Object.assign(gameState.room, data.room)
+          
+          // Обновляем состояние голосования если есть данные
+          if (data.room.voting) {
+            gameState.voting.active = data.room.voting.active
+            gameState.voting.votes = data.room.voting.votes || {}
+          }
           
           // Восстанавливаем права чата если фаза не изменилась
           if (currentChatPerms && gameState.room.phase === data.room.phase) {
@@ -986,6 +1072,15 @@ export const useGame = () => {
         gameState.voting.myVote = data.targetId
       })
       
+      on('vote-cast', (data) => {
+        // Обновляем состояние голосов для отображения счетчика
+        if (!gameState.voting.votes) {
+          gameState.voting.votes = {}
+        }
+        gameState.voting.votes[data.voterId] = data.targetId
+        console.log('🗳️ Vote cast updated:', data)
+      })
+      
       on('voting-ended', (data) => {
         gameState.room.votingActive = false
       })
@@ -1092,6 +1187,7 @@ export const useGame = () => {
     joinRoom,
     startGame,
     selectRole,
+    changeVotingMode,
     sendMessage,
     showChatError,
     executeNightAction,

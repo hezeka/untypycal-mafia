@@ -128,7 +128,7 @@ const { vadEnabled: globalVadEnabled, checkMicrophonePermission } = useVoiceActi
 // Локальные настройки
 const soundEnabled = ref(true)
 const soundVolume = ref(70)
-const vadEnabled = ref(true)
+const vadEnabled = ref(false)
 const showTimestamps = ref(true)
 const compactMode = ref(false)
 const microphoneStatus = ref('Проверить микрофон')
@@ -174,7 +174,7 @@ const loadSettings = () => {
       
       soundEnabled.value = settings.soundEnabled ?? true
       soundVolume.value = settings.soundVolume ?? 70
-      vadEnabled.value = settings.vadEnabled ?? true
+      vadEnabled.value = settings.vadEnabled ?? false
       showTimestamps.value = settings.showTimestamps ?? true
       compactMode.value = settings.compactMode ?? false
     }
@@ -185,7 +185,7 @@ const loadSettings = () => {
 const resetSettings = () => {
   soundEnabled.value = true
   soundVolume.value = 70
-  vadEnabled.value = true
+  vadEnabled.value = false
   showTimestamps.value = true
   compactMode.value = false
 }
