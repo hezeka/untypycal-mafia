@@ -259,6 +259,10 @@ export class GameRoom {
     return this.players.get(playerId)
   }
 
+  getHost() {
+    return this.getPlayer(this.hostId)
+  }
+
   // Получить игроков в случайном порядке (по randomSortId)
   getSortedPlayers() {
     return Array.from(this.players.values()).sort((a, b) => a.randomSortId - b.randomSortId)
