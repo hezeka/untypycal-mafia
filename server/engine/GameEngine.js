@@ -387,6 +387,44 @@ export class GameEngine {
       return { error: 'Вы уже выполнили своё действие' }
     }
 
+    // Особая обработка для Ктулху (как в старом коде)
+    if (player.role === 'cthulhu') {
+      const { targetId } = action
+      if (!targetId) {
+        return { error: 'Напишите в чат /приказ имя_игрока ваш_приказ.' }
+      }
+
+      const target = this.room.getPlayer(targetId)
+      if (!target || target.id === player.id || target.role === 'game_master') {
+        return { error: 'Недопустимая цель' }
+      }
+
+      // Проверяем что команда еще не использовалась в эту ночь
+      if (player.cthulhuOrderUsedTonight) {
+        return { error: 'Вы уже дали приказ в эту ночь' }
+      }
+
+      // Автоматически заполняем чат командой приказа
+      const chatCommand = `/приказ ${target.name} `
+
+      // Отправляем событие для заполнения чата
+      this.room.sendToPlayer(player.id, 'auto-fill-chat', {
+        command: chatCommand
+      })
+
+      return {
+        success: true,
+        message: `Цель выбрана. Напишите в чат /приказ ${target.name} ваш_приказ.`,
+        actionNotComplete: true, // Сообщаем клиенту что действие не завершено
+        data: {
+          targetId: target.id,
+          targetName: target.name,
+          autoFilled: true,
+          actionNotComplete: true
+        }
+      }
+    }
+
     try {
       const result = await executeRoleAction(this, player, action)
       
