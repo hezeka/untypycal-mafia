@@ -154,7 +154,8 @@ const handleWerewolf = async (gameEngine, player, action) => {
     }
     
     gameEngine.werewolfVotes.set(player.id, target.id)
-    
+    console.log(`🐺 ${player.name} voted to kill ${target.name}. Current votes:`, Array.from(gameEngine.werewolfVotes.entries()))
+
     return {
       success: true,
       message: `Вы проголосовали за ${target.name}`,
@@ -378,24 +379,26 @@ const handleProstitute = async (gameEngine, player, action) => {
     return { error: 'Недопустимая цель' }
   }
   
-  // Проверяем, есть ли у цели ночная способность
+  // Получаем информацию о роли цели
   const targetRole = getRoleInfo(target.role)
-  if (!targetRole || !targetRole.hasNightAction) {
-    return { error: 'У этого игрока нет ночной способности' }
-  }
-  
-  // Блокируем ночное действие цели
+
+  // Блокируем игрока (независимо от наличия ночной способности)
   if (!gameEngine.blockedPlayers) {
     gameEngine.blockedPlayers = new Set()
   }
   gameEngine.blockedPlayers.add(targetId)
-  
-  // Уведомление будет отправлено когда игрок попытается действовать
-  
+
+  // Одинаковое сообщение для всех игроков (не раскрываем наличие способностей)
+  const message = `Вы соблазнили игрока ${target.name}`
+
   return {
     success: true,
-    message: `Вы заблокировали ночное действие игрока ${target.name}`,
-    data: { target: target.name, blockedRole: targetRole.name }
+    message: message,
+    data: {
+      target: target.name,
+      blockedRole: targetRole?.name || target.role,
+      hadNightAction: targetRole && targetRole.hasNightAction
+    }
   }
 }
 
