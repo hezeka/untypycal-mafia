@@ -477,7 +477,10 @@ export class GameEngine {
     
     // Отправляем отложенные личные сообщения игрокам
     this.sendPendingMessages()
-    
+
+    // Отправляем сообщения заблокированным игрокам без ночных способностей
+    this.sendBlockedMessagesToInactivePlayers()
+
     // Небольшая задержка перед системными сообщениями (чтобы избежать конфликтов)
     await new Promise(resolve => setTimeout(resolve, 50))
     
@@ -539,6 +542,29 @@ export class GameEngine {
       this.room.addSystemWhisper(message, playerId)
     })
     this.pendingMessages = [] // Очищаем после отправки
+  }
+
+  // Отправка сообщений заблокированным игрокам без ночных способностей
+  sendBlockedMessagesToInactivePlayers() {
+    if (!this.blockedPlayers || this.blockedPlayers.size === 0) return
+
+    this.blockedPlayers.forEach(playerId => {
+      const player = this.room.getPlayer(playerId)
+      if (!player) return
+
+      // Проверяем, есть ли у игрока ночная способность
+      const roleInfo = this.room.getRoleInfo(player.role)
+      const hasNightAction = roleInfo && roleInfo.hasNightAction
+
+      // Если у игрока НЕТ ночной способности, отправляем ему сообщение о блокировке
+      if (!hasNightAction) {
+        this.room.addSystemWhisper(
+          'Ночью вас обольстила путана, но у вас не было ночной способности',
+          playerId
+        )
+        console.log(`🚫 Sent blocking message to ${player.name} (${player.role}) - no night action`)
+      }
+    })
   }
   
   processWerewolfVotes() {
