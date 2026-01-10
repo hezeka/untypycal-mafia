@@ -44,37 +44,61 @@ export const executeRoleAction = async (gameEngine, player, action) => {
   
   // Проверяем, заблокирован ли игрок Путаной
   if (gameEngine.blockedPlayers && gameEngine.blockedPlayers.has(player.id)) {
-    // Отправляем шёпот о блокировке
-    const whisperMessage = {
-      id: `blocked-${Date.now()}`,
-      type: 'whisper',
-      text: 'Ночью вас обольстила путана, вы пропустили свою очередь',
-      timestamp: Date.now(),
-      senderId: 'system',
-      senderName: 'Система',
-      recipientId: player.id,
-      recipientName: player.name,
-      isOwn: false
+    // Ктулху имеет иммунитет к блокировке Путаны
+    if (player.role === 'cthulhu') {
+      // Отправляем шёпот о попытке обольщения
+      const whisperMessage = {
+        id: `blocked-immune-${Date.now()}`,
+        type: 'whisper',
+        text: 'Ночью вас обольстила путана, но на вас это никак не повлияло',
+        timestamp: Date.now(),
+        senderId: 'system',
+        senderName: 'Система',
+        recipientId: player.id,
+        recipientName: player.name,
+        isOwn: false
+      }
+
+      gameEngine.room.chat.push(whisperMessage)
+      gameEngine.room.sendToPlayer(player.id, 'new-message', { message: whisperMessage })
+
+      console.log(`🐙 Cthulhu ${player.name} is immune to prostitute block`)
+
+      // НЕ блокируем Ктулху - продолжаем выполнение его действия
+    } else {
+      // Обычная блокировка для остальных ролей
+      // Отправляем шёпот о блокировке
+      const whisperMessage = {
+        id: `blocked-${Date.now()}`,
+        type: 'whisper',
+        text: 'Ночью вас обольстила путана, вы пропустили свою очередь',
+        timestamp: Date.now(),
+        senderId: 'system',
+        senderName: 'Система',
+        recipientId: player.id,
+        recipientName: player.name,
+        isOwn: false
+      }
+
+      gameEngine.room.chat.push(whisperMessage)
+      gameEngine.room.sendToPlayer(player.id, 'new-message', { message: whisperMessage })
+
+      // Автоматически выполняем пропуск хода
+      const skipResult = {
+        success: true,
+        message: 'Ночью вас обольстила путана, вы пропустили свою очередь',
+        data: { blocked: true, blocker: 'slut', skipped: true }
+      }
+
+      // Помечаем игрока как выполнившего действие (пропуск)
+      gameEngine.completedActions.add(player.id)
+      console.log(`🚫 Player ${player.name} (${player.role}) was blocked and auto-skipped`)
+
+      // Проверяем, все ли игроки с этой ролью завершили действие
+      gameEngine.checkAllPlayersCompleted()
+
+      return skipResult
     }
-    
-    gameEngine.room.chat.push(whisperMessage)
-    gameEngine.room.sendToPlayer(player.id, 'new-message', { message: whisperMessage })
-    
-    // Автоматически выполняем пропуск хода
-    const skipResult = {
-      success: true,
-      message: 'Ночью вас обольстила путана, вы пропустили свою очередь',
-      data: { blocked: true, blocker: 'slut', skipped: true }
-    }
-    
-    // Помечаем игрока как выполнившего действие (пропуск)
-    gameEngine.completedActions.add(player.id)
-    console.log(`🚫 Player ${player.name} (${player.role}) was blocked and auto-skipped`)
-    
-    // Проверяем, все ли игроки с этой ролью завершили действие
-    gameEngine.checkAllPlayersCompleted()
-    
-    return skipResult
   }
   
   // Универсальная обработка пропуска действия

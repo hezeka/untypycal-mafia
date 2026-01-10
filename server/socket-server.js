@@ -460,28 +460,48 @@ const handleVote = (socket, data) => {
   try {
     const { targetId } = data
     const room = getPlayerRoom(socket.id)
-    
+
     if (!room) {
       return sendError(socket, ERROR_CODES.ROOM_NOT_FOUND, 'Комната не найдена')
     }
-    
+
     if (room.gameState !== GAME_PHASES.VOTING) {
       return sendError(socket, ERROR_CODES.INVALID_ACTION, 'Сейчас не время голосования')
     }
-    
+
     const player = room.getPlayer(socket.id)
     if (!player?.alive) {
       return sendError(socket, ERROR_CODES.PERMISSION_DENIED, 'Мертвые не голосуют')
     }
-    
+
     if (player.role === 'game_master') {
       return sendError(socket, ERROR_CODES.PERMISSION_DENIED, 'Ведущий не участвует в голосовании')
     }
-    
-    room.addVote(socket.id, targetId)
-    room.broadcast(SOCKET_EVENTS.VOTE_CAST, { 
+
+    // Проверяем что targetId валидный (null для воздержания или ID игрока)
+    if (targetId !== null && targetId !== undefined) {
+      const targetPlayer = room.getPlayer(targetId)
+      if (!targetPlayer) {
+        logger.error(`🗳️ Invalid vote: targetId "${targetId}" is not a valid player`)
+        return sendError(socket, ERROR_CODES.VALIDATION_ERROR, 'Недопустимая цель голосования')
+      }
+      if (!targetPlayer.alive) {
+        logger.error(`🗳️ Invalid vote: targetId "${targetId}" is a dead player`)
+        return sendError(socket, ERROR_CODES.VALIDATION_ERROR, 'Нельзя голосовать за мёртвого игрока')
+      }
+      if (targetPlayer.role === 'game_master') {
+        logger.error(`🗳️ Invalid vote: targetId "${targetId}" is game master`)
+        return sendError(socket, ERROR_CODES.VALIDATION_ERROR, 'Нельзя голосовать за ведущего')
+      }
+    }
+
+    // Нормализуем undefined к null (воздержание)
+    const normalizedTargetId = targetId === undefined ? null : targetId
+
+    room.addVote(socket.id, normalizedTargetId)
+    room.broadcast(SOCKET_EVENTS.VOTE_CAST, {
       voterId: socket.id,
-      targetId: targetId
+      targetId: normalizedTargetId
     })
     
     logger.info(`🗳️ Vote cast in room ${room.id}`)

@@ -403,6 +403,12 @@ export const useGame = () => {
   }
   
   const votePlayer = (targetId) => {
+    // Проверяем что targetId валидный (null для воздержания или ID игрока)
+    if (targetId !== null && targetId === undefined) {
+      console.error('❌ Cannot vote: targetId is undefined')
+      return
+    }
+
     if (safeEmit('vote', { targetId })) {
       gameState.voting.myVote = targetId
     }

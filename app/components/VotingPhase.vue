@@ -205,16 +205,31 @@ const sortedVotes = computed(() => {
 const voteForPlayer = (playerId) => {
   // Ведущий не может голосовать
   if (isGameMaster.value) return
-  
+
+  // Проверяем валидность ID (playerId должен быть null для воздержания или валидным ID)
+  if (playerId !== null && playerId === undefined) {
+    console.error('❌ Cannot vote: playerId is undefined')
+    return
+  }
+
   // Нельзя голосовать за себя (кроме воздержания)
   if (playerId === currentPlayer.value?.id) return
-  
+
   // Нельзя голосовать за ведущего
-  if (playerId) {
+  if (playerId !== null) {
     const targetPlayer = gameState.room.players.find(p => p.id === playerId)
-    if (targetPlayer?.role === 'game_master') return
+    if (!targetPlayer) {
+      console.error(`❌ Cannot vote: player with id ${playerId} not found`)
+      return
+    }
+    if (targetPlayer.role === 'game_master') return
+    if (!targetPlayer.alive) {
+      console.error(`❌ Cannot vote: player ${targetPlayer.name} is not alive`)
+      return
+    }
   }
-  
+
+  console.log(`🗳️ Voting for player:`, playerId)
   votePlayer(playerId)
   emit('vote', playerId)
 }

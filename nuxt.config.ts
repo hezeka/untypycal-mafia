@@ -7,7 +7,7 @@ export default defineNuxtConfig({
   ssr: false,
   
   // Настройки разработки
-  devtools: { enabled: true },
+  devtools: { enabled: false },
   
   // CSS фреймворк
   css: [
